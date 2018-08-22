@@ -69,7 +69,7 @@ e.copy()
 (expression; `e: Array(T) -> Array(T)`)
 Copy the array.
 
-**TODO: Can Gergo do without Array views? Instead, statically encoding them as affine changes to indexes.**
+**TODO: Can Gergo do without Array views? Instead, encoding them as a struct containing the array and the indexing offsets.**
 
 
 ### Array Storage Annotations
@@ -198,9 +198,9 @@ reduce(parrange(e_1, e_2, e_3), e_e, e_r)
 ```
 (expression)
 Reduce in parallel over the given range.
-The extractor `e_e` is called with an index and must be side-effect-free.
-The reduction operation `e_r` is called with two values and must be associative and side-effect-free.
-Both `e_e` and `e_r` must be function names or lambdas.
+The extractor `e_e` is called with an index and must be pure.
+The reduction operation `e_r` is called with two values and must be associative and pure.
+Both `e_e` and `e_r` must be function names.
 
 Associativity of the reduction operation allows any arbitrary reduction tree to be used for the computation.
 If `e_r` is annotated as commutativity `reduce` can perform reductions on any available values without concern for which index or indicies they represent.

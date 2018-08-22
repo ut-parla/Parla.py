@@ -224,12 +224,12 @@ reduce(parrange(e_1, e_2, e_3), e_e, e_r)
 ```
 (expression)
 Reduce in parallel over the given range.
-The extractor `e_e` is called with an index and must be side-effect-free.
-The reduction operation `e_r` is called with two values and must be associative and side-effect-free.
+The extractor `e_e` is called with an index and must be pure.
+The reduction operation `e_r` is called with two values and must be associative and pure.
 Both `e_e` and `e_r` must be function names or lambdas.
 
 Associativity of the reduction operation allows any arbitrary reduction tree to be used for the computation.
-If `e_r` is annotated as commutativity `reduce` can perform reductions on any available values without concern for which index or indicies they represent.
+If `e_r` is annotated as commutative `reduce` can perform reductions on any available values without concern for which index or indicies they represent.
 
 ```python
 with spawn():
@@ -239,13 +239,11 @@ Execute `statements` as a new task.
 The task will execute in parallel with any following code.
 
 ```python
-with sync():
+with finish():
     statements
 ```
 Execute `statements` normally and then perform a barrier applying to all tasks created in `statements` (statically scoped).
 This block has the same semantics as the implicit barrier on a function in Cilk.
-
-(*Note:* Tasks cannot be synchronized (joined) without `sync`. This guarantees that Cilk-like optimizations and runtime techniques are applicable.)
 
 
 ### Parallelism Restriction Annotations
