@@ -49,7 +49,7 @@ The number of dimensions (rank) of the array `n` is specified in the type.
 ```python
 e_1[i_1, ..., i_n]
 ```
-(expression; `e_1: Array(T), i_j: Size -> T`)
+(expression; `e_1: Array(T), i_j: Size -> Ref(T)`)
 Get the value at position `i_1, ..., i_n` in the array `e_1`.
 This is called an indexing expression.
 An indexing expression is *simple* if all `i_j` are affine expressions of loop variables and constants.
@@ -80,7 +80,7 @@ Create a view into the array `e`.
 `s_i` is a slicing expression in the form `start:stop:stride` and is interpreted as in Python.
 Ellipsis is supported as in Python.
 
-**TODO: Should views be allowed to have fewer dimensions than the array? For instance, should `a[1,:]` by 1-dimensional?**
+**TODO: Should views be allowed to have fewer dimensions than the array? For instance, should `a[1,:]` by 1-dimensional? Yes.**
 
 ```python
 e.copy()
@@ -187,7 +187,7 @@ for x in iter(e):
 (surface language statement)
 A sequential for-each loop over each element of the array `e`.
 This is similar to: `for i in range(outer_dim_size(e)): x = e[i, ...]; statements`.
-`x` will be the element time if `e` is 1-D and an appropriate `ArrayView` otherwise.
+`x` will be the element type if `e` is 1-D and an appropriate `ArrayView` otherwise.
 
 ```python
 while e:
@@ -330,19 +330,14 @@ Declare the binary function `f` as commutative.
 
 ## Types
 
-Types for Parla.
-Each is also a valid Python type, but other Python types are not valid types in Parla.
-There are two kinds of types: Value types which may be pass-by-value or -by-reference (compiler discretion) and references types which use pass-by-reference.
-The primitive value types are immutable so their pass-by- semantics are immaterial.
-Structures however are mutable, so careless use of mutable structures can result in undefined behavior.
-See the structures subsection below for more details.
+Each Parla type is also a valid Python type, but other Python types are not valid types in Parla.
+All types are pass-by-value.
+However Gergo provides a `Ref` type constructor which is a value type that forwards to referenced value, providing explicitly reference semantics.
+Traditional pass-by-reference arrays have type `Ref(Array(...))`.
 
 Up-casts (to supertypes) are automatic.
 Down-casts (to subtypes) are not supported.
 Supporting downcasts would either require runtime type information and create the potential for runtime type errors, or would create complete memory unsafety.
-
-
-### Value Types
 
 ```python
 int(s)
@@ -371,7 +366,7 @@ These are non-negative integers which match the size of C's `size_t`.
 Lock
 ```
 (type)
-An implementation and device dependent mutex implementation.
+A mutex lock.
 The storage size of `Lock` is fixed within an implementation, meaning `Lock`s can be put in arrays and simple structures, and data structures containing `Lock`s can be shared between devices.
 *However*, locking state is not shared between devices, so locking does not prevent concurrent use on another device.
 
@@ -383,45 +378,21 @@ struct S:
 ```
 (statement)
 Declare a structure `S` with fields `x_i`.
-The fields may be any type.
-A structure is simple if all types `T_i` are primitives, `StaticArray`s, or other simple structures.
-Simple structures have a statically known size, so they can be used as the element type in arrays.
+The fields must have types with statically known sizes.
 
-Structure values are stored in arrays and other structures by value, instead of as a reference.
-Direct references or assignments to fields of structure values in arrays or structures are handled by reference as well.
-For instance, `a[1].f1.f2 = 42` assigns `42` to the structure instance stored in the array `a` at index `1`.
-However, the storage of a structure value in a variable or parameter is undefined.
-They may be either by reference or by value (as decided by the compiler).
-Allowing the compiler to pass structure values by reference in some cases frees the programmer from needing to explicitly specify "reference to structure" or similar in function types to avoid on stack copies of large structures.
-
-**TODO: Specifying that structures are always pass-by-reference would be possible, but would force the Array type be able to magically convert the structure reference type into a value type which cannot be specified anywhere else. If the undefined pass-by- semantics of structures is a problem we should probably just make them pass-by-value always and use a `Ref(T)` type.**
-
-If reference semantics are unacceptable at some point in a program (for instance because a structure value will be mutated), structure values can be copied using `e.copy()`.
-The value of `e.copy()` is guaranteed to return a structure value that is not shared, but the compiler can elide this operation if the structure value `e` is already known to be unshared (for instance, because it was passed to a function by value).
-There is no way to force a structure value to be shared.
+Fields are stored by value, however accesses add `Ref` to the field types.
+So `v.x_1` has type `Ref(T_1)` not `T_1`.
+This allows modification and assignment to the values in the structure.
 
 ```python
 StaticArray(T, e_1, ..., e_n)
 ```
 (type)
 A statically sized array with elements of type `T` and dimensions (`e_1`, ..., `e_n`).
-`StaticArray(T, e_1, ..., e_n)` is a subtype of `Array(T, n)` in some sense despite still being a value type.
-The same issues that apply to structures with respect to mutation apply to static arrays.
-However, a `StaticArray` in a variable of type `Array` is always a reference and passed by reference.
+`StaticArray(T, e_1, ..., e_n)` is a subtype of `Array(T, n)`.
 
 Static arrays do not allow full static bounds checking since their super type (`Array`) allows unbounded indexing.
 The primary purpose of static arrays are to provide arrays with a statically known storage size, so they can be included in structures in arrays.
-
-
-### Reference Types
-
-```python
-ArrayView(T, n)
-```
-(type)
-An indexable object with elements of type `T` and `n` dimensions (rank `n`).
-Invariant in `T` and `n`.
-`ArrayView` does not support assignment itself, but also does not prevent mutations to the underlying array from affecting this view.
 
 ```python
 Array(T, n)
@@ -429,9 +400,13 @@ Array(T, n)
 (type)
 An array with elements of type `T` and `n` dimensions (rank `n`).
 Arrays are invariant in `T` and `n`.
-This is a subtype of `ArrayView`.
+Array does not have a statically known size.
 
-**TODO: A `Ref(T)` reference type could be used to adapt by-value types to reference semantics explicitly.**
+```python
+Ref(T)
+```
+A reference to type `T`.
+`Ref(T)` has the same members as `T`.
 
 
 ## Syntax

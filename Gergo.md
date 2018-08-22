@@ -300,17 +300,13 @@ Declare the binary function `f` as commutative.
 
 ## Types
 
-There are two kinds of types: Value types which may be pass-by-value or -by-reference (compiler discretion) and references types which use pass-by-reference.
-The primitive value types are immutable so their pass-by- semantics are immaterial.
-Structures however are mutable, so careless use of mutable structures can result in undefined behavior.
-See the structures subsection below for more details.
+All Gergo types are pass-by-value.
+However Gergo provides a `Ref` type constructor which is a value type that forwards to referenced value, providing explicitly reference semantics.
 
 Up-casts (to supertypes) are automatic.
 Down-casts (to subtypes) are not supported.
 Supporting downcasts would either require runtime type information and create the potential for runtime type errors, or would create complete memory unsafety.
 
-
-### Value Types
 
 ```python
 int(s)
@@ -351,31 +347,18 @@ struct S:
 ```
 (statement)
 Declare a structure `S` with fields `x_i`.
-The fields may be any type.
-A structure is simple if all types `T_i` are primitives, `StaticArray`s, or other simple structures.
-Simple structures have a statically known size, so they can be used as the element type in arrays.
+The fields must have types with statically known sizes.
 
-Structure values are stored in arrays and other structures by value, instead of as a reference.
-Direct references or assignments to fields of structure values in arrays or structures are handled by reference as well.
-For instance, `a[1].f1.f2 = 42` assigns `42` to the structure instance stored in the array `a` at index `1`.
-However, the storage of a structure value in a variable or parameter is undefined.
-They may be either by reference or by value (as decided by the compiler).
-Allowing the compiler to pass structure values by reference in some cases frees the programmer from needing to explicitly specify "reference to structure" or similar in function types to avoid on stack copies of large structures.
-
-**TODO: Specifying that structures are always pass-by-reference would be possible, but would force the Array type be able to magically convert the structure reference type into a value type which cannot be specified anywhere else. If the undefined pass-by- semantics of structures is a problem we should probably just make them pass-by-value always and use a `Ref(T)` type.**
-
-If reference semantics are unacceptable at some point in a program (for instance because a structure value will be mutated), structure values can be copied using `e.copy()`.
-The value of `e.copy()` is guaranteed to return a structure value that is not shared, but the compiler can elide this operation if the structure value `e` is already known to be unshared (for instance, because it was passed to a function by value).
-There is no way to force a structure value to be shared.
+Fields are stored by value, however accesses add `Ref` to the field types.
+So `v.x_1` has type `Ref(T_1)` not `T_1`.
+This allows modification and assignment to the values in the structure.
 
 ```python
 StaticArray(T, e_1, ..., e_n)
 ```
 (type)
 A statically sized array with elements of type `T` and dimensions (`e_1`, ..., `e_n`).
-`StaticArray(T, e_1, ..., e_n)` is a subtype of `Array(T, n)` in some sense despite still being a value type.
-The same issues that apply to structures with respect to mutation apply to static arrays.
-However, a `StaticArray` in a variable of type `Array` is always a reference and passed by reference.
+`StaticArray(T, e_1, ..., e_n)` is a subtype of `Array(T, n)`.
 
 Static arrays do not allow full static bounds checking since their super type (`Array`) allows unbounded indexing.
 The primary purpose of static arrays are to provide arrays with a statically known storage size, so they can be included in structures in arrays.
@@ -386,9 +369,7 @@ Array(T, n)
 (type)
 An array with elements of type `T` and `n` dimensions (rank `n`).
 Arrays are invariant in `T` and `n`.
-
-
-### Reference Types
+Array does not have a statically known size.
 
 ```python
 Ref(T)
