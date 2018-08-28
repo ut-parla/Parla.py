@@ -302,80 +302,15 @@ Declare the binary function `f` as commutative.
 
 All Gergo types are pass-by-value.
 However Gergo provides a `Ref` type constructor which is a value type that forwards to referenced value, providing explicitly reference semantics.
+Traditional pass-by-reference arrays have type `Ref[Array[...]]`.
 
 Up-casts (to supertypes) are automatic.
 Down-casts (to subtypes) are not supported.
 Supporting downcasts would either require runtime type information and create the potential for runtime type errors, or would create complete memory unsafety.
 
-
-```python
-int(s)
-```
-(type; `s: Integer`)
-An `s`-bit integer.
-Implementations will probably restrict `s` to a set, such as {8, 16, 32, 64, 128}.
-`int(s)` is a primitive type.
-
-```python
-float(s)
-```
-(type; `s: Integer`)
-An `s`-bit IEEE floating point (or some natural extension to a non-standard size).
-Implementations will probably restrict `s` to a set, such as {32, 64, 80, 128}.
-`float(s)` is a primitive type.
-
-```python
-Size
-```
-(type)
-The type of array sizes and indicies.
-These are non-negative integers which match the size of C's `size_t`.
-
-```python
-Lock
-```
-(type)
-A mutex lock.
-The storage size of `Lock` is fixed within an implementation, meaning `Lock`s can be put in arrays and simple structures, and data structures containing `Lock`s can be shared between devices.
-*However*, locking state is not shared between devices, so locking does not prevent concurrent use on another device.
-
-```python
-struct S:
-    x_1 : T_1
-    ...
-    x_n : T_n
-```
-(statement)
-Declare a structure `S` with fields `x_i`.
-The fields must have types with statically known sizes.
-
-Fields are stored by value, however accesses add `Ref` to the field types.
-So `v.x_1` has type `Ref(T_1)` not `T_1`.
-This allows modification and assignment to the values in the structure.
-
-```python
-StaticArray(T, e_1, ..., e_n)
-```
-(type)
-A statically sized array with elements of type `T` and dimensions (`e_1`, ..., `e_n`).
-`StaticArray(T, e_1, ..., e_n)` is a subtype of `Array(T, n)`.
-
-Static arrays do not allow full static bounds checking since their super type (`Array`) allows unbounded indexing.
-The primary purpose of static arrays are to provide arrays with a statically known storage size, so they can be included in structures in arrays.
-
-```python
-Array(T, n)
-```
-(type)
-An array with elements of type `T` and `n` dimensions (rank `n`).
-Arrays are invariant in `T` and `n`.
-Array does not have a statically known size.
-
-```python
-Ref(T)
-```
-A reference to type `T`.
-`Ref(T)` has the same members as `T`.
+The types defined in [Types.md](Types.md) are modified slightly for Gergo.
+Specifically, indexing expressions may not contain an ellipsis (so all dimensions must be explicitly handled).
+**TODO: There are probably more simplifications.**
 
 
 ## Syntax
@@ -392,7 +327,7 @@ Execution is sequential.
 ```python
 e
 ```
-An expression in Parla.
+An expression in Gergo.
 Generally Python like, but more restricted.
 
 ```python
