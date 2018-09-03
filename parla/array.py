@@ -1,3 +1,27 @@
+"""
+Arrays support a range on indexing and slicing operations.
+These operations take an indexing expression to select a subset of the array to operate on or return.
+For an `Array[T, k] <Array>`, the indexing expression is (conceptually) `k` slices or indicies: `i₁, …, iₖ`.
+Each `iₓ` specifies the selected elements in dimension `x` as either an index of a single element or a slice expression (define below).
+A literal `...` (ellipsis) represents enough slices to provide `k` slices or indicies to the array.
+The represented slices select the entire dimension.
+For example, if `a : Array[T, 3]` then in `a[1, 2:, ...]` the ellipsis represents `:, :, :` (where `:` is the universal slice).
+Only one ellipsis can appears in an indexing expression, but it can appear anywhere.
+If there are fewer indicies and slices than dimensions an ellipsis is required to explicitly handle the remaining dimensions.
+
+
+The type of the expected or returned array depends on the how many slices are used in indexing.
+If there are `p` slices (and `k - p` indicies) used then the expected or returned array has type `Array[T, p] <Array>`, and the remaining `p` dimensions are those which were sliced instead of indexed.
+If `p == 0` then the return type is `Array[T, 0] ≡ Ref[T]`.
+This means that the returned types (and values) of `a[2]` and `a[2:3]` are different despite the results selecting the same elements from `a`; `a[2]` eliminates the only dimension and `a[2:3]` keeps that dimension with length 1.
+
+
+Slice expressions are written `start:end:step` where `start`, `end` are indicies and `step` is a integer stride.
+The second colon can be omitted, `start:end`, for a `step` of 1.
+The `start` and `end` values can be omitted for 0 and the last element respectively.
+Slices have the same semantics as Python slices: `i:j:k` selects all elements of an array with an index `x` where `x = i + n*k`, `n >= 0` and `i <= x < j` (adapted from the Python documentation: https://docs.python.org/3.7/reference/datamodel.html#types).
+"""
+
 from __future__ import annotations
 
 from parla.typing import *
@@ -252,7 +276,8 @@ class _zerosBuilder(GenericFunction):
         self.__doc__ = """
         Allocate an array with element of type T and fill with the default "zero" value of this type.
         Not all types have a "zero" and if T does not have a zero then this function will raise an exception.
-        `zeros` requires a type parameters, so it must always be called as `zeros[T](*sizes)`.
+        The type parameter `T` is required (since it cannot be inferred from any other argument).
+        To avoid an explicit type use :meth:`filled`.
 
         :usage: zeros[T](\*sizes)
 

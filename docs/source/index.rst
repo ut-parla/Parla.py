@@ -6,6 +6,9 @@
 Welcome to Parla's documentation!
 =================================
 
+.. automodule:: parla
+   :no-members:
+
 .. toctree::
 
    parla.array
@@ -13,22 +16,15 @@ Welcome to Parla's documentation!
    parla.function_decorators
    parla.primitives
    parla.tasks
+   parla.loops
+   todos
 
 
-Indices and tables
-==================
+Indices
+=======
 
 * :ref:`genindex`
 * :ref:`modindex`
-* :ref:`search`
-
-Todos
-=====
-
-.. todolist::
-
    
 .. autosummary::
    :toctree:
-   
-

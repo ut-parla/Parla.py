@@ -12,10 +12,10 @@ BUILDDIR      = build
 help:
 	$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-.PHONY: help Makefile apidoc
+.PHONY: help Makefile upload
 
-apidoc:
-	python -m sphinx.ext.apidoc --force --separate --output-dir source/ ..
+upload: html
+	rsync -aPv build/html/ linux.cs.utexas.edu:public_html/psaap
 
 #	-rm -vf source/parla.*.rst
 clean:
