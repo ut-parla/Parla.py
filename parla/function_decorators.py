@@ -55,13 +55,19 @@ def device_specialized(f):
     The decorated function is the default implemention.
 
     To provide a specialized variant use the `variant` member of the main function:
+
+    .. testsetup::
+
+        from parla.function_decorators import *
+
     >>> @device_specialized
-    >>> def f():
-    >>>     ...
-    >>> @f.variant(DEVICE)
-    >>> def f_gpu():
-    >>>     ...
-    `DEVICE` abot will often by something like `HOST` or `GPU`, but is extensible.
+    ... def f():
+    ...     ...
+    >>> @f.variant('DEVICE')
+    ... def f_gpu():
+    ...     ...
+
+    `DEVICE` above will often by something like `HOST` or `GPU`, but is extensible.
     Multiple devices can be specified as separate parameters to use the same implementation on multiple devices: `@f.variant(CPU, FPGA)`.
     Each device can only be used once on a given function.
     """
@@ -88,6 +94,7 @@ def pure(f):
     """
     A decorator to declare a function as *pure*.
     Where pure means:
+
     * Its return value depends only on its parameters and not on any internal or external state; and
     * Its evaluation has no side effects.
     """
@@ -112,7 +119,7 @@ def commutative(f):
 
 def has_property(f, prop):
     """
-    Check if a callable has a specific property.
+    Check if a callable has a specific :ref:`property <Properties>`.
     Generally the property is only known if the callable is decorated with `prop`.
 
     :param f: A function or method.
@@ -124,11 +131,3 @@ def has_property(f, prop):
         raise TypeError("{} is not a function property".format(prop))
     return prop in _get_properties(f)
 
-@pure
-@device_specialized
-def _f():
-    pass
-
-@_f.variant("GPU")
-def _f_gpu():
-    pass

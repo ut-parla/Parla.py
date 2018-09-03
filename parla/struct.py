@@ -27,7 +27,7 @@ class StructMetaclass(type):
         if bad_members:
             raise TypeError("Structs do not support methods or class members: {}".format(", ".join(bad_members)))
 
-        field_order = tuple(fields.keys())
+        field_order = sorted(tuple(fields.keys()))
         field_defaults = {n: namespace[n] for n in field_order if n in namespace}
         field_types_dict = {n: eval(fields[n]) for n in field_order}
         field_types = tuple(field_types_dict[n] for n in field_order)
@@ -73,13 +73,23 @@ class Struct(metaclass = StructMetaclass):
     The base class for Parla structures.
     Subclasses should have typed names as the body and no other members.
     For example,
-    >>> class Test(Struct):  # Declare a structure Test
-    >>>     x : int          # Declare a field x with type int
-    >>>     y : int = 2      # Declare a field y with a type and a default value
-    creates a structure with two `int` fields.
-    `Test` can be instantiated as `Test(x = 3, y = 4)`, `Test(x = 2)` (using default for y), and similar calls.
 
-    The fields on a structure are accessed as members: `Test(x = 10).x == 10`.
+    .. testsetup::
+
+        from __future__ import annotations
+        from parla.struct import *
+
+    >>> class Test(Struct):  # Declare a structure Test
+    ...     x : int          # Declare a field x with type int
+    ...     y : int = 2      # Declare a field y with a type and a default value
+    >>> Test(x = 3, y = 4)
+    Test(x=3, y=4)
+    >>> t = Test(x = 2)
+    >>> t
+    Test(x=2, y=2)
+    >>> t.x
+    2
+
     The main structure type (`Test` above) does not allow fields to be changed.
     Each structure also has a nested subclass `Mutable` (for example, `Test.Mutable`) which also allows fields to be updated using assignment: `test.x = 8`.
 
@@ -92,7 +102,7 @@ class Struct(metaclass = StructMetaclass):
         """
         Create an instance of this structure.
         
-        :param **kwds: Initial values for the fields of the new structure. Any fields not included here use their default value. Fields without a default are required.
+        :param \*\*kwds: Initial values for the fields of the new structure. Any fields not included here use their default value. Fields without a default are required.
 
         :return: A new mutable structure.
         """
@@ -121,7 +131,3 @@ class Struct(metaclass = StructMetaclass):
 
     def __repr__(self):
         return "{name}({kwds})".format(name = type(self).__name__, kwds = ", ".join("{}={}".format(n, getattr(self, n)) for n in type(self).__slots__))
-
-class _Test(Struct):
-    y : int = 2
-    x : int
