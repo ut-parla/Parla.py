@@ -11,6 +11,11 @@ Parallel
 
 .. autofunction:: range
 .. autofunction:: iter
+
+.. autoclass:: ParIterator
+   :no-members:
+   :members: hint
+
 .. autofunction:: reduce
 
 Parallelism Control
@@ -28,8 +33,3 @@ Sequential
 
 .. automethod:: seq.range
 .. automethod:: seq.iter
-
-
-
-
-

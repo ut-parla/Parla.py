@@ -1,6 +1,13 @@
 # George's tree.py (in mock_ups) rewritten using the concepts and
 # syntax of Arthur's Parla strawman.
 
+from parla.primitives import *
+from parla.array import *
+from parla.function_decorators import *
+from parla.loops import *
+
+FIX = "???"
+
 # "???" marks things that were not specified in the original, but are
 # needed in this version and Arthur couldn't figure out. Pipeline
 # parallelism as mentioned in the orginal is NOT possible with Parla
@@ -19,22 +26,20 @@ def create_tree(points, maxDepth=30):
     '''
 
     # Create a 1d array of 32-bit ints with length len(points)
-    leaves = Array(int(32), 1)(len(points))
+    leaves = zeros[I[32]](len(points))
     # Fill leaves from points in parallel
-    for i in parrange(len(points)):
+    for i in range(len(points)):
         leaves[i] = point_to_morton_index(point[i])
 
     # Sort the array in place (hypothetical library function)
     sort_array(leaves)
 
     # Create a 2d array of 32-bit ints with dims (len(leaves), maxDepth)
-    ancestors = Array(int(32), 2)(len(leaves), maxDepth)
-    # Fill the array with 0s.
-    ancestors.fill(0)
+    ancestors = zeros[I[32]](len(leaves), maxDepth)
 
     # Compute ancesters for each point at least depth
-    for i in parrange(len(leaves)):
-        for j in parrange(maxDepth):
+    for i in range(len(leaves)):
+        for j in range(maxDepth):
             ancestors[i, j] = find_ancestors(leaves[i], j)
 
     # ???
@@ -57,29 +62,20 @@ def evaluate(tree, density):
         Compute near-field potentials
         '''
         # Create a 1d array of potentials, same size as leaves
-        potential_nf = Array(???, 1)(len(tree.leaves))
+        potential_nf = zeros[FIX](len(tree.leaves))
         # Process all leaves in parallel
-        for i in parrange(len(tree.leaves)):
+        for i in range(len(tree.leaves)):
             leaf = tree.leaves(i)
 
             # Reduce the interactions with each ??? leaf into a single potential
             potential_nf[leaf.index] = reduce(
-                pariter(leaf.ulist),
-                lambda other: direct_interaction(leaf, other),
+                (direct_interaction(leaf, other) for other in iter(leaf.ulist)),
                 lambda a, b: a + b)
         # Return the resulting per leaf near-field protentials
         return potential_nf
 
     # perhaps with inline functions no need for stages
-    @variant(GPU, FPGA)  
-    def upward():
-        for node in pariter(tree.nodes):
-            node.d = reduce(
-                pariter(node.children),
-                lambda child: U[node.level] * child.d,
-                sum)
-
-    @variant(CPU)
+    @device_specialized
     def upward():
         # Group the nodes by their level but return list(Array(Index)) of the indicies. (hypothetical library function)
         nodes_at_level = group_indicies_by(tree.nodes, lambda e: e.level, groups = range(tree.depth))
@@ -87,7 +83,7 @@ def evaluate(tree, density):
         # TODO: (amp) George implied that the outer loop could be parallel, but I don't understand how.
         # By-level traversal of the node tree
         for level in reversed(range(tree.depth)):
-            for i in parrange(len(nodes_at_level[level])):
+            for i in range(len(nodes_at_level[level])):
                 currentnode = tree.node[i]
                 def compute(child):
                     # This reads child.d, but child cannot be represented in terms of the the outer loop indicies without pointers or data dependent indexing.
@@ -96,14 +92,20 @@ def evaluate(tree, density):
                     return U[level] * child.d
                 # Compute d for each node based on it's children
                 currentnode.d = reduce(
-                    pariter(currentnode.children),
-                    compute,
+                    (compute(child) for child in iter(currentnode.children)),
                     sum)
+                
+    @upward.variant("GPU", "FPGA")
+    def upward():
+        for node in iter(tree.nodes):
+            node.d = reduce(
+                (U[node.level] * child.d for child in iter(node.children)),
+                sum)
 
-    @variant(GPU)
+
     def far_field():
-        potential_ff = Array(???, 1)(len(tree.leaves))
-        for i in parrange(len(tree.leaves)):
+        potential_ff = zeros[FIX](len(tree.leaves))
+        for i in range(len(tree.leaves)):
             leaf = tree.leaves(i)
             def compute(other):
                 # TODO: This reads other.d, and could be be pipelines with other functions if that dependancy could be directly expressed.
@@ -111,21 +113,19 @@ def evaluate(tree, density):
                 # with reads(other.d): # PIPELINING
                 return direct_interaction(leaf, other)
             potential_ff[n] = reduce(
-                pariter(n.vlist),
-                compute,
+                (compute(child) for child in iter(n.vlist)),
                 sum)
         
         
-    @variant(CPU)
     def far_field():
-        potential_ff = Array(???, 1)(len(tree.leaves))
-        Aind = Array(Size, 1)(???)
-        A = Array(???, 3)(NUM_DIRECTIONS, ???, ???).memory(FAST)
+        potential_ff = zeros[FIX](len(tree.leaves))
+        Aind = zeros[I[32]](FIX)
+        A = zeros[FIX](NUM_DIRECTIONS, FIX, FIX).memory(FAST)
 
         k = 0
 
-        for leaf in pariter(tree.leaves):
-            for j in parrange(len(leaf.vlist)):
+        for leaf in iter(tree.leaves):
+            for j in range(len(leaf.vlist)):
                 other = leaf.vlist[j]
                 d = direction(other)
                 # with reads(other.d): # PIPELINING
@@ -134,7 +134,7 @@ def evaluate(tree, density):
                 Aind[d] = update(Aind[d], k, leaf, other)
         # Loops end with an implicit barrier for their iterations
         
-        for d in parrange(NUM_DIRECTIONS):
+        for d in range(NUM_DIRECTIONS):
             C = G[d]*A[d]
             
             def compute(i):
@@ -142,8 +142,7 @@ def evaluate(tree, density):
                 return unpermute(C[:,cn],Aind[d],i)
 
             potential_ff[Aind[d].n] = reduce(
-                parrange(len(Aind[d])),
-                compute,
+                (compute(child) for child in range(len(Aind[d]))),
                 sum)
         return potential_ff
 

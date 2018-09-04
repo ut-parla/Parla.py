@@ -49,6 +49,6 @@ IEEE-like Floating-point.
 
 :usage: F[size]
 
-:typeparam size: The size of the value in *bits*.
+:param size: The size of the value in *bits*.
     Implementations will probably restrict `size` to a set, such as :math:`\{ 32, 64 \}`.
 """)

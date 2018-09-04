@@ -186,4 +186,7 @@ default_role = "py:obj"
 
 autosummary_generate = True
 
-intersphinx_mapping = {'python': ('https://docs.python.org/3', None)}
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3', None),
+    'numba': ('https://numba.pydata.org/numba-doc/latest/', None)
+}

@@ -17,6 +17,8 @@ Welcome to Parla's documentation!
    parla.primitives
    parla.tasks
    parla.loops
+   ffi
+   prototype
    todos
 
 

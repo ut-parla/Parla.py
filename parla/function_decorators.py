@@ -25,12 +25,7 @@ class _DeviceSpecializer:
         self._variants = {}
         functools.update_wrapper(self, func)
     
-    def variant(self, target):
-        if isinstance(target, collections.Iterable):
-            ts = target
-        else:
-            ts = (target,)
-        
+    def variant(self, *ts):
         if any(t in self._variants for t in ts):
             raise VariantDefinitionError("variant({}) is already defined for {name}".format(target, name = self._default.__name__))
         def variant(f):

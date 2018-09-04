@@ -19,7 +19,7 @@ This means that the returned types (and values) of `a[2]` and `a[2:3]` are diffe
 Slice expressions are written `start:end:step` where `start`, `end` are indicies and `step` is a integer stride.
 The second colon can be omitted, `start:end`, for a `step` of 1.
 The `start` and `end` values can be omitted for 0 and the last element respectively.
-Slices have the same semantics as Python slices: `i:j:k` selects all elements of an array with an index `x` where `x = i + n*k`, `n >= 0` and `i <= x < j` (adapted from the Python documentation: https://docs.python.org/3.7/reference/datamodel.html#types).
+Slices have the same semantics as Python slices: `i:j:k` selects all elements of an array with an index `x` where `x = i + n*k`, `n >= 0` and `i <= x < j` (adapted from the `Python documentation <https://docs.python.org/3.7/reference/datamodel.html#types>`_).
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ class Array(TypeConstructor[T, k]):
         """
         :param indexing_expression: An indexing expression made up of indicies and slices, and optionally an ellipsis.
 
-        :return: Slice or indexed read
+        :return: The selected slice.
         """
         raise NotImplementedError()
 
@@ -78,6 +78,31 @@ class Array(TypeConstructor[T, k]):
             # TODO: Lift the attribute as needed
             raise NotImplementedError()
             return v
+
+    def copy(self, *, storage = None, **hints):
+        """
+        Copy this array.
+        The copy is guarenteed to have the requested `storage` layout (see the :meth:`hint() argument storage<hint>`) if it is provided to this call.
+        
+        :param storage: The required storage layout. `None` means the compiler will choose a layout.
+        :param hints: Any additional hints to apply to the returned array.
+        :return: A new array with the same type and shape as self.
+        """
+        raise NotImplementedError()        
+
+    def hint(self, *, storage : tuple[int or type] = None):
+        """
+        Provide compilation hints and requests to the compiler.
+        The compiler will produce (optional) warnings if the hints are not followed.
+
+        :param storage: Request that the array have the storage layout described.
+                        This does *not* change the order of the dimensions in indexing expressions or how fields are accessed; it only changes how the underlying data is stored in memory.
+
+        .. todo:: How should `storage` describe the layout including both dimension order and struct field handling and nested arrays in the struct?
+
+        :return: A hinted iterator based on `self`.
+        """
+        return self
     
 
 class MutableArray(Array):
@@ -183,12 +208,12 @@ class _RefBuilder(GenericClassAlias):
  
 Ref = _RefBuilder("Ref", Array, """
 A reference to a value of type `T`.
-(*This is an alias for `Array[T, 0]`*)
+(This is an alias for :class:`Array[T, 0] <Array>`)
 
 :usage: Ref[T]
 
 >>> x : Ref[int] = ref(0)  # Create a Ref[int]
->>> x[...] = 2             # Set it's value to 2
+>>> print(deref(x))        # Explicitly extract the value to pass to a none parla function.
 
 This base `Ref` class allows reading, but provide no guarentees about the mutability of the array via some other reference.
 
@@ -197,22 +222,20 @@ This base `Ref` class allows reading, but provide no guarentees about the mutabi
 
 MutableRef = _RefBuilder("MutableRef", MutableArray, """
 A mutable reference to a value of type `T`.
-(*This is an alias for `MutableArray[T, 0]`*)
+(This is an alias for :class:`MutableArray[T, 0] <MutableArray>`)
 
 :usage: MutableRef[T]
 
 >>> x = ref(0)      # Create a Ref[int]
->>> x[...] = 2         # Set it's value to 2
+>>> x[...] = 2      # Set it's value to 2
 >>> print(deref(x)) # Explicitly extract the value to pass to a none parla function.
-
-This base `Ref` class allows reading, but provide no guarentees about the mutability of the array via some other reference.
 
 :meth:`MutableArray.__getitem__` lifts all methods and operators from `T` to `MutableRef`.
 """)
 
 ImmutableRef = _RefBuilder("ImmutableRef", ImmutableArray, """
 An immutable reference to a value of type `T`.
-(*This is an alias for `ImmutableArray[T, 0]`*)
+(This is an alias for :meth:`ImmutableArray[T, 0] <ImmutableArray>`)
 
 :usage: ImmutableRef[T]
 """)

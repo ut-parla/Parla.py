@@ -4,8 +4,7 @@ To restrict this parallelism, Parla provides `reads` and `writes` annotations fr
 Sequential loops are created by using one of the iterable constructors in `seq`.
 Parla while loops are identical to Python's.
 
->>> while e:
->>>     ...
+Parla `parallel iterators <ParIterator>` accept hints on how to perform the iteration.
 
 This entire module should be imported to allow it to override the builtin `~builtins.range` and `~builtins.iter` operations.
 
@@ -17,6 +16,8 @@ This entire module should be imported to allow it to override the builtin `~buil
 .. todo:: parallel iteration annotations: vectorization
 .. todo:: Should parallel loops have an implicit barrier for iterations at loop exit? :func:`parla.tasks.finish`
 """
+
+from __future__ import annotations
 
 import builtins
 from contextlib import contextmanager
@@ -38,18 +39,44 @@ class seq:
     range = builtins.range
     iter = builtins.iter
 
-def range(start, stop = None, step = 1):
+
+class ParIterator:
+    def __init__(self, underlying):
+        self._underlying = underlying
+    
+    def __iter__(self):
+        return self
+    def __next__(self):
+        return next(self._underlying)
+
+    def hint(self, *, vectorize : int = None) -> ParIterator:
+        """
+        Provide compilation hints and requests to the compiler.
+        The compiler will produce (optional) warnings if the hints are not followed.
+        However, even if the Parla compiler follows the hints, the target backend may change the resulting code.
+
+        This method invalidates `self`.
+        
+        :param vectorize: Request that the compiler vectorize the loop assuming the `vectorize` lanes.
+        :return: A hinted iterator based on `self`.
+        """
+        return self
+        
+
+def range(start, stop = None, step = 1, **hints) -> ParIterator:
     """
     A parallel iterable range.
     All iterations execute in parallel.
 
     >>> for x in range(0, 10, 2):
     ...     ...
+
+    :param \*\*hints: Any hints accepted by `ParIterator.hint` can be passed to `range` as keyword arguments.
     """
-    return builtins.range(start, stop, step)
+    return ParIterator(builtins.range(start, stop, step)).hint(**hints)
 
 
-def iter(iterable):
+def iter(iterable, **hints) -> ParIterator:
     """
     A parallel for-each loop over each element of the array `iterable`.
 
@@ -61,24 +88,34 @@ def iter(iterable):
     >>> for i in range(e.size(0)): 
     ...     x = e[i, ...]
     ...     ...
+
+    .. todo:: What dimension should iter use on arrays?
+
+    :param \*\*hints: Any hints accepted by `ParIterator.hint` can be passed to `range` as keyword arguments.
     """
-    return builtins.iter(iterable)
+    return ParIterator(builtins.iter(iterable)).hint(**hints)
 
 
-def reduce(iterable, operator):
+def reduce(iterable : ParIterator or iterable, operator):
     """
     Reduce in parallel over the given `iterable`.
     The iterable will generally be a parallel generator expression (see below).
     The generator must be `~parla.function_decorators.pure`.
     The reduction :py:data:`operator` is called with two values and must be `~parla.function_decorators.associative` and `~parla.function_decorators.pure`.
 
-    >>> reduce((a[i, i] for i in range(0, 100, 1)), op)
+    >>> reduce((a[i, i] for i in range(0, 100)), op)
 
     Associativity of the reduction operation allows any arbitrary reduction tree to be used for the computation.
     If :py:data:`operator` is annotated as `~parla.function_decorators.commutative`, `reduce` can perform reductions on any available values without concern for which index or indicies they represent.
     This commutative reduce is more efficient on some devices.
 
     Since all the functions used in the reduction are side-effect free, `reads` and `writes` will never affect reductions.
+
+    :param iterable: An iterable to reduce.
+    :type iterable: `ParIterator` or, in rare cases, any iterable
+    :param operator: The associative reduction operator.
+    :type operator: A function of type `(T, T) => T`
+    
     """
     result = None
     for v in iterable:

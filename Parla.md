@@ -6,27 +6,6 @@ Parla uses a python like syntax which we will tweak to make it actually valid Py
 ## Core Primitives
 
 
-### Foreign Function Interface
-
-To call a foreign function from within Parla code, the function needs to be imported.
-The import will provide a raw callable which accepts special C based types.
-(If the prototype runs in python this could be [CFFI](https://cffi.readthedocs.io/en/latest/).)
-In general, the raw callable will need to be wrapped to provide an easy to use Parla interface.
-This wrapper uses unsafe operations to extract the low-level pointers and structural information from arrays and potentially convert other types.
-Utility methods exist for external functions which support Dynd.
-
-The wrapper for a `gemv` would be:
-```python
-def sgemv(alpha : F[32], a : Array[F[32], 2], x : Array[F[32], 1], beta : F[32], y : Array[F[32], 1].Mutable):
-    ???Determine if a has an appropriate layout and set Layout; copy the array if the layout is not gemv compatible.
-    cblas_sgemv(???Layout, ???trans, 
-        a.size(0), a.size(1), alpha, a.UNSAFE_data_address(), a.UNSAFE_stride(0), 
-        x.UNSAFE_data_address(), x.UNSAFE_stride(0), 
-        beta, y.UNSAFE_data_address(), y.UNSAFE_stride(0));
-```
-This wrapper is a normal Parla function and can be called as such.
-
-
 ### Variables
 
 ```python
