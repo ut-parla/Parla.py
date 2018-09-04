@@ -15,6 +15,13 @@ This entire module should be imported to allow it to override the builtin `~buil
 
 .. todo:: parallel iteration annotations: vectorization
 .. todo:: Should parallel loops have an implicit barrier for iterations at loop exit? :func:`parla.tasks.finish`
+
+.. testsetup::
+
+    code = None
+    e = [0]
+    a = [0]
+    i = 0
 """
 
 from __future__ import annotations
@@ -29,12 +36,12 @@ class seq:
     Sequential range iteration:
 
     >>> for x in seq.range(0, 10, 1):
-    ...     ...
+    ...     code
 
     Sequential iteration over an interable:
     
     >>> for x in seq.iter(e):
-    ...     ...
+    ...     code
     """
     range = builtins.range
     iter = builtins.iter
@@ -69,11 +76,11 @@ def range(start, stop = None, step = 1, **hints) -> ParIterator:
     All iterations execute in parallel.
 
     >>> for x in range(0, 10, 2):
-    ...     ...
+    ...     code
 
     :param \*\*hints: Any hints accepted by `ParIterator.hint` can be passed to `range` as keyword arguments.
     """
-    return ParIterator(builtins.range(start, stop, step)).hint(**hints)
+    return ParIterator(builtins.iter(builtins.range(start, stop, step))).hint(**hints)
 
 
 def iter(iterable, **hints) -> ParIterator:
@@ -81,13 +88,13 @@ def iter(iterable, **hints) -> ParIterator:
     A parallel for-each loop over each element of the array `iterable`.
 
     >>> for x in iter(a):
-    ...     ...
+    ...     code
 
     This is similar to: 
 
     >>> for i in range(e.size(0)): 
     ...     x = e[i, ...]
-    ...     ...
+    ...     code
 
     .. todo:: What dimension should iter use on arrays?
 
@@ -135,7 +142,7 @@ def reads(v):
     A static array view is one which is defined in the current function using only constants.
 
     >>> with reads(a[i]):
-    >>>     ...
+    ...     code
 
     """
     yield
@@ -147,7 +154,7 @@ def writes(v):
     The same restrictions as for `reads` apply to this.
 
     >>> with writes(a[i]):
-    >>>     ...
+    ...     code
 
     """
     yield

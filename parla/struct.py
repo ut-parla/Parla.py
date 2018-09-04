@@ -27,7 +27,7 @@ class StructMetaclass(type):
         if bad_members:
             raise TypeError("Structs do not support methods or class members: {}".format(", ".join(bad_members)))
 
-        field_order = sorted(tuple(fields.keys()))
+        field_order = tuple(fields.keys())
         field_defaults = {n: namespace[n] for n in field_order if n in namespace}
         field_types_dict = {n: eval(fields[n]) for n in field_order}
         field_types = tuple(field_types_dict[n] for n in field_order)
@@ -48,13 +48,13 @@ class StructMetaclass(type):
             namespace["__doc__"] = "The structure {name} with fields: {}.".format("; ".join("{} of type {}".format(n, type_to_str(t)) for n, t in field_types_dict.items()), name = name)
 
         if "__init__" not in namespace:
-            def __init__(self, **kwds):
-                bases[0].__init__(self, **kwds)
+            def __init__(self, *args, **kwds):
+                bases[0].__init__(self, *args, **kwds)
             __init__.__annotations__ = fields
             __init__.__kwdefaults__ = field_defaults
             __init__.__doc__ = "Create a new {name}.".format(name = name)
             params = [
-                pythoninspect.Parameter(n, pythoninspect.Parameter.KEYWORD_ONLY,
+                pythoninspect.Parameter(n, pythoninspect.Parameter.POSITIONAL_OR_KEYWORD,
                                         default = field_defaults.get(n, pythoninspect.Parameter.empty),
                                         annotation = field_types_dict[n])
                 for n in field_order]
@@ -72,7 +72,8 @@ class Struct(metaclass = StructMetaclass):
     """
     The base class for Parla structures.
     Subclasses should have typed names as the body and no other members.
-    For example,
+    Fields can also be assigned a default value.
+    (Limitation: All fields with defaults must come after all fields without.)
 
     .. testsetup::
 
@@ -83,6 +84,8 @@ class Struct(metaclass = StructMetaclass):
     ...     x : int          # Declare a field x with type int
     ...     y : int = 2      # Declare a field y with a type and a default value
     >>> Test(x = 3, y = 4)
+    Test(x=3, y=4)
+    >>> Test(3, 4)
     Test(x=3, y=4)
     >>> t = Test(x = 2)
     >>> t
@@ -98,11 +101,14 @@ class Struct(metaclass = StructMetaclass):
 
     __slots__ = ()
     
-    def __init__(self, **kwds):
+    def __init__(self, *args, **kwds):
         """
         Create an instance of this structure.
         
-        :param \*\*kwds: Initial values for the fields of the new structure. Any fields not included here use their default value. Fields without a default are required.
+        The arguments are initial values for the fields of the new structure.
+        Positional arguments are in declaration order.
+        Any fields not included here use their default value. 
+        Fields without a default are required.
 
         :return: A new mutable structure.
         """
@@ -111,14 +117,14 @@ class Struct(metaclass = StructMetaclass):
         bad_kwds = [n for n in kwds.keys() if n not in slots]
         if bad_kwds:
             raise TypeError("{name} only takes keyword arguments {}".format(bad_kwds, name = typename))
-        # if len(args) > len(slots):
-        #     raise TypeError("{name} only takes at most {} positional arguments".format(len(slots), name = typename))
+        if len(args) > len(slots):
+            raise TypeError("{name} only takes at most {} positional arguments".format(len(slots), name = typename))
         for n, v in type(self).__slot_defaults__.items():
             setattr(self, n, v)
-        # for n, v in zip(slots, args):
-        #     setattr(self, n, v)
-        #     if n in kwds:
-        #         raise TypeError("{n} is given as both a positional and keyword argument".format(n = n))
+        for n, v in zip(slots, args):
+            setattr(self, n, v)
+            if n in kwds:
+                raise TypeError("{n} is given as both a positional and keyword argument".format(n = n))
         for n, v in kwds.items():
             setattr(self, n, v)
         for n, t in zip(slots, type(self).__slot_types__):

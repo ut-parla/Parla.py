@@ -1,5 +1,10 @@
 """
 Parla supports simple task parallelism.
+
+.. testsetup::
+
+    code = None
+
 """
 
 from contextlib import contextmanager
@@ -11,7 +16,7 @@ def spawn():
     The task will execute in parallel with any following code.
 
     >>> with spawn():
-    >>>     ...
+    ...     code
 
     """
     yield
@@ -23,7 +28,7 @@ def finish():
     This block has the same semantics as the implicit barrier on a function in Cilk.
 
     >>> with finish():
-    >>>     ...
+    ...     code
 
     """
     yield
