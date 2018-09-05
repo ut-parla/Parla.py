@@ -9,11 +9,13 @@ For example, if `a : Array[T, 3]` then in `a[1, 2:, ...]` the ellipsis represent
 Only one ellipsis can appears in an indexing expression, but it can appear anywhere.
 If there are fewer indicies and slices than dimensions an ellipsis is required to explicitly handle the remaining dimensions.
 
+.. todo:: Fix up indexing documentation and cover newdim. The documentation here should be cleanly combined with that for `Array.__getitem__`.
+
 
 The type of the expected or returned array depends on the how many slices are used in indexing.
 If there are `p` slices (and `k - p` indicies) used then the expected or returned array has type `Array[T, p] <Array>`, and the remaining `p` dimensions are those which were sliced instead of indexed.
 If `p == 0` then the return type is `Array[T, 0] ≡ Ref[T]`.
-This means that the returned types (and values) of `a[2]` and `a[2:3]` are different despite the results selecting the same elements from `a`; `a[2]` eliminates the only dimension and `a[2:3]` keeps that dimension with length 1.
+This means that the returned types (and values) of `a[2]` and `a[2:3]` are different despite the results selecting the same elements from `a`; `a[2]` eliminates the dimension and `a[2:3]` keeps it (with length 1).
 
 
 Slice expressions are written `start:end:step` where `start`, `end` are indicies and `step` is a integer stride.
@@ -29,17 +31,51 @@ from parla import function_decorators
 
 __all__ = [
     "Array", "ImmutableArray", "MutableArray",
-    "InplaceArray", "InplaceImmutableArray", "InplaceMutableArray",
+    "InplaceArray", "ImmutableInplaceArray", "MutableInplaceArray",
     "Ref", "ImmutableRef", "MutableRef",
-    "ref", "deref", "zeros", "filled",
-    "freeze", "UNSAFE_freeze"
+    "ref", "zeros", "filled",
+    "newdim"
 ]
 
 T = TypeVar("T")
 k = LiftedNaturalVar("k")
 s1 = LiftedNaturalVar("s₁")
 sk = LiftedNaturalVar("sₖ")
+
+class _NewDim:
+    """
+    This sentinal value is used in place of a slice or index to create a new dimension (of size 1) during indexing.
+    """
+
+    def __str__(self):
+        return "newdim"
+    def __repr__(self):
+        return "newdim"
+
+newdim = _NewDim()
+
+class StorageLayout:
+    """
+    A representation of a storage layout for arrays.
+    Storage layouts are specific to an dimensionality and (sometimes) an element type.
+    """
     
+    def __init__(self, *dim_order, soa : bool = False):
+        """
+        :param \*dim_order: A series of dimension numbers ordered from slowest to fastest changing.
+                            So, `StorageLayout(0, 1)` is row-major order and `StorageLayout(1, 0)` is column-major.
+                            The dimension numbers are with respect to the indexing order of the array this layout is applied to.
+        :param soa: Use a structure of arrays layout if the element type is a `Struct` and `soa = True`.
+        """
+        self.dim_order = dim_order
+        self.soa = soa
+
+def count_slices(indexing_expression):
+    """
+    Count the number of slices used in an indexing expression.
+    """
+    return len([s for s in indexing_expression if isinstance(s, slice)])
+
 class Array(TypeConstructor[T, k]):
     """
     Parla arrays are (generally) references to data stored outside the array value itself.
@@ -56,9 +92,53 @@ class Array(TypeConstructor[T, k]):
 
     def __getitem__(self, indexing_expression) -> Array[T, count_slices(indexing_expression)]:
         """
-        :param indexing_expression: An indexing expression made up of indicies and slices, and optionally an ellipsis.
+        >>> a = zeros[int](3, 3)
+        >>> a[1:, 2] : Array[int, 1]
+        >>> a[1:, 2].shape
+        (2,)
+        >>> a[1:, :] : Array[int, 2]
+        >>> a[1:, :].shape
+        (2, 3)
+        >>> a[1:, ...].shape
+        (2, 3)
+        >>> a[1, 2] : Ref[int]
 
-        :return: The selected slice.
+        :param indexing_expression: An indexing expression made up of indicies and slices, and optionally an ellipsis.
+            Like numpy and Python, `Array` supports negative indices to index from the end of a dimension.
+            Slices with negative indicies are also supported, however a single slice must be totally negative or totally non-negative.
+        :return: The view on `self` explosing the selected parts.
+        :raise ValueError: if a slice in `indexing_expression` contains both negative and non-negative numbers.
+        :raise IndexError: if an index (or element of a slice) is outside the dimensions of the array.
+        :allocation: Never
+        """
+        raise NotImplementedError()
+
+    def get(self, *indices) -> T:
+        """
+        >>> a = zeros[int](3, 3)
+        >>> a.get(1, 2) : int
+
+        :param \*indices: A series of indices specifying a location in the array. Slices are not allowed.
+        :type \*indices: exactly `k` integers
+        :return: the value in a single element of this array.
+        :raise IndexError: if an index (or element of a slice) is outside the dimensions of the array.
+        :allocation: Never
+        """
+        raise NotImplementedError()
+
+    def permute_dims(self, *dim_order):
+        """
+        Create a view with rearranged the dimensions.
+
+        >>> a = zeros[int](2, 3, 4)
+        >>> a.permute_dims(2, 0, 1)
+        >>> a.shape
+        (4, 2, 3)
+
+        :param \*dim_order: The new order of dimensions specified as a series of current dimension numbers (0 based).
+
+        :return: A view on this array which expects indicies in the new order.
+        :allocation: Never
         """
         raise NotImplementedError()
 
@@ -68,6 +148,7 @@ class Array(TypeConstructor[T, k]):
         All `side-effect-free <parla.function_decorators.side_effect_free>` methods and operators (including pure) on `T` are lifted to `Array[T, k]` as element-wise operations.
 
         :return: The lifted bound method or `Array` of attribute values.
+        :allocation: Lifting the attribute never requires allocation, however lifted operations themselves often require an output array to be allocated.
         """
         try:
             return super().__getattr__(attrname)
@@ -79,49 +160,107 @@ class Array(TypeConstructor[T, k]):
             raise NotImplementedError()
             return v
 
-    def copy(self, *, storage = None, **hints):
+    def reshape(self, shape):
+        """
+        Reshape this array, performing a copy if needed.
+
+        If a the reshaped version is required, write `a.reshape(shape).copy()`.
+        The compiler will eliminate the potential additional copy.
+
+        :see: `reshape_view`
+        :allocation: If the new shape is incompatible with this array's storage layout.
+        """
+        try:
+            return self.reshape_view(shape)
+        except ValueError:
+            raise NotImplementedError()
+
+    def reshape_view(self, shape):
+        """
+        Create a view of this array with a new shape.
+        Element ordering is defined by the view of `self`.
+        `reshape_view` never performs a copy.
+
+        Not all arrays support views of all shapes.
+        `reshape_copy` supports all shapes on all arrays, but requires a copy.
+
+        :raise ValueError: if the reshaped view cannot be created due to the storage layout of `self`.
+        :allocation: Never
+        """
+        raise NotImplementedError()
+
+
+    def copy(self, *, layout: StorageLayout = None, **hints):
         """
         Copy this array.
-        The copy is guarenteed to have the requested `storage` layout (see the :meth:`hint() argument storage<hint>`) if it is provided to this call.
-        
-        :param storage: The required storage layout. `None` means the compiler will choose a layout.
+        The copy is guaranteed to have the requested `storage` layout (see the :meth:`hint() argument storage<hint>`) if it is provided to this call.
+
+        :param StorageLayout layout: The required storage layout. `None` means the compiler will choose a layout.
         :param hints: Any additional hints to apply to the returned array.
         :return: A new array with the same type and shape as self.
+        :raise ValueError: if `layout` is not applicable to this array's dimensionality and element type.
+        :allocation: Always
         """
-        raise NotImplementedError()        
+        raise NotImplementedError()
 
-    def hint(self, *, storage : tuple[int or type] = None):
+    def hint(self, *, layout: StorageLayout = None):
         """
         Provide compilation hints and requests to the compiler.
         The compiler will produce (optional) warnings if the hints are not followed.
 
-        :param storage: Request that the array have the storage layout described.
+        :param StorageLayout layout: Request that the array have the storage layout described.
                         This does *not* change the order of the dimensions in indexing expressions or how fields are accessed; it only changes how the underlying data is stored in memory.
 
-        .. todo:: How should `storage` describe the layout including both dimension order and struct field handling and nested arrays in the struct?
-
         :return: A hinted iterator based on `self`.
+        :raise ValueError: if `layout` is not applicable to this array's dimensionality and element type.
+        :allocation: Never
         """
         return self
-    
+
+    @property
+    def shape(self):
+        """
+        The shape of `self` represented as a tuple of dimension lengths.
+        """
+        raise NotImplementedError()
+
+    def freeze(self) -> ImmutableArray[T, k]:
+        """
+        Create an immutable copy of an `Array` or `Ref`.
+
+        :return: An immutable copy of this array.
+        """
+        raise NotImplementedError()
+
+    def UNSAFE_freeze(self) -> ImmutableArray[T, k]:
+        """
+        Create an **unsafe** immutable `Array` or `Ref`.
+        Reads from the immutable reference may be arbitrarily and inconsistently stale (because *any* caching is allowed).
+        No guarentees are made even for bytes or bits within the same element; they may be from different writes to that element.
+
+        :return: An *unsafe* immutable reference to this array *without copying*.
+        """
+        raise NotImplementedError()
+
 
 class MutableArray(Array):
     """
     A reference to a mutable `Array`.
 
     :usage: MutableArray[T, k]
-    
+
     :meth:`MutableArray.__getitem__` lifts all methods and operators from `T` to `Array`.
     """
     def __getitem__(self, indexing_expression) -> MutableArray[T, count_slices(indexing_expression)]:
-        pass
-        
-    def __setitem__(self, indexing_expression, a : Array[T, count_slices(indexing_expression)]) -> Void:
+        return super().__getitem__(indexing_expression)
+
+    def __setitem__(self, indexing_expression, a : Array[T, count_slices(indexing_expression)]):
         """
         Assign new values to the slice.
 
-        :param indexing_expression: An indexing expression made up of indicies and slices, and optionally an ellipsis.
+        :param indexing_expression: An indexing expression made up of indices and slices, and optionally an ellipsis. See `__getitem__` for details.
         :param a: The array to copy into the slice. `a` will be broadcast as needed.
+        :allocation: Never
         """
         raise NotImplementedError()
 
@@ -130,7 +269,12 @@ class MutableArray(Array):
         Get the lifted version of an attribute on `T`.
         *All* methods and operators (including side-effecting) on `T` are lifted to `Array[T, k]` as element-wise operations.
 
+        In-place operators (such as `+=`) are supported when the left operand is of the same type as the return value (that is, `(x : T) + (y : U)` has type `T`).
+        Parla guarantees this for all :mod:`primitive types<primitives>`.
+        Unsupported in-place operators will raise a TypeError.
+
         :return: The lifted bound method or `Array` of attribute values.
+        :allocation: Lifting the attribute never requires allocation, however lifted operations themselves often require an output array to be allocated. In-place operators never allocate.
         """
         try:
             return super().__getattr__(attrname)
@@ -173,27 +317,27 @@ class InplaceArray(Array[T, s1, ..., sk], TypeConstructor[T, k]):
     """
     pass
 
-class InplaceMutableArray(MutableArray, InplaceArray):
+class MutableInplaceArray(MutableArray, InplaceArray):
     """
     A mutable in-place array.
 
-    :usage: InplaceMutableArray[T, s₁, …, sₖ]
+    :usage: MutableInplaceArray[T, s₁, …, sₖ]
 
     :see: `InplaceArray`
     """
     pass
 
-class InplaceImmutableArray(ImmutableArray, InplaceArray):
+class ImmutableInplaceArray(ImmutableArray, InplaceArray):
     """
     An immutable in-place array.
 
-    :usage: InplaceImmutableArray[T, s₁, …, sₖ]
+    :usage: ImmutableInplaceArray[T, s₁, …, sₖ]
 
     :see: `InplaceArray`
     """
     pass
 
-    
+
 ## Refs
 
 class _RefBuilder(GenericClassAlias):
@@ -205,7 +349,7 @@ class _RefBuilder(GenericClassAlias):
         return self._ArrayCls[indexing_expression, 0]
     def __getattr__(self, attrname):
         return getattr(self._ArrayCls, attrname)
- 
+
 Ref = _RefBuilder("Ref", Array, """
 A reference to a value of type `T`.
 (This is an alias for :class:`Array[T, 0] <Array>`)
@@ -213,7 +357,7 @@ A reference to a value of type `T`.
 :usage: Ref[T]
 
 >>> x : Ref[int] = ref(0)  # Create a Ref[int]
->>> print(deref(x))        # Explicitly extract the value to pass to a none parla function.
+>>> print(deref(x))        # Explicitly extract the value to pass to a non-Parla function.
 
 This base `Ref` class allows reading, but provide no guarentees about the mutability of the array via some other reference.
 
@@ -228,7 +372,6 @@ A mutable reference to a value of type `T`.
 
 >>> x = ref(0)      # Create a Ref[int]
 >>> x[...] = 2      # Set it's value to 2
->>> print(deref(x)) # Explicitly extract the value to pass to a none parla function.
 
 :meth:`MutableArray.__getitem__` lifts all methods and operators from `T` to `MutableRef`.
 """)
@@ -239,38 +382,9 @@ An immutable reference to a value of type `T`.
 
 :usage: ImmutableRef[T]
 """)
-    
 
-def freeze(a : Array[T, k]) -> ImmutableArray[T, k]:
-    """
-    Create an immutable copy of an `Array` or `Ref`.
 
-    :param a: An array.
-    :return: An immutable copy of `a`
-    """
-    raise NotImplementedError()
-
-def UNSAFE_freeze(a : Array[T, k]) -> ImmutableArray[T, k]:
-    """
-    Create an **unsafe** immutable `Array` or `Ref`.
-    Reads from the immutable reference may be arbitrarily and inconsistently stale (because *any* caching is allowed).
-    No guarentees are made even for bytes or bits within the same element; they may be from different writes to that element.
-
-    :param a: An array.
-    :return: An *unsafe* immutable reference to `a` *without copying*.
-    """
-    raise NotImplementedError()
-
-def deref(a : Array[T, k], *indicies) -> T:
-    """
-    Get a value from an array by value instead of as a `Ref[T]`.
-
-    :param a: An array.
-    :param \*indicies: `k` indicies into the array. This may not include slices.
-
-    :return: The value at position `indicies`.
-    """
-    raise NotImplementedError()
+## Functions
 
 def ref(v : T) -> MutableRef[T]:
     """
@@ -304,8 +418,10 @@ class _zerosBuilder(GenericFunction):
 
         :usage: zeros[T](\*sizes)
 
-        >>> zeros[int](5, 5, 5)
-        
+        >>> a : Array[int, 3] = zeros[int](5, 5, 5)
+        >>> a.shape
+        (5, 5, 5)
+
         :param T: The element type of the array.
         :param \*sizes: The shape of the resulting array.
 
@@ -322,4 +438,3 @@ class _zerosBuilder(GenericFunction):
         return getattr(self[T], name)
 
 zeros = _zerosBuilder()
-

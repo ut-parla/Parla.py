@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import inspect
+import types as pytypes
+from typing import Tuple, List
 
-__all__ = ["TypeVar", "LiftedNaturalVar", "TypeConstructor", "GenericFunction", "GenericClassAlias", "type_to_str"]
+__all__ = ["TypeVar", "LiftedNaturalVar", "TypeConstructor", "GenericFunction", "GenericClassAlias", "type_to_str", "Tuple", "List"]
 
 def type_to_str(arg):
     if isinstance(arg, type):
@@ -11,34 +13,27 @@ def type_to_str(arg):
         return str(arg)
 
 
-class TypeVar:
+class TypeVar(type):
+    def __new__(cls, name):
+        return super().__new__(cls, name, (), {})
+
     def __init__(self, name):
-        self.name = name
-        
-    def __str__(self):
-        return self.name
+        pass
 
-class LiftedNaturalVar:
-    def __init__(self, name):
-        self.name = name
-        
-    def __str__(self):
-        return self.name
-
-class _TypeApplication:
-    def __init__(self, cls, args):
-        self.cls = cls
-        self.args = args
-
-    def __mro_entries__(self, bases):
-        return (self.cls,)
-
-    def __repr__(self):
-        return "{:s}[{}]".format(self.cls.__name__, ", ".join(type_to_str(t) for t in self.args))
+class LiftedNaturalVar(TypeVar):
+    pass
 
 class TypeConstructor:
+    @classmethod
+    def _new_application(cls, constr, args):
+        name = "{:s}[{}]".format(constr.__name__, ", ".join(type_to_str(t) for t in args))
+        def body(ns):
+            ns["type_constructor"] = constr
+            ns["args"] = args
+        return pytypes.new_class(name, (constr,), exec_body=body)
+    
     def __class_getitem__(cls, params):
-        return _TypeApplication(cls, params)
+        return cls._new_application(cls, params)
 
 
 ## Patch isfunction to make pydoc behave correctly

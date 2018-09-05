@@ -22,8 +22,10 @@ This implementation will be able execute Parla programs (at least simple ones) a
 Initially, this implementation will be totally sequential (expect potentially inside `~parla.array` operations or foreign calls).
 However, a parallel implementation would be possible with additional work.
 
-.. note:: A parallel implementation would require Python bytecode rewriting, making it a significant time investment.
-
+.. note::
+   A parallel implementation would require Python AST rewriting which would probably be fragile (break in the presences of particular language features or variable usage patterns), but it would not be all that difficult.
+   An `@parla` annotation would find all parallel `for` loops and rewrite them to a body function definition and a call to `parla.loops.forloop(iterable, body)` which would implement parallel for loops.
+          
 Compiled Implementation
 -----------------------
 

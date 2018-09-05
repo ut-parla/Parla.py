@@ -11,14 +11,12 @@ parla.array
    :no-members:
 
 
-Functions
----------
+Constructors
+------------
 
 .. autofunction:: zeros
 .. autofunction:: filled
-.. autofunction:: freeze
 .. autofunction:: ref
-.. autofunction:: deref
 
 
 Array[T, k]
@@ -26,6 +24,9 @@ Array[T, k]
 
 .. autoclass:: Array
 
+.. autodata:: newdim
+.. autoclass:: StorageLayout
+               
 ImmutableArray[T, k]
 ********************
 
@@ -57,17 +58,12 @@ InplaceArray[T, s₁, …, sₖ]
 
 .. autoclass:: InplaceArray
 
-InplaceImmutableArray[T, s₁, …, sₖ]
+ImmutableInplaceArray[T, s₁, …, sₖ]
 ***********************************
 
-.. autoclass:: InplaceImmutableArray
+.. autoclass:: ImmutableInplaceArray
 
-InplaceMutableArray[T, s₁, …, sₖ]
+MutableInplaceArray[T, s₁, …, sₖ]
 *********************************
 
-.. autoclass:: InplaceMutableArray
-
-Escape-Hatch Functions
-----------------------
-
-.. autofunction:: UNSAFE_freeze
+.. autoclass:: MutableInplaceArray

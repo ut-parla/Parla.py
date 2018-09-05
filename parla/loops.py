@@ -13,7 +13,6 @@ This entire module should be imported to allow it to override the builtin `~buil
 .. note:: All the looping constructs are single dimensional. For multi-dimensional operations nest loops.
 .. note:: As in Python, `with` blocks can be combined as follows: `with reads(v), writes(w): ...`
 
-.. todo:: parallel iteration annotations: vectorization
 .. todo:: Should parallel loops have an implicit barrier for iterations at loop exit? :func:`parla.tasks.finish`
 
 .. testsetup::
@@ -96,7 +95,7 @@ def iter(iterable, **hints) -> ParIterator:
     ...     x = e[i, ...]
     ...     code
 
-    .. todo:: What dimension should iter use on arrays?
+    .. todo:: What dimension should iter use on arrays? Inner most or outer most?
 
     :param \*\*hints: Any hints accepted by `ParIterator.hint` can be passed to `range` as keyword arguments.
     """

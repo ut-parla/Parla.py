@@ -9,6 +9,8 @@ Welcome to Parla's documentation!
 .. automodule:: parla
    :no-members:
 
+:Version: |release|
+      
 .. toctree::
 
    parla.array
