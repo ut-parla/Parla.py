@@ -3,8 +3,8 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to Parla's documentation!
-=================================
+The Parla Language
+==================
 
 .. automodule:: parla
    :no-members:
@@ -13,6 +13,7 @@ Welcome to Parla's documentation!
       
 .. toctree::
 
+   parla.detail
    parla.array
    parla.struct
    parla.function_decorators
@@ -29,6 +30,3 @@ Indices
 
 * :ref:`genindex`
 * :ref:`modindex`
-   
-.. autosummary::
-   :toctree:

@@ -24,8 +24,8 @@ def spawn():
 @contextmanager
 def finish():
     """
-    Execute the body of the `with` normally and then perform a barrier applying to all tasks created (statically scoped).
-    This block has the same semantics as the implicit barrier on a function in Cilk.
+    Execute the body of the `with` normally and then perform a barrier applying to all tasks created.
+    This block has the similar semantics to the ``sync`` in Cilk.
 
     >>> with finish():
     ...     code

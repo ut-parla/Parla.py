@@ -1,5 +1,5 @@
-parla.function\_decorators
-==========================
+Declaring Functions (parla.function\_decorators)
+=================================================
 
 .. automodule:: parla.function_decorators
    :no-members:

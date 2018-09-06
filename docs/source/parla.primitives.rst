@@ -1,14 +1,8 @@
-parla.primitives
-================
+Primitive Types (parla.primitives)
+==================================
 
-.. testsetup::
-
-   from __future__ import annotations
-   from parla.primitives import *
-   
 .. automodule:: parla.primitives
    :no-members:
-
 
 Boolean
 -------
@@ -30,8 +24,10 @@ F[size]
 
 .. autoclass:: F
 
-               
+Details
+-------
 
+.. autoclass:: alignment
                
 
 

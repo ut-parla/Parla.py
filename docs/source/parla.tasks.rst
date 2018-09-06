@@ -1,5 +1,5 @@
-parla.tasks
-===========
+Tasks (parla.tasks)
+===================
 
 .. testsetup::
 
@@ -10,11 +10,11 @@ parla.tasks
    :no-members:
 
 
-Decorators
-----------
+Annotations
+-----------
 
-.. autofunction:: finish
 .. autofunction:: spawn
+.. autofunction:: finish
 
 
 

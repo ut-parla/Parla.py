@@ -66,7 +66,8 @@ def device_specialized(f):
     Multiple devices can be specified as separate parameters to use the same implementation on multiple devices: `@f.variant(CPU, FPGA)`.
     Each device can only be used once on a given function.
 
-    Device specialized functions are called just like any other function, but the implementation which is called is selected by the runtime.
+    Device specialized functions are called just like any other function, but the implementation which is called is selected based on where the code executes.
+    The compiler will make the choice when it is compiling for a specific target.
     """
     return _DeviceSpecializer(f)
 

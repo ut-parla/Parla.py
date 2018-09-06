@@ -1,12 +1,7 @@
-parla.array
-===========
+Arrays (parla.array)
+====================
 
 
-.. testsetup::
-
-   from __future__ import annotations
-   from parla.array import *
-   
 .. automodule:: parla.array
    :no-members:
 
@@ -14,9 +9,8 @@ parla.array
 Constructors
 ------------
 
-.. autofunction:: zeros
-.. autofunction:: filled
-.. autofunction:: ref
+.. autofunction:: zero
+.. autofunction:: full
 
 
 Array[T, k]
@@ -24,9 +18,14 @@ Array[T, k]
 
 .. autoclass:: Array
 
+Related Values
+**************
+
+.. autoclass:: layout
+
+.. autodata:: infer
 .. autodata:: newdim
-.. autoclass:: StorageLayout
-               
+              
 ImmutableArray[T, k]
 ********************
 
@@ -37,33 +36,3 @@ MutableArray[T, k]
 ******************
 
 .. autoclass:: MutableArray
-
-Ref[T]
-------
-
-.. autoclass:: Ref
-
-ImmutableRef[T]
-***************
-
-.. autoclass:: ImmutableRef
-
-MutableRef[T]
-*************
-
-.. autoclass:: MutableRef
-
-InplaceArray[T, s₁, …, sₖ]
---------------------------
-
-.. autoclass:: InplaceArray
-
-ImmutableInplaceArray[T, s₁, …, sₖ]
-***********************************
-
-.. autoclass:: ImmutableInplaceArray
-
-MutableInplaceArray[T, s₁, …, sₖ]
-*********************************
-
-.. autoclass:: MutableInplaceArray

@@ -1,8 +1,13 @@
 """
 Parla flow-control is similar to Python except that loops are parallel by default (except for `while`).
-To restrict this parallelism, Parla provides `reads` and `writes` annotations from which dependencies can be generated.
-Sequential loops are created by using one of the iterable constructors in `seq`.
 Parla while loops are identical to Python's.
+
+Parla's parallel loops assume that all iterations are independent and do not have an implicit barrier at the end of the loop.
+If this is not the case the programmer must explicitly restrict the parallelism.
+To restrict this parallelism, Parla provides `reads` and `writes` annotations from which dependencies can be generated.
+Since Parla loops don't have an implicit barrier, the programmer should use :func:`with finish():<parla.tasks.finish>` around the loop to guarantee that loop iterations are finished if that is required.
+
+Sequential loops are created by using one of the iterable constructors in `seq`.
 
 Parla `parallel iterators <ParIterator>` accept hints on how to perform the iteration.
 
@@ -11,9 +16,13 @@ This entire module should be imported to allow it to override the builtin `~buil
 >>> from parla.loops import *
 
 .. note:: All the looping constructs are single dimensional. For multi-dimensional operations nest loops.
-.. note:: As in Python, `with` blocks can be combined as follows: `with reads(v), writes(w): ...`
+.. note::
+  As in Python, `with` blocks can be combined as follows: 
 
-.. todo:: Should parallel loops have an implicit barrier for iterations at loop exit? :func:`parla.tasks.finish`
+  .. code-block:: python
+
+      with reads(v), writes(w): ...
+
 
 .. testsetup::
 
@@ -27,6 +36,17 @@ from __future__ import annotations
 
 import builtins
 from contextlib import contextmanager
+
+from parla.tasks import finish
+from parla import detail
+
+__all__ = [
+    "seq",
+    "range", "iter",
+    "reduce",
+    "reads", "writes",
+    "finish"
+]
 
 class seq:
     """
@@ -46,7 +66,21 @@ class seq:
     iter = builtins.iter
 
 
-class ParIterator:
+class vectorize(detail.IntDetail):
+    """
+    Request that the compiler vectorize the loop for the specified number of lanes lanes.
+
+    >>> for i in range(100).vectorize(4):
+    >>>     code
+    
+    """
+    pass
+    
+    
+class ParIterator(detail.Detailable):
+    """
+    An iterator which executes loops in parallel.
+    """
     def __init__(self, underlying):
         self._underlying = underlying
     
@@ -55,21 +89,28 @@ class ParIterator:
     def __next__(self):
         return next(self._underlying)
 
-    def hint(self, *, vectorize : int = None) -> ParIterator:
+    def hint(self, *args):
         """
-        Provide compilation hints and requests to the compiler.
-        The compiler will produce (optional) warnings if the hints are not followed.
-        However, even if the Parla compiler follows the hints, the target backend may change the resulting code.
-
-        This method invalidates `self`.
+        Return a new ParIterator with hints.
         
-        :param vectorize: Request that the compiler vectorize the loop assuming the `vectorize` lanes.
-        :return: A hinted iterator based on `self`.
+        This invalidates `self`.
+
+        :return: a new iterator
         """
-        return self
+        return super().hint(*args)
+
+    def require(self, *args):
+        """
+        Return a new ParIterator with hints.
+        
+        This invalidates `self`.
+
+        :return: a new iterator
+        """
+        return super().require(*args)
         
 
-def range(start, stop = None, step = 1, **hints) -> ParIterator:
+def range(start, stop = None, step = 1, *, requirements=(), hints=()) -> ParIterator:
     """
     A parallel iterable range.
     All iterations execute in parallel.
@@ -77,27 +118,29 @@ def range(start, stop = None, step = 1, **hints) -> ParIterator:
     >>> for x in range(0, 10, 2):
     ...     code
 
-    :param \*\*hints: Any hints accepted by `ParIterator.hint` can be passed to `range` as keyword arguments.
+    :param requirements: Any requirements accepted by `ParIterator`.
+    :param hints: Any hints accepted by `ParIterator`.
     """
     return ParIterator(builtins.iter(builtins.range(start, stop, step))).hint(**hints)
 
 
-def iter(iterable, **hints) -> ParIterator:
+def iter(iterable, *, requirements=(), hints=()) -> ParIterator:
     """
     A parallel for-each loop over each element of the array `iterable`.
 
     >>> for x in iter(a):
     ...     code
 
-    This is similar to: 
+    Executes similarly to: 
 
-    >>> for i in range(e.size(0)): 
+    >>> for i in range(e.shape[0]): 
     ...     x = e[i, ...]
     ...     code
 
-    .. todo:: What dimension should iter use on arrays? Inner most or outer most?
+    :param requirements: Any requirements accepted by `ParIterator`.
+    :param hints: Any hints accepted by `ParIterator`.
 
-    :param \*\*hints: Any hints accepted by `ParIterator.hint` can be passed to `range` as keyword arguments.
+    .. seealso:: :meth:`Array.__iter__ <parla.array.Array.__iter__>`
     """
     return ParIterator(builtins.iter(iterable)).hint(**hints)
 

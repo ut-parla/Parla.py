@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from parla.typing import *
+from parla.primitives import alignment
+from parla import detail
 
 import inspect as pythoninspect
 
 __all__ = [
-    "Struct"
+    "Struct",
+    "alignment",
 ]
 
 class StructMetaclass(type):
@@ -18,8 +21,8 @@ class StructMetaclass(type):
             # This is the declaration of Struct itself
             return super().__new__(cls, name, bases, namespace, **kwds)
 
-        if len(bases) != 1 or bases[0].__name__ != "Struct":
-            raise TypeError("Structures must have the superclass Struct and no others")
+        # if len(bases) != 1 or bases[0].__name__ != "Struct":
+        #     raise TypeError("Structures must have the superclass Struct and no others")
 
         fields = namespace.get("__annotations__", {})
 
@@ -68,7 +71,7 @@ class StructMetaclass(type):
         
         return resultcls
 
-class Struct(metaclass = StructMetaclass):
+class Struct(detail.DetailableType, metaclass = StructMetaclass):
     """
     The base class for Parla structures.
     Subclasses should have typed names as the body and no other members.
@@ -95,10 +98,11 @@ class Struct(metaclass = StructMetaclass):
 
     The main structure type (`Test` above) does not allow fields to be changed.
     Each structure also has a nested subclass `Mutable` (for example, `Test.Mutable`) which also allows fields to be updated using assignment: `test.x = 8`.
+    :class:`Alignment<parla.primitives.alignment>` requirements can be given for a `Struct` by using the type `Test.require(alignment(64))`.
 
     Struct subclasses have simple automatically generated documentation.
     """
-
+    __type_details__ = frozenset((alignment,))
     __slots__ = ()
     
     def __init__(self, *args, **kwds):

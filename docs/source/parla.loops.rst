@@ -1,5 +1,5 @@
-parla.loops
-===========
+Loops (parla.loops)
+===================
 
 .. automodule:: parla.loops
    :no-members:
@@ -9,12 +9,13 @@ Parallel
 
 .. currentmodule:: parla.loops
 
-.. autofunction:: range
-.. autofunction:: iter
-
 .. autoclass:: ParIterator
    :no-members:
-   :members: hint
+   :members: hint, require
+.. autoclass:: vectorize
+
+.. autofunction:: range
+.. autofunction:: iter
 
 .. autofunction:: reduce
 
