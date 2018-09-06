@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.abspath('../..'))
 # ones.
 extensions = [
     'sphinx.ext.intersphinx',
-    'sphinx.ext.autosummary',
+    #'sphinx.ext.autosummary',
     'sphinx.ext.autodoc',
     #'sphinx_autodoc_typehints',
     'sphinx.ext.doctest',
@@ -191,6 +191,7 @@ autodoc_default_options = {
     'members': None,
     'special-members': None,
     'undoc-members': None,
+    'show-inheritance': None,
     'exclude-members': '__weakref__,__module__,__orig_bases__,__dict__,__repr__,__str__,__slots__,__name__'
 }
 
