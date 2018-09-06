@@ -22,6 +22,7 @@ Related Values
 **************
 
 .. autoclass:: layout
+.. autoclass:: inplace
 
 .. autodata:: infer
 .. autodata:: newdim

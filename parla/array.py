@@ -64,10 +64,15 @@ sk = LiftedNaturalVar("sₖ")
 
 class inplace(detail.Detail):
     """
-    An Array type detail which specifies that the array will always have the specified size exactly.
+    An `Array` type detail which specifies that the array will always have the specified shape exactly.
     This allow the whole array to be stored in a fixed size region inside a `~parla.struct.Struct` and be accessed without a pointer dereference.
     """
-    pass
+    def __init__(self, *shape):
+        """
+        :param \*shape: The shape all instances will have.
+        """
+        self.shape = shape
+        self.args = shape
 
 class layout(detail.Detail):
     """
@@ -151,7 +156,7 @@ class Array(TypeConstructor[T, k], detail.DetailableType):
         (2, 3)
         >>> a[1:, ...].shape
         (2, 3)
-        >>> a[1, 2] : Ref[int]
+        >>> a[1, 2] : Array[int, 0]
 
         :param indexing_expression: An indexing expression made up of indicies and slices, and optionally an ellipsis.
             Like numpy and Python, `Array` supports negative indices to index from the end of a dimension.
@@ -241,7 +246,7 @@ class Array(TypeConstructor[T, k], detail.DetailableType):
     def reshape(self, *shape):
         """
         Reshape this array, performing a copy if needed.
-        A single dimension size may be `infer` to compute that size based on the other dimensions and the total number of elements in `self`.
+        A single dimension length may be `infer` to compute that length based on the other dimensions and the total number of elements in `self`.
 
         >>> a.shape(infer)        # Flatten the array to 1-d
         >>> a.shape(3, 3)         # Reshape to 3 by 3 if possible
@@ -300,7 +305,7 @@ class Array(TypeConstructor[T, k], detail.DetailableType):
 
     def freeze(self) -> ImmutableArray[T, k]:
         """
-        Create an immutable copy of an `Array` or `Ref`.
+        Create an immutable copy of an `Array`.
 
         >>> a = zero[F[32]](3, 3)
         >>> a[0, 0] = 1
@@ -318,7 +323,7 @@ class Array(TypeConstructor[T, k], detail.DetailableType):
 
     def UNSAFE_freeze(self) -> ImmutableArray[T, k]:
         """
-        Create an **unsafe** immutable `Array` or `Ref`.
+        Create an **unsafe** immutable `Array`.
         Reads from the immutable reference may be arbitrarily and inconsistently stale (because *any* caching is allowed).
         No guarentees are made even for bytes or bits within the same element; they may be from different writes to that element.
 
