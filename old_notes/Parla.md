@@ -29,46 +29,6 @@ Therefor, a variable is not allowed to be assigned a conditional branch (if-stat
 **TODO: How are Ref arguments handled? Implicitly creating a ref? Explicitly?**
 
 
-## Array Storage Annotations
-
-**TODO: This section should move to a Type implementations file or section in Types.md**
-
-The interface for arrays does not specify the storage.
-However the storage can be controlled by these annotations.
-They are written as methods on arrays that make copies, but as an optimization expressions which apply these functions to an array constructor directly, such as `Array(T)(10, 40).majority(1, 0).structure_of_arrays()`, are compiled to code that directly generates the final array.
-Similarly, a sequence of storage annotations is collapsed together into a single copy operation.
-
-
-### Dimension Ordering
-
-```python
-e_1.majority(i_1, ..., i_n)
-```
-(expression; `e_1: Array(T), i_j: Dimension -> Array(T)`)
-Create a copy of `e_1` such that the *storage* of the dimensions (identified by number) is ordered as specified by the arguments.
-This does **not** change the order of the dimensions in indexing expressions; it only changes how the underlying data is stored.
-This allows switching between row-major and column-major order.
-*Example:* If `a[row, col]` is an array then `a.majority(1, 0)` is a copy which is stored (but not indexed) in `col`-major order regardless of its previous storage.
-
-**FIXME: The name `majority` is bad. "Dimension order"?**
-
-
-### Structure of Arrays vs. Array of Structures
-
-```python
-e_1.structure_of_arrays()
-```
-(expression; `e_1: Array(T) -> Array(T)`)
-Create a copy of `e_1` which is stored as a structure of arrays.
-Static arrays in T are treated as a single field, so their elements will be kept together in memory.
-
-```python
-e_1.array_of_structures()
-```
-(expression; `e_1: Array(T) -> Array(T)`)
-Create a copy of `e_1` which is stored as an array of structures.
-
-
 ## Sequential Control Flow
 
 ```python

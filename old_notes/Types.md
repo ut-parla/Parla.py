@@ -2,25 +2,6 @@
 
 This describes a type system for values in Parla (and Gergo).
 
-## Types
-
-Parla's types fall into 2 kinds: Sized and Unsized.
-Sized types have a statically known size (known at compile time).
-Unsized types have a dynamic size (known only at run time), so they cannot be placed directly in arrays or structures.
-Parla types do not specify a storage layout or implementation.
-A type specifies an interface to values of that type and requires the implementation to provide type meta-information at compile time.
-All types are immutable except for those marked explicitly as mutable.
-
-
-### Structures
-
-For each user-defined structure `S`, Parla generates three types.
-```
-    ● S
-    ├─● S.Mutable
-    └─● S.Immutable
-```
-
 #### Atomic Types
 
 This section describes some types that we could support if needed, but are not required for straight-forward parallel programming in Parla.
