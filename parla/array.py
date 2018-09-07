@@ -1,13 +1,51 @@
 """
-Parla provides multi-dimensional arrays similar to :class:`numpy.ndarray` in :std:doc:`Numpy <numpy:docs/index>`.
+Parla provides multi-dimensional arrays similar to :class:`numpy.ndarray` in :std:doc:`Numpy<numpy:docs/index>`.
 
 Indexing
 --------
 
-Indexing in Parla is similar to :std:doc:`Numpy <numpy:docs/index>`.
-However, Parla eliminates many of the special cases and simplifies whenever possible.
+Parla :class:`arrays<Array>` can be indexed in a number of ways to select subarrays or elements.
+The syntax for indexing is the same as :ref:`Python indexing<python:subscriptions>`: 
+:samp:`a[{indexing_sequence}]` where :samp:`{indexing_sequence}` is a comma separated sequence of indexing expressions.
+Each indexing expression is one of:
 
-.. todo:: Fully explain indexing expressions. The documentation here should be cleanly combined with that for `Array.__getitem__`.
+* an index: An integer value (`int`, `I[?]<parla.primitives.I>`, `UI[?]<parla.primitives.UI>`).
+* a slice: An expression :samp:`{start}:{stop}:{step}`.
+* `newdim`: The special value `newdim`.
+
+.. rubric:: Index
+
+Non-negative indices are 0-based indices into the dimension.
+Negative indices are specify positions from the end of the dimension with -1 being the last element.
+
+.. rubric:: Slice
+
+A slice :samp:`{start}:{stop}:{step}` specifies a series of indices starting at :samp:`{start}` and stepping :samp:`{step}` and stopping before :samp:`{stop}`.
+The second colon can be omitted, :samp:`{start}:{stop}`, for a :samp:`{step}` of 1.
+The :samp:`{start}` and :samp:`{stop}` values can be omitted for 0 and the last element respectively.
+The slice :samp:`:` selects all elements of a dimension.
+Slices have the same semantics as Python slices: :samp:`{i}:{j}:{k}` selects all elements of an array with an index `x` where :samp:`x = {i} + n*{k}`, `n >= 0` and :samp:`{i} <= x < {j}` (adapted from the `Python documentation <https://docs.python.org/3.7/reference/datamodel.html#types>`_).
+
+.. rubric:: `newdim`
+
+`newdim` introduces a new dimension of length 1.
+It does not index an existing dimension in the array.
+
+.. rubric:: Ellipsis
+
+Parla requires every dimension in an array to be provided.
+So a 3-d array cannot indexed with only two index expressions.
+However, Parla provides ``...`` which can replace any number of ``:`` slices.
+Only one ``...`` is allowed per indexing sequence.
+
+.. note::
+
+  Indexing in Parla is similar to :std:doc:`Numpy <numpy:docs/index>`.
+  However, Parla eliminates many of the special cases and simplifies whenever possible.
+  Parla does not support logical indexing or array indexing of any kind.
+
+
+.. todo:: The documentation here should be cleanly combined with that for `Array.__getitem__`.
 
 .. testsetup::
 
@@ -117,11 +155,11 @@ class _Infer:
 
 infer = _Infer()
 
-def count_slices(indexing_expression):
+def count_slices(indexing_sequence):
     """
     Count the number of slices used in an indexing expression.
     """
-    return len([s for s in indexing_expression if isinstance(s, slice)])
+    return len([s for s in indexing_sequence if isinstance(s, slice)])
 
 class Array(TypeConstructor[T, k], detail.DetailableType):
     """
@@ -145,7 +183,7 @@ class Array(TypeConstructor[T, k], detail.DetailableType):
     __type_details__ = frozenset((inplace, layout))
     __instance_details__ = frozenset((layout,))
     
-    def __getitem__(self, indexing_expression) -> Array[T, count_slices(indexing_expression)]:
+    def __getitem__(self, indexing_sequence) -> Array[T, count_slices(indexing_sequence)]:
         """
         >>> a = zero[int](3, 3)
         >>> a[1:, 2] : Array[int, 1]
@@ -158,11 +196,11 @@ class Array(TypeConstructor[T, k], detail.DetailableType):
         (2, 3)
         >>> a[1, 2] : Array[int, 0]
 
-        :param indexing_expression: An indexing expression made up of indicies and slices, and optionally an ellipsis.
+        :param indexing_sequence: An indexing expression made up of indicies and slices, and optionally an ellipsis.
             Like numpy and Python, `Array` supports negative indices to index from the end of a dimension.
             Slices with negative indicies are also supported, however a single slice must be totally negative or totally non-negative.
         :return: The view on `self` explosing the selected parts.
-        :raise ValueError: if a slice in `indexing_expression` contains both negative and non-negative numbers.
+        :raise ValueError: if a slice in `indexing_sequence` contains both negative and non-negative numbers.
         :raise IndexError: if an index (or element of a slice) is outside the dimensions of the array.
         :allocation: Never
         """
@@ -349,14 +387,14 @@ class MutableArray(Array):
 
     :meth:`MutableArray.__getitem__` lifts all methods and operators from `T` to `Array`.
     """
-    def __getitem__(self, indexing_expression) -> MutableArray[T, count_slices(indexing_expression)]:
-        return super().__getitem__(indexing_expression)
+    def __getitem__(self, indexing_sequence) -> MutableArray[T, count_slices(indexing_sequence)]:
+        return super().__getitem__(indexing_sequence)
 
-    def __setitem__(self, indexing_expression, a : Array[T, count_slices(indexing_expression)]):
+    def __setitem__(self, indexing_sequence, a : Array[T, count_slices(indexing_sequence)]):
         """
         Assign new values to the slice.
 
-        :param indexing_expression: An indexing expression made up of indices and slices, and optionally an ellipsis. See `__getitem__` for details.
+        :param indexing_sequence: An indexing expression made up of indices and slices, and optionally an ellipsis. See `__getitem__` for details.
         :param a: The array to copy into the slice. `a` will be broadcast as needed.
         :allocation: Never
         """
@@ -391,7 +429,7 @@ class ImmutableArray(Array):
 
     :usage: ImmutableArray[T, k]
     """
-    def __getitem__(self, indexing_expression) -> ImmutableArray[T, count_slices(indexing_expression)]:
+    def __getitem__(self, indexing_sequence) -> ImmutableArray[T, count_slices(indexing_sequence)]:
         raise NotImplementedError()
 
 ## Inplace Arrays
@@ -443,8 +481,8 @@ class _RefBuilder(GenericClassAlias):
         self.__doc__ = doc
         self.__name__ = name
         self._ArrayCls = ArrayCls
-    def __getitem__(self, indexing_expression):
-        return self._ArrayCls[indexing_expression, 0]
+    def __getitem__(self, indexing_sequence):
+        return self._ArrayCls[indexing_sequence, 0]
     def __getattr__(self, attrname):
         return getattr(self._ArrayCls, attrname)
 
