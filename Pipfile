@@ -6,10 +6,7 @@ name = "pypi"
 [packages]
 
 [dev-packages]
-Sphinx = ">=1.7.99"
+Sphinx = ">=1.8"
 
 [requires]
 python_version = "3.7"
-
-[pipenv]
-allow_prereleases = true

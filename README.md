@@ -6,7 +6,7 @@ Parla should be usable by real world programmers.
 The Parla documentation/specification is written as a well documented Python library.
 The Python files are in the package parla in this directory and additional documentation files are in docs.
 The documentation is built with Sphinx.
-A prebuilt version is maintained at: http://www.cs.utexas.edu/~amp/psaap/index.html
+A prebuilt version is maintained at: http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html
 
 The goal of Gergo is to provide a *minimal* but expressive set of primitives to describe and optimize Parla programs.
 Gergo will not be usable by programmers, but will be simpler and more uniform to make optimization easier.

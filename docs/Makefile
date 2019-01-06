@@ -15,7 +15,7 @@ help:
 .PHONY: help Makefile upload
 
 upload: html
-	rsync -aPv build/html/ linux.cs.utexas.edu:public_html/psaap
+	rsync -aPv build/html/ linux.cs.utexas.edu:public_html/psaap/Parla.py
 
 #	-rm -vf source/parla.*.rst
 clean:
@@ -25,4 +25,3 @@ clean:
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
 %: Makefile
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
-
