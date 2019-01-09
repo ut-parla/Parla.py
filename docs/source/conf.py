@@ -55,7 +55,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'Parla'
-copyright = '2018, University of Texas'
+copyright = '2019, University of Texas'
 author = 'Arthur Peters'
 
 # The version info for the project you're documenting, acts as replacement for

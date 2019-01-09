@@ -5,7 +5,7 @@ Tasks (parla.tasks)
 
    from __future__ import annotations
    from parla.tasks import *
-   
+
 .. automodule:: parla.tasks
    :no-members:
 
@@ -14,13 +14,8 @@ Annotations
 -----------
 
 .. autofunction:: spawn
-.. autofunction:: finish
 
+Task Types
+----------
 
-
-
-
-
-
-
-
+.. autofunction:: TaskSpace

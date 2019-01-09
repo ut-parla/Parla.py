@@ -10,17 +10,10 @@ The Parla Language
    :no-members:
 
 :Version: |release|
-      
+
 .. toctree::
 
-   parla.detail
-   parla.array
-   parla.struct
-   parla.function_decorators
-   parla.primitives
    parla.tasks
-   parla.loops
-   ffi
    prototype
    todos
 
