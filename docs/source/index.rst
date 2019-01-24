@@ -14,6 +14,7 @@ The Parla Language
 .. toctree::
 
    parla.tasks
+   parla.function_decorators
    prototype
    todos
 

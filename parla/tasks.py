@@ -8,16 +8,21 @@ Parla supports simple task parallelism.
 
 """
 
-import ctypes
+from numba import cfunc, jit
 import threading
 from contextlib import contextmanager
 from collections import namedtuple
 
+class TaskID:
+    def __init__(self, id):
+        self._id = id
+        self.task = None
 
-class Task(namedtuple("Task", ("underlying", "name"))):
-    pass
+    @property
+    def id(self):
+        return self._id
 
-class TaskSpace(dict):
+class TaskSpace:
     """A collection of tasks with IDs.
 
     A `TaskSpace` can be indexed using any hashable values and any
@@ -31,8 +36,11 @@ class TaskSpace(dict):
     ...         code
 
     This will produce a series of tasks where each depends on all previous tasks.
-
     """
+
+    def __init__(self):
+        self._data = {}
+
     def __getitem__(self, index):
         if not hasattr(index, "__iter__") and not isinstance(index, slice):
             index = (index,)
@@ -46,16 +54,23 @@ class TaskSpace(dict):
                 else:
                     traverse(prefix + (i,), rest)
             else:
-                ret.append(self[prefix])
+                ret.append(self._data.setdefault(prefix, TaskID(prefix)))
         traverse((), index)
         return ret
 
 
+class _TaskLocals(threading.local):
+    @property
+    def ctx(self):
+        return getattr(self, "_ctx", None)
+    @ctx.setter
+    def ctx(self, v):
+        self._ctx = v
 
-_task_callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
-_tasks_local = threading.local()
+_task_locals = _TaskLocals()
 
-def spawn(taskid):
+
+def spawn(taskid, **kwds):
     """@spawn(taskid)(\*dependencies)
 
     Execute the body of the function as a new task. The task may start
@@ -77,27 +92,40 @@ def spawn(taskid):
     """
     def deps(*dependencies):
         def decorator(body):
-            @_task_callback_type
-            def callback(task):
-                _tasks_local.new_tasks = []
+            # Apply numba to the body function
+            body = jit("void()", **kwds)(body)
+
+            # Build the callback to be called directly from the Parla runtime
+            @cfunc("void(voidptr, pyobject)")
+            def callback(ctx, body):
+                old_ctx = _tasks_local.ctx
+                _tasks_local.ctx = ctx
                 body()
-                for t in _tasks_local.new_tasks:
-                    parla_task_add_child(task, t)
-                _tasks_local.new_tasks = None
-                return 0
-            task = parla_new_task(callback)
+                _tasks_local.ctx = old_ctx
+
+            # Compute the flat dependency set (including unwrapping TaskID objects)
+            deps = []
             for ds in dependencies:
                 if not hasattr(ds, "__iter__"):
                     ds = (ds,)
                 for d in ds:
+                    if hasattr(d, "task"):
+                        d = d.task
                     assert isinstance(d, Task)
-                    parla_task_add_dependency(task, d._underlying)
-            if _tasks_local.new_tasks is not None:
-                _tasks_local.new_tasks.append(task)
+                    deps.append(d)
+
+            # Spawn the task via the Parla runtime API
+            if _tasks_local.ctx:
+                task = create_task(_tasks_local.ctx, callback, body, deps)
             else:
-                # We are top level so spawn this task directly
-                parla_task_ready(task)
-            return Task(task, body.__name__)
+                # BUG: This function MUST take deps and must return a task
+                run_generation_task(callback, body)
+
+            # Store the task object in it's ID object
+            taskid.task = task
+
+            # Return the task object
+            return task
         return decorator
     return deps
 
