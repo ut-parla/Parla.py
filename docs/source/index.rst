@@ -10,6 +10,7 @@ The Parla Language
 
    parla.tasks
    parla.detail
+   parla.memory
    parla.function_decorators
    prototype
    todos
