@@ -14,12 +14,33 @@ from contextlib import contextmanager
 from collections import namedtuple
 
 class TaskID:
+    """The identity of a task.
+
+    This combines some ID value with the task object itself. The task
+    object is assigned by `spawn`. This can be used in place of the
+    task object in most places.
+
+    """
     def __init__(self, id):
+        """"""
         self._id = id
-        self.task = None
+        self._task = None
+
+    @property
+    def task(self):
+        """Get the task object associated with this ID.
+        """
+        return self._task
+
+    @task.setter
+    def task(self, v):
+        assert not self._task
+        self._task = v
 
     @property
     def id(self):
+        """Get the ID object.
+        """
         return self._id
 
 class TaskSpace:
@@ -36,12 +57,18 @@ class TaskSpace:
     ...         code
 
     This will produce a series of tasks where each depends on all previous tasks.
+
+    :note: `TaskSpace` does not support assignment to indicies.
     """
 
     def __init__(self):
+        """Create an empty TaskSpace.
+        """
         self._data = {}
 
     def __getitem__(self, index):
+        """Get the `TaskID` associated with the provided indicies.
+        """
         if not hasattr(index, "__iter__") and not isinstance(index, slice):
             index = (index,)
         ret = []
@@ -70,8 +97,8 @@ class _TaskLocals(threading.local):
 _task_locals = _TaskLocals()
 
 
-def spawn(taskid, **kwds):
-    """@spawn(taskid)(\*dependencies)
+def spawn(taskid):
+    """spawn(taskid)(*dependencies) -> Task
 
     Execute the body of the function as a new task. The task may start
     executing immediately, so it may execute in parallel with any
@@ -82,18 +109,18 @@ def spawn(taskid, **kwds):
     ...     code
 
     :param taskid: the ID of the task in a `TaskSpace` or None if the task does not have an ID.
-    :param dependencies: any number of dependency arguments which may be tasks, ids, or iterables of tasks or ids.
+    :param dependencies: any number of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or iterables of Tasks or TaskIDs.
 
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
-    This same value is conceptually stored into the task space used in `taskid`.
+    This same value is stored into the task space used in `taskid`.
 
     :see: `Blocked Cholesky Example <https://github.com/UTexas-PSAAP/Parla.py/blob/master/examples/blocked_cholesky.py#L37>`_
 
     """
     def deps(*dependencies):
         def decorator(body):
-            # Apply numba to the body function
-            body = jit("void()", **kwds)(body)
+            # TODO: Numba jit the body function by default?
+            # body = jit("void()")(body)
 
             # Build the callback to be called directly from the Parla runtime
             @cfunc("void(voidptr, pyobject)")

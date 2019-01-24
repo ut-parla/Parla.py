@@ -18,4 +18,7 @@ Annotations
 Task Types
 ----------
 
-.. autofunction:: TaskSpace
+.. autoclass:: TaskSpace
+   :members: __getitem__
+.. autoclass:: TaskID
+   :members: task, id

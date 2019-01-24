@@ -195,6 +195,8 @@ autodoc_default_options = {
     'exclude-members': '__weakref__,__module__,__orig_bases__,__dict__,__repr__,__str__,__slots__,__name__'
 }
 
+autodoc_docstring_signature = True
+
 default_role = "py:obj"
 
 autosummary_generate = True

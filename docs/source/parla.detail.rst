@@ -1,4 +1,4 @@
-Requirements and Hints (parla.detail)
+Details (parla.detail)
 =====================================
 
 .. automodule:: parla.detail
@@ -8,9 +8,3 @@ Detail
 -------
 
 .. autoclass:: Detail
-
-Detailable
-----------
-
-.. autoclass:: Detailable
-.. autoclass:: DetailableType
