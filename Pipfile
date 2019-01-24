@@ -4,6 +4,9 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+numba = ">0.42"
+numpy = "*"
+cffi = "*"
 
 [dev-packages]
 Sphinx = ">=1.8"
