@@ -24,7 +24,7 @@ class _DeviceSpecializer:
         self._default = func
         self._variants = {}
         functools.update_wrapper(self, func)
-    
+
     def variant(self, *ts):
         if any(t in self._variants for t in ts):
             raise VariantDefinitionError("variant({}) is already defined for {name}".format(target, name = self._default.__name__))
@@ -36,13 +36,13 @@ class _DeviceSpecializer:
 
     def __call__(self, *args, **kwds):
         return self._default(*args, **kwds)
-    
+
     def get_variant(self, target):
         return self._variants.get(target, self._default)
 
     def __repr__(self):
         return "{f} specialized to {targets}>".format(f = repr(self._default)[:-1], targets = tuple(self._variants.keys()))
-                                    
+
 
 def device_specialized(f):
     """
@@ -68,6 +68,9 @@ def device_specialized(f):
 
     Device specialized functions are called just like any other function, but the implementation which is called is selected based on where the code executes.
     The compiler will make the choice when it is compiling for a specific target.
+
+    .. TODO::
+        This is **not** implement in the `Parla Prototype`_.
     """
     return _DeviceSpecializer(f)
 
@@ -103,7 +106,7 @@ def associative(f):
     """
     A decorator to declare that a function is associative, meaning applying the function to reduce a subset of the arguments ahead of this call will not change the result.
     This is a simple generalization of associativity of binary operators.
-    
+
     """
     _get_properties(f).add(associative)
     return f
@@ -128,4 +131,3 @@ def has_property(f, prop):
     if not _is_proprerty(prop):
         raise TypeError("{} is not a function property".format(prop))
     return prop in _get_properties(f)
-
