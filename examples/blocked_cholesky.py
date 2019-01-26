@@ -33,7 +33,7 @@ def ltriang_solve(a, b):
 # The input array 4 dimensional. The first and second index select
 # the block (row first, then column). The third and fourth index
 # select the entry within the given block.
-@jit(void(float64[:,:,:,:]))
+# @jit(void(float64[:,:,:,:]))
 def cholesky_blocked_inplace(a):
     T1 = TaskSpace()
     T2 = TaskSpace()

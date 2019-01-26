@@ -12,6 +12,7 @@ The Parla Language
    parla.detail
    parla.memory
    parla.function_decorators
+   examples
    prototype
    todos
 

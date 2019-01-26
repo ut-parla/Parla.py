@@ -114,7 +114,7 @@ def spawn(taskid):
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
     This same value is stored into the task space used in `taskid`.
 
-    :see: `Blocked Cholesky Example <https://github.com/UTexas-PSAAP/Parla.py/blob/master/examples/blocked_cholesky.py#L37>`_
+    :see: :ref:`Blocked Cholesky` Example
 
     """
     def deps(*dependencies):

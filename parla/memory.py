@@ -2,7 +2,7 @@
 Parla supports an abstract memory model for every device.
 
 .. TODO::
-    This is **not** implement in the `Parla Prototype`_.
+    This is **not** implement in the :ref:`Parla Prototype`.
 """
 
 from enum import Enum

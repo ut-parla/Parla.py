@@ -70,7 +70,7 @@ def device_specialized(f):
     The compiler will make the choice when it is compiling for a specific target.
 
     .. TODO::
-        This is **not** implement in the `Parla Prototype`_.
+        This is **not** implement in the :ref:`Parla Prototype`.
     """
     return _DeviceSpecializer(f)
 
