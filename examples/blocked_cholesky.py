@@ -2,6 +2,9 @@ import numpy as np
 from numba import jit, void, float64
 import math
 from scipy import linalg as la
+import time
+
+from parla.tasks import *
 
 # Naive version of dpotrf
 # Write results into lower triangle of the input array.
@@ -35,10 +38,10 @@ def ltriang_solve(a, b):
 # select the entry within the given block.
 # @jit(void(float64[:,:,:,:]))
 def cholesky_blocked_inplace(a):
-    T1 = TaskSpace()
-    T2 = TaskSpace()
-    T3 = TaskSpace()
-    T4 = TaskSpace()
+    T1 = TaskSpace("T1")
+    T2 = TaskSpace("T2")
+    T3 = TaskSpace("T3")
+    T4 = TaskSpace("T4")
 
     if a.shape[0] * a.shape[2] != a.shape[1] * a.shape[3]:
         raise ValueError("A square matrix is required.")
@@ -47,21 +50,24 @@ def cholesky_blocked_inplace(a):
     for j in range(a.shape[0]):
         # Batched BLAS operations could help here.
         for k in range(j):
-            @spawn(T1[j, k])(T4[j, k])
+            @spawn(T1[j, k], [T4[j, k]])
             def t1():
                 a[j,j] -= a[j,k] @ a[j,k].T
-        @spawn(T2[j])(T1[j, 0:j])
+        @spawn(T2[j], [T1[j, 0:j]])
         def t2():
+            time.sleep(1)
             cholesky_inplace(a[j,j])
         for i in range(j+1, a.shape[0]):
             for k in range(j):
-                @spawn(T3[i, j, k])(T4[j, k], T4[i, k])
+                @spawn(T3[i, j, k], [T4[j, k], T4[i, k]])
                 def t3():
                     a[i,j] -= a[i,k] @ a[j,k].T
-            @spawn(T4[i, j])(T3[i, j, 0:j], T2[j])
+            @spawn(T4[i, j], [T3[i, j, 0:j], T2[j]])
             def t4():
                 ltriang_solve(a[j,j], a[i,j].T)
+    return T2[j]
 
+@spawn()
 def test_blocked_cholesky():
     # Test all the above cholesky versions.
     a = np.random.rand(4, 4)
@@ -69,7 +75,12 @@ def test_blocked_cholesky():
     res = la.tril(la.cho_factor(a, lower=True)[0])
     a1 = a.copy()
     cholesky_inplace(a1)
-    assert np.allclose(res, la.tril(a1))
+    assert np.allclose(res, la.tril(a1)), "Sequential cholesky_inplace failed"
     a1 = a.copy()
-    cholesky_blocked_inplace(a1.reshape(2,2,2,2).swapaxes(1,2))
-    assert np.allclose(res, la.tril(a1))
+    T = cholesky_blocked_inplace(a1.reshape(2,2,2,2).swapaxes(1,2))
+    print(res)
+    print("===========")
+    @spawn(None, [T])
+    def t():
+        print(res)
+        assert np.allclose(res, la.tril(a1)), "Parallel cholesky_blocked_inplace failed"
