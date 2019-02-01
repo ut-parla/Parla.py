@@ -77,10 +77,10 @@ def test_blocked_cholesky():
     cholesky_inplace(a1)
     assert np.allclose(res, la.tril(a1)), "Sequential cholesky_inplace failed"
     a1 = a.copy()
+    print(a1)
     T = cholesky_blocked_inplace(a1.reshape(2,2,2,2).swapaxes(1,2))
-    print(res)
-    print("===========")
     @spawn(None, [T])
     def t():
-        print(res)
+        print("===========")
+        print(a1)
         assert np.allclose(res, la.tril(a1)), "Parallel cholesky_blocked_inplace failed"
