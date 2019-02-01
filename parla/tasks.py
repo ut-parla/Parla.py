@@ -204,7 +204,7 @@ def spawn(taskid=None, dependencies=[]):
         taskid.dependencies = dependencies
         data.taskid = taskid
         print("Created:", taskid)
-        weakref.finalize(taskid, lambda: print("Collected: " + str(taskid)))
+        # weakref.finalize(taskid, lambda: print("Collected: " + str(taskid)))
 
         # Spawn the task via the Parla runtime API
         if _task_locals.ctx:

@@ -70,15 +70,17 @@ def cholesky_blocked_inplace(a):
 @spawn()
 def test_blocked_cholesky():
     # Test all the above cholesky versions.
-    a = np.random.rand(4, 4)
+    a = np.random.rand(16, 16)
     a = a @ a.T
     res = la.tril(la.cho_factor(a, lower=True)[0])
     a1 = a.copy()
     cholesky_inplace(a1)
+    print(a1)
+    print("=============")
     assert np.allclose(res, la.tril(a1)), "Sequential cholesky_inplace failed"
     a1 = a.copy()
     print(a1)
-    T = cholesky_blocked_inplace(a1.reshape(2,2,2,2).swapaxes(1,2))
+    T = cholesky_blocked_inplace(a1.reshape(4,4,4,4).swapaxes(1,2))
     @spawn(None, [T])
     def t():
         print("===========")
