@@ -12,10 +12,13 @@ from contextlib import contextmanager
 from collections import namedtuple
 from collections.abc import Iterable
 
+import logging
+logger = logging.getLogger(__name__)
+
 import parla_task
 
-import numba
-from numba import cfunc, jit
+# import numba
+# from numba import cfunc, jit
 import weakref
 
 class TaskID:
@@ -142,19 +145,29 @@ def _task_callback(ctx, data):
     """
     A C function which forwards to a python function and maintains Galios state information.
     """
-    print("Starting:", data.taskid)
+    logger.debug("Starting: %s", data.taskid)
     old_ctx = data._task_locals.ctx
     data._task_locals.ctx = ctx
     try:
         data.body()
     finally:
         data._task_locals.ctx = old_ctx
-        print("Finished:", data.taskid)
+        logger.debug("Finished: %s", data.taskid)
     return 0
 # print(ctypes.cast(_task_callback, ctypes.c_void_p))
 # print(ctypes.addressof(_task_callback))
 #print(_task_callback.inspect_llvm())
 
+def _make_cell(val):
+    """
+    Create a new Python closure cell object.
+
+    You should not be using this.
+    """
+    x = val
+    def closure():
+        return x
+    return closure.__closure__[0]
 
 def spawn(taskid=None, dependencies=[]):
     """spawn(taskid, dependencies) -> Task
@@ -192,9 +205,23 @@ def spawn(taskid=None, dependencies=[]):
                 assert isinstance(d, parla_task.task)
                 deps.append(d)
 
+        # Perform a horrifying hack to build a new function which will
+        # not be able to observe changes in the original cells in the
+        # tasks outer scope. To do this we build a new function with a
+        # replaced closure which contains new cells.
+        #
+
+        separated_body = type(body)(
+            body.__code__, body.__globals__, body.__name__, body.__defaults__,
+            closure=body.__closure__ and tuple(_make_cell(x.cell_contents) for x in body.__closure__))
+        separated_body.__annotations__ = body.__annotations__
+        separated_body.__doc__ = body.__doc__
+        separated_body.__kwdefaults__ = body.__kwdefaults__
+        separated_body.__module__ = body.__module__
+
         data = _TaskData()
         data._task_locals = _task_locals
-        data.body = body
+        data.body = separated_body
         data.dependencies = dependencies
 
         if not taskid:
@@ -203,8 +230,9 @@ def spawn(taskid=None, dependencies=[]):
         taskid.data = data
         taskid.dependencies = dependencies
         data.taskid = taskid
-        print("Created:", taskid)
         # weakref.finalize(taskid, lambda: print("Collected: " + str(taskid)))
+
+        logger.debug("Created: %s", taskid)
 
         # Spawn the task via the Parla runtime API
         if _task_locals.ctx:
