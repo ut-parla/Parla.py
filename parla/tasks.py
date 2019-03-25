@@ -152,6 +152,9 @@ def _task_callback(ctx, data):
         data.body()
     except:
         print("exiting because of unhandled exception.")
+        print("Traceback was:")
+        import traceback
+        print(traceback.format_exc())
         import sys
         sys.exit()
     finally:
