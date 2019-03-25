@@ -150,6 +150,10 @@ def _task_callback(ctx, data):
     data._task_locals.ctx = ctx
     try:
         data.body()
+    except:
+        print("exiting because of unhandled exception.")
+        import sys
+        sys.exit()
     finally:
         data._task_locals.ctx = old_ctx
         logger.debug("Finished: %s", data.taskid)
