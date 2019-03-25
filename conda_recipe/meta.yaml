@@ -1,0 +1,29 @@
+{% set version = "0.1" %}
+
+package:
+  name: parla
+  version: {{ version }}
+
+build:
+  noarch: python
+  number: 0
+  script: |
+    cd $RECIPE_DIR/..
+    "{{ PYTHON }}" -m pip install . --no-deps --ignore-installed
+
+requirements:
+  host:
+    - python
+    - pip
+    - parla_task
+  run:
+    - python
+    - parla_task
+
+about:
+  license: BSD
+  summary: Parla tasking system.
+
+extra:
+  recipe-maintainers:
+    - insertinterestingnamehere
