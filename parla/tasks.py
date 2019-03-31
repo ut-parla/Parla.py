@@ -145,6 +145,10 @@ def _task_callback(ctx, data):
     """
     A C function which forwards to a python function and maintains Galios state information.
     """
+    # Release the reference held to represent the pending execution of the task.
+    # "data" is still a local variable here, so it won't be destroyed till this
+    # function finishes.
+    ctypes.pythonapi.Py_DecRef(data)
     logger.debug("Starting: %s", data.taskid)
     old_ctx = data._task_locals.ctx
     data._task_locals.ctx = ctx
@@ -244,6 +248,8 @@ def spawn(taskid=None, dependencies=[]):
         # Spawn the task via the Parla runtime API
         if _task_locals.ctx:
             task = parla_task.create_task(_task_locals.ctx, _task_callback, data, deps)
+            # Create a reference held by the task to prevent data from getting collected.
+            ctypes.pythonapi.Py_IncRef(data)
         else:
             # BUG: This function MUST take deps and must return a task
             parla_task.run_generation_task(_task_callback, data)
