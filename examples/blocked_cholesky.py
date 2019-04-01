@@ -1,7 +1,6 @@
 import numpy as np
 from numba import jit, void, float64
 import math
-from scipy import linalg as la
 import time
 
 from parla.tasks import *
@@ -84,13 +83,13 @@ def test_blocked_cholesky():
     size_factor = 15
     a = np.random.rand(16*size_factor*size_factor, 16*size_factor*size_factor)
     a = a @ a.T
-    res = la.tril(la.cho_factor(a, lower=True)[0])
+    res = np.tril(np.linalg.cholesky(a))
     print("=============", a.shape)
     a1 = a.copy()
     cholesky_inplace(a1)
     print(a1)
     print("=============", a.shape)
-    assert np.allclose(res, la.tril(a1)), "Sequential cholesky_inplace failed"
+    assert np.allclose(res, np.tril(a1)), "Sequential cholesky_inplace failed"
     a1 = a.copy()
     print(a1)
     time.sleep(2)
@@ -99,4 +98,4 @@ def test_blocked_cholesky():
     def t():
         print("===========", a.shape)
         print(a1)
-        assert np.allclose(res, la.tril(a1)), "Parallel cholesky_blocked_inplace failed"
+        assert np.allclose(res, np.tril(a1)), "Parallel cholesky_blocked_inplace failed"
