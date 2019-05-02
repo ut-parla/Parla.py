@@ -8,4 +8,4 @@ Blocked Cholesky
 ----------------
 
 .. literalinclude:: /../../examples/blocked_cholesky.py
-   :lines: 37-42,47-63
+   :lines: 37-41,43-80

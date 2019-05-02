@@ -15,7 +15,13 @@ from collections.abc import Iterable
 import logging
 logger = logging.getLogger(__name__)
 
-import parla_task
+try:
+    import parla_task
+except ImportError as e:
+    import inspect
+    # Ignore the exception if the stack includes the doc generator
+    if all("sphinx" not in f.filename for f in inspect.getouterframes(inspect.currentframe())):
+        raise
 
 # import numba
 # from numba import cfunc, jit

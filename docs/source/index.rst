@@ -9,11 +9,10 @@ The Parla Language
 .. toctree::
 
    parla.tasks
-   parla.detail
-   parla.memory
+   parla.device
    parla.function_decorators
+   parla.detail
    examples
-   prototype
    todos
 
 
