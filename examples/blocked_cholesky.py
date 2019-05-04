@@ -1,15 +1,21 @@
 import numpy as np
+import cupy
 from numba import jit, void, float64
 import math
 import time
 
 from parla.tasks import *
+from parla.device import *
+from parla.cuda import *
+from parla.function_decorators import *
 
 import logging
 # logging.basicConfig(level=logging.DEBUG)
 artificial_delay = 0
+
 # Naive version of dpotrf
 # Write results into lower triangle of the input array.
+@specialized
 @jit(void(float64[:,:]), nopython=True, nogil=True)
 def cholesky_inplace(a):
     if a.shape[0] != a.shape[1]:
@@ -19,6 +25,16 @@ def cholesky_inplace(a):
         for i in range(j+1, a.shape[0]):
             a[i,j] -= (a[i,:j] * a[j,:j]).sum()
             a[i,j] /= a[j,j]
+
+@cholesky_inplace.variant(gpu)
+def cholesky_inplace(a):
+    if a.shape[0] != a.shape[1]:
+        raise ValueError("A square array is required.")
+    ca = cupy.asarray(a, dtype='f')
+    # print("CUDA:", a, ca)
+    ca[:] = cupy.linalg.cholesky(ca)
+    a[:] = cupy.asnumpy(ca)
+    # print("CUDA:", a, ca)
 
 # This is a naive version of dtrsm.
 # The result is written over the input array 'b'.
@@ -85,14 +101,14 @@ def test_blocked_cholesky():
     a = a @ a.T
     res = np.tril(np.linalg.cholesky(a))
     print("=============", a.shape)
+    # a1 = a.copy()
+    # cholesky_inplace(a1)
+    # print(a1)
+    # print("=============", a.shape)
+    # assert np.allclose(res, np.tril(a1)), "Sequential cholesky_inplace failed"
     a1 = a.copy()
-    cholesky_inplace(a1)
-    print(a1)
-    print("=============", a.shape)
-    assert np.allclose(res, np.tril(a1)), "Sequential cholesky_inplace failed"
-    a1 = a.copy()
-    print(a1)
-    time.sleep(2)
+    # print(a1)
+    # time.sleep(2)
     T = cholesky_blocked_inplace(a1.reshape(4*size_factor,4*size_factor,4*size_factor,4*size_factor).swapaxes(1,2))
     @spawn(None, [T])
     def t():
