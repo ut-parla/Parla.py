@@ -4,6 +4,7 @@ The model is used to describe the placement restrictions for computations and st
 """
 
 from enum import Enum
+from contextlib import contextmanager
 from collections import namedtuple
 from typing import Optional
 
@@ -47,6 +48,10 @@ class Device:
         self.args = args
         self.kwds = kwds
 
+    @contextmanager
+    def context(self):
+        yield
+
 class MemoryKind(Enum):
     """
     MemoryKinds specify a kind of memory on a device.
@@ -81,5 +86,15 @@ class Memory(Detail):
         self.device = device
         self.kind = kind
 
-cpu = Architecture("CPU", 0)
-gpu = Architecture("GPU", 1)
+cpu = Architecture("CPU", "cpu")
+
+_architectures = {
+    "cpu": cpu,
+    }
+
+def _get_architecture(name):
+    return _architectures[name]
+
+def _register_archecture(name, impl):
+    assert name not in _architectures
+    _architectures[name] = impl

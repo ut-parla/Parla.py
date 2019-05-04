@@ -2,6 +2,8 @@ import inspect as pythoninspect
 import functools
 import collections
 
+from . import tasks
+
 __all__ = [
     "VariantDefinitionError", "specialized",
 ]
@@ -32,7 +34,10 @@ class _ArchitectureSpecializer:
 
     def __call__(self, *args, **kwds):
         # TODO: Get current device and use it to select the varient
-        return self._default(*args, **kwds)
+        d = tasks.get_current_device()
+        f = self.get_variant(d.architecture)
+        return f(*args, **kwds)
+        # return self._default(*args, **kwds)
 
     def get_variant(self, target):
         return self._variants.get(target, self._default)

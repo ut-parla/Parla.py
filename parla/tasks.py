@@ -15,6 +15,8 @@ from collections.abc import Iterable
 import logging
 logger = logging.getLogger(__name__)
 
+from parla import device
+
 try:
     import parla_task
 except ImportError as e:
@@ -23,9 +25,10 @@ except ImportError as e:
     if all("sphinx" not in f.filename for f in inspect.getouterframes(inspect.currentframe())):
         raise
 
-# import numba
-# from numba import cfunc, jit
 import weakref
+
+from numba import types
+import ctypes
 
 class TaskID:
     """The identity of a task.
@@ -139,10 +142,6 @@ class _TaskData:
 
 _task_locals = _TaskLocals()
 
-from numba import types
-
-import ctypes
-
 _task_callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.py_object)
 
 #@cfunc(types.void(types.voidptr, types.voidptr), nopython=False)
@@ -152,14 +151,15 @@ def _task_callback(ctx, data):
     A C function which forwards to a python function and maintains Galios state information.
     """
     # Release the reference held to represent the pending execution of the task.
-    # "data" is still a local variable here, so it won't be destroyed till this
+    # "data" is still a local variable here, so it won't be destroyed 'til this
     # function finishes.
     ctypes.pythonapi.Py_DecRef(ctypes.py_object(data))
     logger.debug("Starting: %s", data.taskid)
     old_ctx = data._task_locals.ctx
     data._task_locals.ctx = ctx
     try:
-        data.body()
+        with get_current_device().context():
+            data.body()
     except:
         print("exiting because of unhandled exception.")
         print("Traceback was:")
@@ -267,6 +267,11 @@ def spawn(taskid=None, dependencies=[]):
         # Return the task object
         return task
     return decorator
+
+def get_current_device():
+    arch, index = parla_task.get_device()
+    arch = device._get_architecture(arch)
+    return arch(index)
 
 
 # @contextmanager
