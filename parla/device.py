@@ -87,6 +87,10 @@ class Memory(Detail):
         self.kind = kind
 
 cpu = Architecture("CPU", "cpu")
+cpu.__doc__ = """The `Architecture` for CPUs.
+
+>>> cpu()
+"""
 
 _architectures = {
     "cpu": cpu,

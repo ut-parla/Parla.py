@@ -1,7 +1,13 @@
 from . import device
 from .device import *
 
-import cupy
+try:
+    import cupy
+except ImportError as e:
+    import inspect
+    # Ignore the exception if the stack includes the doc generator
+    if all("sphinx" not in f.filename for f in inspect.getouterframes(inspect.currentframe())):
+        raise
 
 class _GPUDevice(Device):
     @contextmanager
@@ -14,5 +20,9 @@ class _GPUArchitecture(Architecture):
         return _GPUDevice(self, *args, **kwds)
 
 gpu = _GPUArchitecture("GPU", "gpu")
+gpu.__doc__ = """The `Architecture` for CUDA GPUs.
+
+>>> gpu(0)
+"""
 
 device._register_archecture("gpu", gpu)

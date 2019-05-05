@@ -15,3 +15,6 @@ Logical Devices (parla.device)
    :no-members:
 .. autoclass:: MemoryKind
 .. autoclass:: Memory
+
+.. autodata:: cpu
+.. autodata:: parla.cuda.gpu
