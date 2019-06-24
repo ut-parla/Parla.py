@@ -186,7 +186,7 @@ def _make_cell(val):
         return x
     return closure.__closure__[0]
 
-def spawn(taskid=None, dependencies=[]):
+def spawn(taskid: TaskID = None, dependencies = (), placement: Device = None):
     """spawn(taskid, dependencies) -> Task
 
     Execute the body of the function as a new task. The task may start
@@ -199,6 +199,7 @@ def spawn(taskid=None, dependencies=[]):
 
     :param taskid: the ID of the task in a `TaskSpace` or None if the task does not have an ID.
     :param dependencies: any number of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or iterables of Tasks or TaskIDs.
+    :param placement: a device on which the task should run.
 
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
     This same value is stored into the task space used in `taskid`.
@@ -253,11 +254,13 @@ def spawn(taskid=None, dependencies=[]):
 
         # Spawn the task via the Parla runtime API
         if _task_locals.ctx:
+            # TODO: Provide `placement` to parla_task if not None
             task = parla_task.create_task(_task_locals.ctx, _task_callback, data, deps)
             # Create a reference held by the task to prevent data from getting collected.
             ctypes.pythonapi.Py_IncRef(ctypes.py_object(data))
         else:
-            # BUG: This function MUST take deps and must return a task
+            # FIXME: This function MUST take deps and must return a task
+            # TODO: Provide `placement` to parla_task if not None
             parla_task.run_generation_task(_task_callback, data)
             task = data
 
