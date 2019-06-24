@@ -3,11 +3,8 @@ Parla allows programmers to instruct the compiler or runtime to perform certain 
 These are specified as *details*.
 This module provides a simple framework for declaring, applying, and accessing details.
 
-.. todo::
-    The compiler will produce errors if requirements are not followed and (optional) warnings if the hints are not followed.
-
 To apply a detail to a target value call the detail with the target as an argument and use the returned value in place of the target.
-So, any requirments specifications should follow one of these patterns:
+So, any requirements specifications should follow one of these patterns:
 
 .. code-block:: python
 
@@ -17,7 +14,8 @@ So, any requirments specifications should follow one of these patterns:
 
 """
 
-import types as pytypes
+import warnings
+
 
 class Detail:
     """
@@ -25,6 +23,7 @@ class Detail:
     Details should be declared as a subclass.
     If the detail takes parameters, the subclass must override `__init__`.
     """
+
     @classmethod
     def get(cls, obj):
         """
@@ -48,11 +47,13 @@ class Detail:
             details.append(self)
             target.__details__ = details
         except (TypeError, AttributeError) as e:
-            warnings.warn("Detail applied to unsupported type. Override __call__ in {}. Or this might be a user code bug.".format(type(self)), DeprecationWarning)
+            warnings.warn("Detail applied to unsupported type. Override __call__ in {}. Or this might be a user code "
+                          "bug.".format(type(self)), DeprecationWarning)
         return target
 
     def __str__(self):
         return "{}({})".format(type(self).__name__, ", ".join(getattr(self, "args", ())))
+
 
 class DetailUnsupportedError(TypeError):
     """

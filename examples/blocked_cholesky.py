@@ -7,6 +7,7 @@ import time
 from parla.tasks import *
 from parla.device import *
 from parla.cuda import *
+from parla.cpu import *
 from parla.function_decorators import *
 
 import logging
@@ -30,10 +31,10 @@ def cholesky_inplace(a):
 def cholesky_inplace(a):
     if a.shape[0] != a.shape[1]:
         raise ValueError("A square array is required.")
-    ca = cupy.asarray(a, dtype='f')
+    ca = get_current_device().memory()(a) # dtype='f'
     # print("CUDA:", a, ca)
     ca[:] = cupy.linalg.cholesky(ca)
-    a[:] = cupy.asnumpy(ca)
+    a[:] = cpu().memory()(ca)
     # print("CUDA:", a, ca)
 
 # This is a naive version of dtrsm.

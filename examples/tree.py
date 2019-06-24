@@ -2,7 +2,6 @@
 # syntax of Arthur's Parla strawman.
 
 from parla.primitives import *
-from parla.array import *
 from parla.function_decorators import *
 from parla.loops import *
 
