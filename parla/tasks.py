@@ -7,15 +7,14 @@ Parla supports simple task parallelism.
     code = None
 
 """
-import threading
-from contextlib import contextmanager
-from collections import namedtuple
-from collections.abc import Iterable
 
+import threading
+from collections.abc import Iterable
+import ctypes
 import logging
-logger = logging.getLogger(__name__)
 
 from parla import device
+from parla.device import Device
 
 try:
     import parla_task
@@ -25,10 +24,11 @@ except ImportError as e:
     if all("sphinx" not in f.filename for f in inspect.getouterframes(inspect.currentframe())):
         raise
 
-import weakref
+logger = logging.getLogger(__name__)
 
-from numba import types
-import ctypes
+__all__ = [
+    "TaskID", "TaskSpace", "spawn", "get_current_device"
+]
 
 class TaskID:
     """The identity of a task.
@@ -171,9 +171,6 @@ def _task_callback(ctx, data):
         data._task_locals.ctx = old_ctx
         logger.debug("Finished: %s", data.taskid)
     return 0
-# print(ctypes.cast(_task_callback, ctypes.c_void_p))
-# print(ctypes.addressof(_task_callback))
-#print(_task_callback.inspect_llvm())
 
 def _make_cell(val):
     """
@@ -227,8 +224,6 @@ def spawn(taskid: TaskID = None, dependencies = (), placement: Device = None):
         # not be able to observe changes in the original cells in the
         # tasks outer scope. To do this we build a new function with a
         # replaced closure which contains new cells.
-        #
-
         separated_body = type(body)(
             body.__code__, body.__globals__, body.__name__, body.__defaults__,
             closure=body.__closure__ and tuple(_make_cell(x.cell_contents) for x in body.__closure__))
@@ -248,7 +243,6 @@ def spawn(taskid: TaskID = None, dependencies = (), placement: Device = None):
         taskid.data = data
         taskid.dependencies = dependencies
         data.taskid = taskid
-        # weakref.finalize(taskid, lambda: print("Collected: " + str(taskid)))
 
         logger.debug("Created: %s", taskid)
 
