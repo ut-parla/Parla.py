@@ -1,5 +1,5 @@
-from .device import Memory, Device, MemoryKind, Architecture, _register_archecture
 from . import array
+from .device import Memory, Device, MemoryKind, Architecture, _register_archecture
 
 
 class _CPUMemory(Memory):

@@ -1,12 +1,11 @@
-import inspect as pythoninspect
 import functools
-import collections
 
 from . import tasks
 
 __all__ = [
     "VariantDefinitionError", "specialized",
 ]
+
 
 class VariantDefinitionError(ValueError):
     """
@@ -16,6 +15,7 @@ class VariantDefinitionError(ValueError):
     """
     pass
 
+
 class _ArchitectureSpecializer:
     def __init__(self, func):
         self._default = func
@@ -24,11 +24,14 @@ class _ArchitectureSpecializer:
 
     def variant(self, *ts):
         if any(t in self._variants for t in ts):
-            raise VariantDefinitionError("variant({}) is already defined for {name}".format(target, name = self._default.__name__))
+            raise VariantDefinitionError(
+                "variant({}) is already defined for {name}".format(target, name=self._default.__name__))
+
         def variant(f):
             for t in ts:
                 self._variants[t] = f
             return self
+
         variant.__name__ = "{}.variant".format(self._default.__name__)
         return variant
 
@@ -43,7 +46,7 @@ class _ArchitectureSpecializer:
         return self._variants.get(target, self._default)
 
     def __repr__(self):
-        return "{f} specialized to {targets}>".format(f = repr(self._default)[:-1], targets = tuple(self._variants.keys()))
+        return "{f} specialized to {targets}>".format(f=repr(self._default)[:-1], targets=tuple(self._variants.keys()))
 
 
 def specialized(f):

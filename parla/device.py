@@ -3,8 +3,8 @@ Parla provides an abstract model of compute devices and memories.
 The model is used to describe the placement restrictions for computations and storage.
 """
 
-from enum import Enum
 from contextlib import contextmanager
+from enum import Enum
 from typing import Optional
 
 from .detail import Detail

@@ -8,10 +8,10 @@ Parla supports simple task parallelism.
 
 """
 
-import threading
-from collections.abc import Iterable
 import ctypes
 import logging
+import threading
+from collections.abc import Iterable
 
 from parla import device
 from parla.device import Device
@@ -30,6 +30,7 @@ __all__ = [
     "TaskID", "TaskSpace", "spawn", "get_current_device"
 ]
 
+
 class TaskID:
     """The identity of a task.
 
@@ -38,6 +39,7 @@ class TaskID:
     task object in most places.
 
     """
+
     def __init__(self, name, id):
         """"""
         self._name = name
@@ -72,6 +74,7 @@ class TaskID:
     def __str__(self):
         return "TaskID({}{}, task={})".format(self.name, self.id, self._task)
 
+
 class TaskSpace:
     """A collection of tasks with IDs.
 
@@ -102,6 +105,7 @@ class TaskSpace:
         if not hasattr(index, "__iter__") and not isinstance(index, slice):
             index = (index,)
         ret = []
+
         def traverse(prefix, index):
             if len(index) > 0:
                 i, *rest = index
@@ -115,6 +119,7 @@ class TaskSpace:
                     traverse(prefix + (i,), rest)
             else:
                 ret.append(self._data.setdefault(prefix, TaskID(self._name, prefix)))
+
         traverse((), index)
         # print(index, ret)
         if len(ret) == 1:
@@ -126,6 +131,7 @@ class _TaskLocals(threading.local):
     @property
     def ctx(self):
         return getattr(self, "_ctx", None)
+
     @ctx.setter
     def ctx(self, v):
         self._ctx = v
@@ -133,18 +139,22 @@ class _TaskLocals(threading.local):
     @property
     def global_tasks(self):
         return getattr(self, "_global_tasks", [])
+
     @global_tasks.setter
     def global_tasks(self, v):
         self._global_tasks = v
 
+
 class _TaskData:
     pass
+
 
 _task_locals = _TaskLocals()
 
 _task_callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.py_object)
 
-#@cfunc(types.void(types.voidptr, types.voidptr), nopython=False)
+
+# @cfunc(types.void(types.voidptr, types.voidptr), nopython=False)
 @_task_callback_type
 def _task_callback(ctx, data):
     """
@@ -172,6 +182,7 @@ def _task_callback(ctx, data):
         logger.debug("Finished: %s", data.taskid)
     return 0
 
+
 def _make_cell(val):
     """
     Create a new Python closure cell object.
@@ -179,11 +190,14 @@ def _make_cell(val):
     You should not be using this.
     """
     x = val
+
     def closure():
         return x
+
     return closure.__closure__[0]
 
-def spawn(taskid: TaskID = None, dependencies = (), placement: Device = None):
+
+def spawn(taskid: TaskID = None, dependencies=(), placement: Device = None):
     """spawn(taskid, dependencies) -> Task
 
     Execute the body of the function as a new task. The task may start
@@ -204,6 +218,7 @@ def spawn(taskid: TaskID = None, dependencies = (), placement: Device = None):
     :see: :ref:`Blocked Cholesky` Example
 
     """
+
     def decorator(body):
         nonlocal taskid
         # TODO: Numba jit the body function by default?
@@ -263,13 +278,14 @@ def spawn(taskid: TaskID = None, dependencies = (), placement: Device = None):
 
         # Return the task object
         return task
+
     return decorator
+
 
 def get_current_device():
     arch, index = parla_task.get_device()
     arch = device._get_architecture(arch)
     return arch(index)
-
 
 # @contextmanager
 # def finish():
