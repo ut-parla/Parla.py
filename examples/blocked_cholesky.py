@@ -75,7 +75,7 @@ def cholesky_blocked_inplace(a):
                 # print("T1", j, k)
                 time.sleep(artificial_delay)
                 a[j,j] -= a[j,k] @ a[j,k].T
-        @spawn(T2[j], [T1[j, 0:j]])
+        @spawn(T2[j], [T1[j, 0:j]], placement=gpu(j%4))
         def t2():
             # print("T2", j)
             time.sleep(artificial_delay)

@@ -5,6 +5,7 @@ Parla supports simple task parallelism.
 
     T0 = None
     code = None
+    from .cpu import cpu
 
 """
 
@@ -208,6 +209,10 @@ def spawn(taskid: TaskID = None, dependencies=(), placement: Device = None):
     ... def t():
     ...     code
 
+    >>> @spawn(T1, [T0], placement=cpu())
+    ... def t():
+    ...     code
+
     :param taskid: the ID of the task in a `TaskSpace` or None if the task does not have an ID.
     :param dependencies: any number of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or iterables of Tasks or TaskIDs.
     :param placement: a device on which the task should run.
@@ -216,6 +221,8 @@ def spawn(taskid: TaskID = None, dependencies=(), placement: Device = None):
     This same value is stored into the task space used in `taskid`.
 
     :see: :ref:`Blocked Cholesky` Example
+
+    .. todo:: Provide `placement` to parla_task and implement it in the runtime
 
     """
 
