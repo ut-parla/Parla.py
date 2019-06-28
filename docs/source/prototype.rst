@@ -20,15 +20,35 @@ This prototype has two primary restrictions:
 
 These limitations will be removed as we move towards a complete implementation.
 
-Implementation
---------------
+Physical Placement of Data and Computation
+------------------------------------------
 
-We will finally implement Parla as an embedded language in Python.
-The implementation will be based on the :std:doc:`Numba <numba:user/overview>` compiler for array-based Python programs.
-We will extend Numba to support the Parla API.
-The runtime for Parla will use `Dynd <http://libdynd.org/>`_ to provide low-level array types and operations.
-The runtime may also use `Galois's runtime library <http://iss.ices.utexas.edu/?p=projects/galois>`_ to handle parallel tasks and threads.
-Other parallelism runtimes could be supported (for instance, the OpenMP runtime, to allow Parla code to interoperate with OpenMP code).
+For initial experimentation, Parla provides ways to place data and computation on specific physical devices.
 
-This Parla implementation will initially provide Just-in-Time (JIT) compilation only.
-Later versions could support Ahead-of-Time (AOT) compilation and even calling into Parla from C, both using :std:doc:`Numba's AOT support <numba:user/pycc>`.
+To copy data into a location, apply a memory detail to that value:
+
+.. testsetup::
+    import numpy as np
+
+.. code-block:: python
+
+    a = np.array([1, 2, 3])
+    # Copy the array to GPU #0.
+    b = gpu(0).memory()(a)
+    # Or identically
+    g0mem = gpu(0).memory()
+    b = g0mem(a)
+
+The new object `b` is not related to the original array `a`.
+The user will have to perform manual copies to keep them in sync if needed.
+
+To place tasks at a location, provide the `placement` argument to `~parla.tasks.spawn`:
+
+.. code-block:: python
+
+    @spawn(T2[j], [T1[j, 0:j]], placement=gpu(j%4))
+    def t2():
+        cholesky_inplace(a[j,j])
+
+The task will be run on the specific device provided and no other.
+As always, the task orchestration code will run on the CPU, but appropriate `~parla.function_decorators.specialized` function variant will be used and those should be setup to call device kernels.

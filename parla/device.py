@@ -6,6 +6,7 @@ The model is used to describe the placement restrictions for computations and st
 from contextlib import contextmanager
 from enum import Enum
 from typing import Optional
+from abc import ABCMeta, abstractmethod
 
 from .detail import Detail
 
@@ -18,13 +19,17 @@ class MemoryKind(Enum):
     Slow = "DRAM or similar conventional memory"
 
 
-class Memory(Detail):
+class Memory(Detail, metaclass=ABCMeta):
     """
     Memory locations are specified as a device and a memory type:
     The `Device` specifies the device which has direct (or primary) access to the location;
     The `Kind` specifies what kind of memory should be used.
 
-    A `Memory` instance can also be used as a detail on data references (such as an `~numpy.ndarray`) to force the data to be in the location.
+    A `Memory` instance can also be used as a detail on data references (such as an `~numpy.ndarray`) to copy the data
+    to the location. If the original object is already in the correct location, it is returned unchanged, otherwise
+    a copy is made in the correct location.
+    There is no relationship between the original object and the new one, and the programmer must copy data back to the
+    original if needed.
 
     .. testsetup::
         import numpy as np
@@ -46,8 +51,29 @@ class Memory(Detail):
         self.device = device
         self.kind = kind
 
+    @abstractmethod
+    def array(self, *args, **kwds):
+        """
+        Create an array on this device.
+        All arguments to this call are passed to the underlying array constructor for the device's library.
+        For the prototype, the library should be compatible with the `numpy.array` constructor.
 
-class Device:
+        :return: An array object with a `numpy.ndarray` like interface.
+        """
+        pass
+
+    @abstractmethod
+    def __call__(self, target):
+        """
+        Copy target into this memory.
+
+        :param target: A data object (e.g., an array).
+        :return: The copied data object in this memory. The returned object should have the same interface as the original.
+        """
+        pass
+
+
+class Device(metaclass=ABCMeta):
     """
     An instance of `Device` represents a **logical** compute device and its associated memory.
     Every device can directly access its own memory, but may be able to directly or indirectly access other devices memories.
@@ -72,7 +98,7 @@ class Device:
         return Memory(self, kind)
 
 
-class Architecture:
+class Architecture(metaclass=ABCMeta):
     """
     An Architecture instance represents a range of devices that can be used via the same API and can run the same code.
     For example, an architecture could be "host" (representing the CPUs on the system), or "CUDA" (representing CUDA supporting GPUs).

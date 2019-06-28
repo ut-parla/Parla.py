@@ -1,8 +1,13 @@
+import numpy
+
 from . import array
 from .device import Memory, Device, MemoryKind, Architecture, _register_archecture
 
 
 class _CPUMemory(Memory):
+    def array(self, *args, **kwds):
+        return numpy.array(*args, **kwds)
+
     def __call__(self, target):
         v = array.asnumpy(target)
         return super(_CPUMemory, self).__call__(v)

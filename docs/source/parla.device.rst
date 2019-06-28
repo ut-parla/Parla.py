@@ -12,7 +12,6 @@ Logical Devices (parla.device)
 
 .. autoclass:: Architecture
 .. autoclass:: Device
-   :no-members:
 .. autoclass:: MemoryKind
 .. autoclass:: Memory
 

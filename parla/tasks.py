@@ -198,9 +198,8 @@ def _make_cell(val):
     return closure.__closure__[0]
 
 
-def spawn(taskid: TaskID = None, dependencies=(), placement: Device = None):
-    """spawn(taskid, dependencies) -> Task
-
+def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
+    """
     Execute the body of the function as a new task. The task may start
     executing immediately, so it may execute in parallel with any
     following code.
