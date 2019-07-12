@@ -1,52 +1,95 @@
-import collections
+from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
+from multiprocessing.pool import ThreadPool
 import cupy
 import threading
 import time
 
+# Note: The code here relies on the semantics of the GIL to ensure thread safety in various places.
+
 def get_devices():
     # Hack to get around the fact that cupy doesn't expose
     # any version of cudaGetDeviceCount.
-    # "None" device is CPU
-    devices = [None]
-    device_id = 0
+    # 0 device is the CPU
+    devices = [0]
+    device_id = 1
     while True:
-        next_device = cupy.cuda.Device(device_id)
+        next_device = cupy.cuda.Device(device_id-1)
         try:
             next_device.compute_capability
         except cupy.cuda.runtime.CUDARuntimeError:
             break
         device_id += 1
-        devices.append(next_device)
+        devices.append(device_id)
     return devices
 
 devices = get_devices()
-pool = ThreadPoolExecutor(len(devices))
-main_queue = collections.deque()
-local_queues = [collections.deque() for d in devices]
+main_queue = Queue()
+local_queues = [Queue() for d in devices]
+pool_running = False
+tasks_in_progress = 0
 
-def local_func(device_info):
-    index, device = device_info
-    local_queue = local_queue[index]
+def enqueue_ready_task(task):
+    queue_index = task[3]
+    receiving_queue = main_queue if queue_index is None else local_queues[queue_index]
+    receiving_queue.put(task)
+
+def local_func(device_index):
+    local_queue = local_queue[device_index]
     # While there is any work left, do it.
     while local_queue or main_queue or tasks_in_progress:
         if local_queue:
-            op, closure = local_queue.popleft()
+            work_item = local_queue.popleft()
         elif main_queue:
-            op, closure = main_queue.popleft()
+            work_item = main_queue.popleft()
         else:
             # TODO: intelligent backoff here
-            time.sleep(5)
+            time.sleep(.005)
             continue
         tasks_in_progress += 1
-        op(closure)
+        # TODO: unpack args and kwargs instead of just passing a single argument.
+        work_item.func(work_item.inputs)
+        work_item.completed = True
+        for dependee in work_item.dependees:
+            dependee.remaining_dependencies -= 1
+            if not dependee.remaining_dependencies:
+                enqueue_ready_task(dependee)
         tasks_in_progress -= 1
 
-pool.map(local_func, devices)
+class task:
+    pass
 
-def run_generation_task(func, inputs):
-    # Global counter used for termination detection
-    tasks_in_progress = 0
-    # Outer loop run on the managing thread for each device
-    with ThreadPoolExecutor(len(devices)) as pool:
-        pool.map(local_func, enumerate(devices))
+def create_task_inside_pool(func, inputs, dependencies, queue_index):
+    created_item = task()
+    created_item.func = func
+    created_item.inputs = inputs
+    created_item.remaining_dependencies = len(dependencies)
+    created_item.dependees = []
+    created_item.completed = False
+    for dep in dependencies:
+        if dep.completed:
+            created_item.remaining_dependencies -= 1
+        else:
+            dep.dependees.append(created_item)
+    if created_item.remaining_dependencies:
+        return created_item
+    enqueue_ready_task(created_item)
+    return created_item
+
+# Lazily starting the thread pool like this still requires the code
+# to be organized so that there's a single "generation" task
+# even though separate functions aren't necessary anymore.
+# Maybe launching/stopping the thread pool would be better as a
+# context manager.
+
+def run_task(func, inputs, dependencies, queue_index = None):
+    global pool_running
+    if pool_running:
+        return create_task_inside_pool(runc, inputs, dependencies, queue_index)
+    else:
+        pool_running = True
+        create_task_inside_pool(func, inputs, dependencies, queue_index)
+        with ThreadPoolExecutor(len(devices)) as pool:
+            pool.map(local_func, devices)
+        pool_running = False
+
