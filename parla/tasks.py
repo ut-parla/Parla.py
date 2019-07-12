@@ -18,7 +18,7 @@ from parla import device
 from parla.device import Device
 
 try:
-    import parla_task
+    import task_runtime
 except ImportError as e:
     import inspect
     # Ignore the exception if the stack includes the doc generator
@@ -152,22 +152,15 @@ class _TaskData:
 
 _task_locals = _TaskLocals()
 
-_task_callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.py_object)
+# _task_callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.py_object)
 
 
-# @cfunc(types.void(types.voidptr, types.voidptr), nopython=False)
-@_task_callback_type
-def _task_callback(ctx, data):
+# @_task_callback_type
+def _task_callback(data):
     """
-    A C function which forwards to a python function and maintains Galios state information.
+    A function which forwards to a python function in the appropriate device context.
     """
-    # Release the reference held to represent the pending execution of the task.
-    # "data" is still a local variable here, so it won't be destroyed 'til this
-    # function finishes.
-    ctypes.pythonapi.Py_DecRef(ctypes.py_object(data))
     logger.debug("Starting: %s", data.taskid)
-    old_ctx = data._task_locals.ctx
-    data._task_locals.ctx = ctx
     try:
         with get_current_device().context():
             data.body()
@@ -179,7 +172,6 @@ def _task_callback(ctx, data):
         import sys
         sys.exit()
     finally:
-        data._task_locals.ctx = old_ctx
         logger.debug("Finished: %s", data.taskid)
     return 0
 
@@ -227,8 +219,6 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
 
     def decorator(body):
         nonlocal taskid
-        # TODO: Numba jit the body function by default?
-        # body = jit("void()")(body)
 
         # Compute the flat dependency set (including unwrapping TaskID objects)
         deps = []
@@ -238,7 +228,7 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
             for d in ds:
                 if hasattr(d, "task"):
                     d = d.task
-                assert isinstance(d, parla_task.task)
+                assert isinstance(d, task_runtime.task)
                 deps.append(d)
 
         # Perform a horrifying hack to build a new function which will
@@ -259,7 +249,7 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
         data.dependencies = dependencies
 
         if not taskid:
-            taskid = TaskID("global", ())
+            taskid = TaskID("global", len(_task_locals.global_tasks))
             _task_locals.global_tasks += [taskid]
         taskid.data = data
         taskid.dependencies = dependencies
@@ -268,16 +258,8 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
         logger.debug("Created: %s", taskid)
 
         # Spawn the task via the Parla runtime API
-        if _task_locals.ctx:
-            # TODO: Provide `placement` to parla_task if not None
-            task = parla_task.create_task(_task_locals.ctx, _task_callback, data, deps)
-            # Create a reference held by the task to prevent data from getting collected.
-            ctypes.pythonapi.Py_IncRef(ctypes.py_object(data))
-        else:
-            # FIXME: This function MUST take deps and must return a task
-            # TODO: Provide `placement` to parla_task if not None
-            parla_task.run_generation_task(_task_callback, data)
-            task = data
+        # TODO: Provide `placement` to the runtime if not None
+        task = task_runtime.run_task(_task_callback, data, deps)
 
         # Store the task object in it's ID object
         taskid.task = task
@@ -289,8 +271,14 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
 
 
 def get_current_device():
-    arch, index = parla_task.get_device()
-    arch = device._get_architecture(arch)
+    index = task_runtime.get_device()
+    if index == 0:
+        arch = device._get_architecture("cpu")
+    elif index >= 1:
+        arch = device._get_architecture("gpu")
+        index -= 1
+    else:
+        raise ValueError("Could not find device for this thread.")
     return arch(index)
 
 # @contextmanager
