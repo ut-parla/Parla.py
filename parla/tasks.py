@@ -152,18 +152,15 @@ class _TaskData:
 
 _task_locals = _TaskLocals()
 
-_task_callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.py_object)
+# _task_callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.py_object)
 
 
-# @cfunc(types.void(types.voidptr, types.voidptr), nopython=False)
-@_task_callback_type
-def _task_callback(ctx, data):
+# @_task_callback_type
+def _task_callback(data):
     """
-    A C function which forwards to a python function and maintains Galios state information.
+    A function which forwards to a python function in the appropriate device context.
     """
     logger.debug("Starting: %s", data.taskid)
-    old_ctx = data._task_locals.ctx
-    data._task_locals.ctx = ctx
     try:
         with get_current_device().context():
             data.body()
@@ -175,7 +172,6 @@ def _task_callback(ctx, data):
         import sys
         sys.exit()
     finally:
-        data._task_locals.ctx = old_ctx
         logger.debug("Finished: %s", data.taskid)
     return 0
 
@@ -232,7 +228,7 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
             for d in ds:
                 if hasattr(d, "task"):
                     d = d.task
-                assert isinstance(d, task_runtime.Task)
+                assert isinstance(d, task_runtime.task)
                 deps.append(d)
 
         # Perform a horrifying hack to build a new function which will

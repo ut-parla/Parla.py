@@ -50,3 +50,7 @@ def run_generation_task(func, inputs):
     # Outer loop run on the managing thread for each device
     with ThreadPoolExecutor(len(devices)) as pool:
         pool.map(local_func, enumerate(devices))
+
+
+# Dummy type to allow for sanity checks in other task handling code.
+Task = tuple
