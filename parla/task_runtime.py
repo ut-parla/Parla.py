@@ -1,20 +1,18 @@
-from queue import Queue
-from concurrent.futures import ThreadPoolExecutor
+from queue import SimpleQueue
+from concurrent.futures import ThreadPoolExecutor, wait
 from multiprocessing.pool import ThreadPool
 import cupy
 import threading
 import time
-
-# Note: The code here relies on the semantics of the GIL to ensure thread safety in various places.
 
 def get_devices():
     # Hack to get around the fact that cupy doesn't expose
     # any version of cudaGetDeviceCount.
     # 0 device is the CPU
     devices = [0]
-    device_id = 1
+    device_id = 0
     while True:
-        next_device = cupy.cuda.Device(device_id-1)
+        next_device = cupy.cuda.Device(device_id)
         try:
             next_device.compute_capability
         except cupy.cuda.runtime.CUDARuntimeError:
@@ -24,28 +22,36 @@ def get_devices():
     return devices
 
 devices = get_devices()
-main_queue = Queue()
-local_queues = [Queue() for d in devices]
+main_queue = SimpleQueue()
+local_queues = [SimpleQueue() for d in devices]
 pool_running = False
 tasks_in_progress = 0
+mutex = threading.Lock()
 
 def local_func(device_index):
     global tasks_in_progress
     local_queue = local_queues[device_index]
     # While there is any work left, do it.
-    while local_queue or main_queue or tasks_in_progress:
-        if local_queue:
-            work_item = local_queue.popleft()
-        elif main_queue:
-            work_item = main_queue.popleft()
-        else:
-            # TODO: intelligent backoff here
-            time.sleep(.005)
-            continue
-        tasks_in_progress += 1
+    while True:
+        with mutex:
+            # Apparently the Queue class has it's own internal lock aside from the GIL,
+            # so things can deadlock. I just went ahead and used a coarse-grained mutex
+            # to guard all the scheduling logic and avoid any issues that could arise
+            # from the extra queue-local lock.
+            if local_queue.empty and main_queue.empty() and not tasks_in_progress:
+                break
+            if not local_queue.empty():
+                work_item = local_queue.get()
+            elif not main_queue.empty():
+                work_item = main_queue.get()
+            else:
+                # TODO: intelligent backoff here?
+                continue
+            tasks_in_progress += 1
         # TODO: unpack args and kwargs instead of just passing a single argument.
         work_item.run()
-        tasks_in_progress -= 1
+        with mutex:
+            tasks_in_progress -= 1
 
 class Task:
 
@@ -56,25 +62,28 @@ class Task:
         self.dependees = []
         self.completed = False
         self.queue_index = queue_index
-        for dep in dependencies:
-            if dep.completed:
-                self.remaining_dependencies -= 1
-            else:
-                dep.dependees.append(self)
-        if not self.remaining_dependencies:
-            self.enqueue()
+        with mutex:
+            for dep in dependencies:
+                if dep.completed:
+                    self.remaining_dependencies -= 1
+                else:
+                    dep.dependees.append(self)
+            if not self.remaining_dependencies:
+                self.enqueue()
 
     def enqueue(self):
+        # Requires mutex governing queues to be held.
         receiving_queue = main_queue if self.queue_index is None else local_queues[queue_index]
         receiving_queue.put(self)
 
     def run(self):
         self.func(*self.inputs)
-        self.completed = True
-        for dependee in work_item.dependees:
-            dependee.remaining_dependencies -= 1
-            if not dependee.remaining_dependencies:
-                dependee.enqueue()
+        with mutex:
+            self.completed = True
+            for dependee in self.dependees:
+                dependee.remaining_dependencies -= 1
+                if not dependee.remaining_dependencies:
+                    dependee.enqueue()
 
 # Lazily starting the thread pool like this still requires the code
 # to be organized so that there's a single "generation" task
@@ -98,6 +107,6 @@ def run_task(func, inputs, dependencies, queue_index = None):
         pool_running = True
         root_task = Task(func, inputs, dependencies, queue_index)
         with ThreadPoolExecutor(len(devices)) as pool:
-            pool.map(local_func, devices)
+            local_loops = pool.map(local_func, devices)
         pool_running = False
 
