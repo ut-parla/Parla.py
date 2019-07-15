@@ -26,9 +26,16 @@ main_queue = SimpleQueue()
 local_queues = [SimpleQueue() for d in devices]
 pool_running = False
 tasks_in_progress = 0
+device_indices = threading.local()
+# Main thread is the CPU.
+device_indices.index = 0
 mutex = threading.Lock()
 
+def get_device():
+    return device_indices.index
+
 def local_func(device_index):
+    device_indices.index = device_index
     global tasks_in_progress
     local_queue = local_queues[device_index]
     # While there is any work left, do it.
@@ -52,6 +59,7 @@ def local_func(device_index):
         work_item.run()
         with mutex:
             tasks_in_progress -= 1
+    device_indices.index = None
 
 class Task:
 
@@ -104,9 +112,12 @@ def run_task(func, inputs, dependencies, queue_index = None):
     if pool_running:
         return Task(func, inputs, dependencies, queue_index)
     else:
+        print("starting pool")
         pool_running = True
         root_task = Task(func, inputs, dependencies, queue_index)
         with ThreadPoolExecutor(len(devices)) as pool:
             local_loops = pool.map(local_func, devices)
+        # Reset main thread to use CPU.
+        device_indices.index = 0
         pool_running = False
 

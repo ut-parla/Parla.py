@@ -18,7 +18,7 @@ from parla import device
 from parla.device import Device
 
 try:
-    import task_runtime
+    from parla import task_runtime
 except ImportError as e:
     import inspect
     # Ignore the exception if the stack includes the doc generator
@@ -228,7 +228,7 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
             for d in ds:
                 if hasattr(d, "task"):
                     d = d.task
-                assert isinstance(d, task_runtime.task)
+                assert isinstance(d, task_runtime.Task)
                 deps.append(d)
 
         # Perform a horrifying hack to build a new function which will
@@ -259,7 +259,10 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
 
         # Spawn the task via the Parla runtime API
         # TODO: Provide `placement` to the runtime if not None
-        task = task_runtime.run_task(_task_callback, data, deps)
+        print(_task_callback)
+        print(data)
+        print(deps)
+        task = task_runtime.run_task(_task_callback, (data,), deps)
 
         # Store the task object in it's ID object
         taskid.task = task
