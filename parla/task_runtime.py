@@ -44,12 +44,7 @@ def local_func(device_index):
             continue
         tasks_in_progress += 1
         # TODO: unpack args and kwargs instead of just passing a single argument.
-        work_item.func(work_item.inputs)
-        work_item.completed = True
-        for dependee in work_item.dependees:
-            dependee.remaining_dependencies -= 1
-            if not dependee.remaining_dependencies:
-                dependee.enqueue()
+        work_item.run()
         tasks_in_progress -= 1
 
 class Task:
@@ -67,11 +62,19 @@ class Task:
             else:
                 dep.dependees.append(self)
         if not self.remaining_dependencies:
-            self.euqueue()
+            self.enqueue()
 
-    def enqueue():
+    def enqueue(self):
         receiving_queue = main_queue if self.queue_index is None else local_queues[queue_index]
-        receiving_queue.put(task)
+        receiving_queue.put(self)
+
+    def run(self):
+        self.func(*self.inputs)
+        self.completed = True
+        for dependee in work_item.dependees:
+            dependee.remaining_dependencies -= 1
+            if not dependee.remaining_dependencies:
+                dependee.enqueue()
 
 # Lazily starting the thread pool like this still requires the code
 # to be organized so that there's a single "generation" task
