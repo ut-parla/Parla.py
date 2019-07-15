@@ -29,11 +29,6 @@ local_queues = [Queue() for d in devices]
 pool_running = False
 tasks_in_progress = 0
 
-def enqueue_ready_task(task):
-    queue_index = task.queue_index
-    receiving_queue = main_queue if queue_index is None else local_queues[queue_index]
-    receiving_queue.put(task)
-
 def local_func(device_index):
     global tasks_in_progress
     local_queue = local_queues[device_index]
@@ -54,29 +49,29 @@ def local_func(device_index):
         for dependee in work_item.dependees:
             dependee.remaining_dependencies -= 1
             if not dependee.remaining_dependencies:
-                enqueue_ready_task(dependee)
+                dependee.enqueue()
         tasks_in_progress -= 1
 
 class Task:
-    pass
 
-def create_task_inside_pool(func, inputs, dependencies, queue_index):
-    created_item = Task()
-    created_item.func = func
-    created_item.inputs = inputs
-    created_item.remaining_dependencies = len(dependencies)
-    created_item.dependees = []
-    created_item.completed = False
-    created_item.queue_index = queue_index
-    for dep in dependencies:
-        if dep.completed:
-            created_item.remaining_dependencies -= 1
-        else:
-            dep.dependees.append(created_item)
-    if created_item.remaining_dependencies:
-        return created_item
-    enqueue_ready_task(created_item)
-    return created_item
+    def __init__(self, func, inputs, dependencies, queue_index):
+        self.func = func
+        self.inputs = inputs
+        self.remaining_dependencies = len(dependencies)
+        self.dependees = []
+        self.completed = False
+        self.queue_index = queue_index
+        for dep in dependencies:
+            if dep.completed:
+                self.remaining_dependencies -= 1
+            else:
+                dep.dependees.append(self)
+        if not self.remaining_dependencies:
+            self.euqueue()
+
+    def enqueue():
+        receiving_queue = main_queue if self.queue_index is None else local_queues[queue_index]
+        receiving_queue.put(task)
 
 # Lazily starting the thread pool like this still requires the code
 # to be organized so that there's a single "generation" task
@@ -95,10 +90,10 @@ def create_task_inside_pool(func, inputs, dependencies, queue_index):
 def run_task(func, inputs, dependencies, queue_index = None):
     global pool_running
     if pool_running:
-        return create_task_inside_pool(func, inputs, dependencies, queue_index)
+        return Task(func, inputs, dependencies, queue_index)
     else:
         pool_running = True
-        create_task_inside_pool(func, inputs, dependencies, queue_index)
+        root_task = Task(func, inputs, dependencies, queue_index)
         with ThreadPoolExecutor(len(devices)) as pool:
             pool.map(local_func, devices)
         pool_running = False
