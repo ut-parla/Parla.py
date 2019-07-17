@@ -112,7 +112,6 @@ def run_task(func, inputs, dependencies, queue_index = None):
     if pool_running:
         return Task(func, inputs, dependencies, queue_index)
     else:
-        print("starting pool")
         pool_running = True
         root_task = Task(func, inputs, dependencies, queue_index)
         with ThreadPoolExecutor(len(devices)) as pool:
