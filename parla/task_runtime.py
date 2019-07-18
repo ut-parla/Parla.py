@@ -1,25 +1,30 @@
 from queue import SimpleQueue
 from concurrent.futures import ThreadPoolExecutor, wait
 from multiprocessing.pool import ThreadPool
-import cupy
 import threading
 import time
 
-def get_devices():
-    # Hack to get around the fact that cupy doesn't expose
-    # any version of cudaGetDeviceCount.
-    # 0 device is the CPU
-    devices = [0]
-    device_id = 0
-    while True:
-        next_device = cupy.cuda.Device(device_id)
-        try:
-            next_device.compute_capability
-        except cupy.cuda.runtime.CUDARuntimeError:
-            break
-        device_id += 1
-        devices.append(device_id)
-    return devices
+try:
+    import cupy
+
+    def get_devices():
+        # Hack to get around the fact that cupy doesn't expose
+        # any version of cudaGetDeviceCount.
+        # 0 device is the CPU
+        devices = [0]
+        device_id = 0
+        while True:
+            next_device = cupy.cuda.Device(device_id)
+            try:
+                next_device.compute_capability
+            except cupy.cuda.runtime.CUDARuntimeError:
+                break
+            device_id += 1
+            devices.append(device_id)
+        return devices
+except ImportError:
+    def get_devices():
+        return [0]
 
 devices = get_devices()
 main_queue = SimpleQueue()
