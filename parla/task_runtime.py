@@ -30,6 +30,7 @@ device_indices = threading.local()
 # Main thread is the CPU.
 device_indices.index = 0
 mutex = threading.Lock()
+raised_exception = None
 
 def get_device():
     return device_indices.index
@@ -37,6 +38,7 @@ def get_device():
 def local_func(device_index):
     device_indices.index = device_index
     global tasks_in_progress
+    global raised_exception
     local_queue = local_queues[device_index]
     # While there is any work left, do it.
     while True:
@@ -45,7 +47,7 @@ def local_func(device_index):
             # so things can deadlock. I just went ahead and used a coarse-grained mutex
             # to guard all the scheduling logic and avoid any issues that could arise
             # from the extra queue-local lock.
-            if local_queue.empty and main_queue.empty() and not tasks_in_progress:
+            if (local_queue.empty and main_queue.empty() and not tasks_in_progress) or raised_exception is not None:
                 break
             if not local_queue.empty():
                 work_item = local_queue.get()
@@ -56,10 +58,15 @@ def local_func(device_index):
                 continue
             tasks_in_progress += 1
         # TODO: unpack args and kwargs instead of just passing a single argument.
-        work_item.run()
-        with mutex:
-            tasks_in_progress -= 1
-    device_indices.index = None
+        try:
+            work_item.run()
+        except Exception as exc:
+            with mutex:
+                if raised_exception is None:
+                    raised_exception = exc
+        finally:
+            with mutex:
+                tasks_in_progress -= 1
 
 class Task:
 
@@ -109,6 +116,7 @@ class Task:
 
 def run_task(func, inputs, dependencies, queue_index = None):
     global pool_running
+    global raised_exception
     if pool_running:
         return Task(func, inputs, dependencies, queue_index)
     else:
@@ -116,6 +124,19 @@ def run_task(func, inputs, dependencies, queue_index = None):
         root_task = Task(func, inputs, dependencies, queue_index)
         with ThreadPoolExecutor(len(devices)) as pool:
             local_loops = pool.map(local_func, devices)
+        if raised_exception is not None:
+            exc = raised_exception
+            raised_exception = None
+            global tasks_in_progress
+            tasks_in_progress = 0
+            global main_queue
+            main_queue = SimpleQueue()
+            pool_running = False
+            global local_queues
+            for i in range(len(local_queues)):
+                if not local_queues[i].empty():
+                    local_queues[i] = SimpleQueue()
+            raise exc
         # Reset main thread to use CPU.
         device_indices.index = 0
         pool_running = False
