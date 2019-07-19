@@ -60,7 +60,7 @@ class Memory(Detail, metaclass=ABCMeta):
 
         :return: An array object with a `numpy.ndarray` like interface.
         """
-        pass
+        raise NotImplementedError()
 
     @abstractmethod
     def __call__(self, target):
@@ -70,7 +70,7 @@ class Memory(Detail, metaclass=ABCMeta):
         :param target: A data object (e.g., an array).
         :return: The copied data object in this memory. The returned object should have the same interface as the original.
         """
-        pass
+        raise NotImplementedError()
 
 
 class Device(metaclass=ABCMeta):

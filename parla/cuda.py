@@ -15,8 +15,7 @@ class _GPUMemory(Memory):
         return cupy.array(*args, **kwds)
 
     def __call__(self, target):
-        v = cupy.asarray(target)
-        return super(_GPUMemory, self).__call__(v)
+        return cupy.asarray(target)
 
 
 class _GPUDevice(Device):
