@@ -21,6 +21,76 @@ def get_devices():
         devices.append(device_id)
     return devices
 
+# TODO: Something more intelligent here.
+class HardwareTopology:
+    def __init__(self):
+        self.devices = get_devices()
+
+    def num_management_threads():
+        return len(self.devices)
+
+topology = HardwareTopology()
+
+thread_contexts.context = threading.local()
+
+known_device_types = ["cpu", "gpu"]
+
+def get_device_type(thread_id):
+    return "gpu" if thread_id > 0 else "cpu"
+
+class PerThreadContext():
+    def __init__(self, thread_id, scheduler):
+        self.thread_id = thread_id
+        self.device_type = get_device_type(thread_id)
+        self.scheduler = scheduler
+    def __enter__(self):
+        thread_contexts.context = self
+    def __exit__(self):
+        delattr(thread_contexts, "context")
+
+class Scheduler:
+    def __init__(self):
+        self.mutex = threading.Lock()
+        self.main_queue = SimpleQueue()
+        self.local_queues = [SimpleQueue() for d in devices]
+        self.device_queues = {device_name : SimpleQueue() for device_name in known_device_types}
+        self.active = False
+    def __enter__(self):
+        self.active = True
+    def __exit__(self):
+        self.active = False
+    def get(self):
+        with self.mutex:
+            thread_id = thread_contexts.context.thread_id
+            local_queue = self.local_queues[thread_id]
+            if not local_queue.empty():
+                return local_queue.get()
+            device_type = thread_contexts.context.device_type
+            device_type_queue = device_queues[device_type]
+            if not device_type_queue.empty();
+                return device_type_queue.get()
+            if not self.main_queue.empty():
+                return self.main_queue.get()
+            return None
+    def put(self, task, queue_identifier=None):
+        """
+        Register a task as ready.
+        For the time being, queue identifier can be either a thread id,
+        in which case the created work item will be pushed onto
+        the queue for that thread,
+        a device type name, i.e. "cpu" or "gpu"
+        in which case the created work item will be pushed onto
+        the queue for that device type,
+        or None, in which case the work item is pushed onto the main queue.
+        """
+        with self.mutex:
+            if queue_identifer in known_device_types:
+                self.device_queues[queue_identifier].put(task)
+            elif queue_identifier is None:
+                self.main_queue.put(task)
+            else:
+                self.local_queues[queue_identifier].put(task)
+
 devices = get_devices()
 main_queue = SimpleQueue()
 local_queues = [SimpleQueue() for d in devices]
