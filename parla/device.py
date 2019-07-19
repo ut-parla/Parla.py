@@ -5,11 +5,15 @@ The model is used to describe the placement restrictions for computations and st
 
 from contextlib import contextmanager
 from enum import Enum
+from functools import lru_cache
 from typing import Optional
 from abc import ABCMeta, abstractmethod
 
+import logging
+
 from .detail import Detail
 
+logger = logging.getLogger(__name__)
 
 class MemoryKind(Enum):
     """
@@ -81,6 +85,11 @@ class Device(metaclass=ABCMeta):
 
     As devices are logical, the runtime may choose to implement two devices using the same hardware.
     """
+    index: Optional[int]
+
+    @lru_cache(maxsize=None)
+    def __new__(cls, *args, **kwargs):
+        return super(Device, cls).__new__(cls)
 
     def __init__(self, architecture, *args, **kwds):
         """
@@ -89,6 +98,7 @@ class Device(metaclass=ABCMeta):
         self.architecture = architecture
         self.args = args
         self.kwds = kwds
+        self.index = None
 
     @contextmanager
     def context(self):
