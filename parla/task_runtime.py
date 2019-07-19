@@ -93,7 +93,7 @@ class Task:
 
     def enqueue(self):
         # Requires mutex governing queues to be held.
-        receiving_queue = main_queue if self.queue_index is None else local_queues[queue_index]
+        receiving_queue = main_queue if self.queue_index is None else local_queues[self.queue_index]
         receiving_queue.put(self)
 
     def run(self):
