@@ -9,8 +9,7 @@ class _CPUMemory(Memory):
         return numpy.array(*args, **kwds)
 
     def __call__(self, target):
-        v = array.asnumpy(target)
-        return super(_CPUMemory, self).__call__(v)
+        return array.asnumpy(target)
 
 
 class _CPUDevice(Device):

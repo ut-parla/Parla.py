@@ -259,10 +259,7 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
 
         # Spawn the task via the Parla runtime API
         # TODO: Provide `placement` to the runtime if not None
-        print(_task_callback)
-        print(data)
-        print(deps)
-        task = task_runtime.run_task(_task_callback, (data,), deps)
+        task = task_runtime.run_task(_task_callback, (data,), deps, queue_index=placement and placement.index)
 
         # Store the task object in it's ID object
         taskid.task = task
@@ -277,12 +274,15 @@ def get_current_device():
     index = task_runtime.get_device()
     if index == 0:
         arch = device._get_architecture("cpu")
+        arch_index = index
     elif index >= 1:
         arch = device._get_architecture("gpu")
-        index -= 1
+        arch_index = index - 1
     else:
         raise ValueError("Could not find device for this thread.")
-    return arch(index)
+    d = arch(arch_index)
+    d.index = index
+    return d
 
 # @contextmanager
 # def finish():
