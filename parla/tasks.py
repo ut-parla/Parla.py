@@ -12,6 +12,7 @@ Parla supports simple task parallelism.
 import ctypes
 import logging
 import threading
+from collections import Sized
 from collections.abc import Iterable
 
 from parla import device
@@ -103,7 +104,7 @@ class TaskSpace:
     def __getitem__(self, index):
         """Get the `TaskID` associated with the provided indicies.
         """
-        if not hasattr(index, "__iter__") and not isinstance(index, slice):
+        if not isinstance(index, tuple):
             index = (index,)
         ret = []
 
@@ -147,7 +148,13 @@ class _TaskLocals(threading.local):
 
 
 class _TaskData:
-    pass
+    def __init__(self, _task_locals, body, dependencies):
+        self._task_locals = _task_locals
+        self.body = body
+        self.dependencies = dependencies
+
+    def __repr__(self):
+        return "<TaskData {body}>".format(**self.__dict__)
 
 
 _task_locals = _TaskLocals()
@@ -243,10 +250,7 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
         separated_body.__kwdefaults__ = body.__kwdefaults__
         separated_body.__module__ = body.__module__
 
-        data = _TaskData()
-        data._task_locals = _task_locals
-        data.body = separated_body
-        data.dependencies = dependencies
+        data = _TaskData(_task_locals, separated_body, dependencies)
 
         if not taskid:
             taskid = TaskID("global", len(_task_locals.global_tasks))
@@ -255,14 +259,16 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
         taskid.dependencies = dependencies
         data.taskid = taskid
 
-        logger.debug("Created: %s", taskid)
+        queue_index = None if placement is None else placement.index
 
         # Spawn the task via the Parla runtime API
         # TODO: Provide `placement` to the runtime if not None
-        task = task_runtime.run_task(_task_callback, (data,), deps, queue_index=placement and placement.index)
+        task = task_runtime.run_task(_task_callback, (data,), deps, queue_index=queue_index)
 
         # Store the task object in it's ID object
         taskid.task = task
+
+        logger.debug("Created: %s <%s, %s>", taskid, placement, queue_index)
 
         # Return the task object
         return task

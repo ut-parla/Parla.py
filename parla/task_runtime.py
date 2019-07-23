@@ -1,8 +1,13 @@
+import logging
 from queue import SimpleQueue
 from concurrent.futures import ThreadPoolExecutor, wait
 from multiprocessing.pool import ThreadPool
 import threading
 import time
+
+logger = logging.getLogger(__name__)
+
+__all__ = []
 
 try:
     import cupy
@@ -162,6 +167,7 @@ def local_func(thread_id):
         while not scheduler.finished():
             with exception_log_mutex:
                 if raised_exceptions:
+                    logger.debug("Exiting with exceptions: {}".format(raised_exceptions))
                     break
             try:
                 did_work = scheduler.run_next()
@@ -175,7 +181,6 @@ def local_func(thread_id):
 # counters for dependency tracking.
 
 class Task:
-
     def __init__(self, func, inputs, dependencies, queue_identifier):
         self.func = func
         self.inputs = inputs
@@ -204,6 +209,9 @@ class Task:
                 dependee.remaining_dependencies -= 1
                 if not dependee.remaining_dependencies:
                     dependee.enqueue()
+
+    def __repr__(self):
+        return "{func}{inputs}<{remaining_dependencies}, {completed}, {queue_index}>".format(**self.__dict__)
 
 # Lazily starting the thread pool like this still requires the code
 # to be organized so that there's a single "generation" task

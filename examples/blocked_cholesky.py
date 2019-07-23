@@ -117,3 +117,4 @@ def test_blocked_cholesky():
         print("===========", a.shape)
         print(a1)
         assert np.allclose(res, np.tril(a1)), "Parallel cholesky_blocked_inplace failed"
+        print("Done")
