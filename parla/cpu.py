@@ -5,8 +5,9 @@ from .device import Memory, Device, MemoryKind, Architecture, _register_archectu
 
 
 class _CPUMemory(Memory):
-    def array(self, *args, **kwds):
-        return numpy.array(*args, **kwds)
+    @property
+    def np(self):
+        return numpy
 
     def __call__(self, target):
         return array.asnumpy(target)
@@ -19,7 +20,7 @@ class _CPUDevice(Device):
 
 class _CPUArchitecture(Architecture):
     def __call__(self, *args, **kwds):
-        return _CPUDevice(self, *args, **kwds)
+        return _CPUDevice(self, 0, *args, **kwds)
 
 
 cpu = _CPUArchitecture("CPU", "cpu")

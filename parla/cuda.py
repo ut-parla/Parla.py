@@ -11,17 +11,19 @@ except ImportError as e:
 
 
 class _GPUMemory(Memory):
-    def array(self, *args, **kwds):
-        return cupy.array(*args, **kwds)
+    @property
+    def np(self):
+        return cupy
 
     def __call__(self, target):
-        return cupy.asarray(target)
+        with self.device.context():
+            return cupy.asarray(target)
 
 
 class _GPUDevice(Device):
     def __init__(self, architecture, device_number, **kwds):
-        super().__init__(architecture, *(device_number,), **kwds)
         self.device_number = device_number
+        super().__init__(architecture, device_number+1, *(device_number,), **kwds)
 
     @contextmanager
     def context(self):

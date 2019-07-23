@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from enum import Enum
 from functools import lru_cache
 from typing import Optional
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta, abstractmethod, abstractproperty
 
 import logging
 
@@ -55,14 +55,12 @@ class Memory(Detail, metaclass=ABCMeta):
         self.device = device
         self.kind = kind
 
+    @property
     @abstractmethod
-    def array(self, *args, **kwds):
+    def np(self):
         """
-        Create an array on this device.
-        All arguments to this call are passed to the underlying array constructor for the device's library.
-        For the prototype, the library should be compatible with the `numpy.array` constructor.
-
-        :return: An array object with a `numpy.ndarray` like interface.
+        Return an object with an interface similar to the `numpy` module, but
+        which operates on arrays in this memory.
         """
         raise NotImplementedError()
 
@@ -91,14 +89,14 @@ class Device(metaclass=ABCMeta):
     def __new__(cls, *args, **kwargs):
         return super(Device, cls).__new__(cls)
 
-    def __init__(self, architecture, *args, **kwds):
+    def __init__(self, architecture, index, *args, **kwds):
         """
         Construct a new **logical** Device with a specific architecture.
         """
         self.architecture = architecture
+        self.index = index
         self.args = args
         self.kwds = kwds
-        self.index = None
 
     @contextmanager
     def context(self):
