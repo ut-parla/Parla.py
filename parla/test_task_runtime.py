@@ -5,7 +5,7 @@ def test_flag_increment():
     def increment_flag():
         nonlocal external_flag
         external_flag += 1
-    run_task(increment_flag, tuple(), [])
+    tsk = run_task(increment_flag, tuple(), [])
     assert external_flag
 
 def test_deps():
@@ -61,7 +61,7 @@ def test_exception_handling():
     def raise_exc():
         raise CustomException("error")
     try:
-        run_task(raise_exc, tuple(), [])
+        tsk = run_task(raise_exc, tuple(), [])
     except:
         success = True
     else:
