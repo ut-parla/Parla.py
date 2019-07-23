@@ -62,7 +62,6 @@ def fox(y, A, x):
 
     # FIXME: Assume that partitions_x exactly subdivides n.
     # partition A into Ap (partitions_x, partitions_y)
-    Ap: List[List[np.ndarray]]
     Ap = [[mem(i, j)(A[partition_slice(i, partitions_x), partition_slice(j, partitions_y)])
             for j in range(partitions_x)]
           for i in range(partitions_y)]
@@ -111,7 +110,7 @@ def fox(y, A, x):
 
 @spawn(placement=cpu(0))
 def test_fox():
-    size_factor = 4*partitions_x
+    size_factor = 2*partitions_x
     A = np.random.rand(size_factor, size_factor)
     x = np.random.rand(size_factor)
     res = A @ x

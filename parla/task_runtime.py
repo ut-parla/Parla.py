@@ -148,6 +148,8 @@ class Scheduler:
                     return False
             if not self.main_queue.empty():
                 return False
+        logger.debug("Exiting %d with (%r, %d, %r)", map(len, self.local_queues), len(self.main_queue),
+                     self.tasks_in_progress)
         return True
 
 # TODO: Do we want an interface that lets the scheduler be specified at
@@ -211,7 +213,7 @@ class Task:
                     dependee.enqueue()
 
     def __repr__(self):
-        return "{func}{inputs}<{remaining_dependencies}, {completed}, {queue_index}>".format(**self.__dict__)
+        return "{func}{inputs}<{remaining_dependencies}, {completed}, {queue_identifier}>".format(**self.__dict__)
 
 # Lazily starting the thread pool like this still requires the code
 # to be organized so that there's a single "generation" task
@@ -246,4 +248,3 @@ def run_task(func, inputs, dependencies, queue_identifier = None):
                 raise exc
         pool_running = False
         return root_task
-
