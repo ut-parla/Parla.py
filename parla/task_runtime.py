@@ -1,8 +1,13 @@
+import logging
 from queue import SimpleQueue
 from concurrent.futures import ThreadPoolExecutor, wait
 from multiprocessing.pool import ThreadPool
 import threading
 import time
+
+logger = logging.getLogger(__name__)
+
+__all__ = []
 
 try:
     import cupy
@@ -31,12 +36,12 @@ class HardwareTopology:
     def __init__(self):
         self.devices = get_devices()
 
-    def num_management_threads():
+    def num_management_threads(self):
         return len(self.devices)
 
 topology = HardwareTopology()
 
-thread_contexts.context = threading.local()
+thread_contexts = threading.local()
 
 known_device_types = ["cpu", "gpu"]
 
@@ -72,7 +77,7 @@ class Scheduler:
                 return local_queue.get()
             device_type = thread_contexts.context.device_type
             device_type_queue = device_queues[device_type]
-            if not device_type_queue.empty();
+            if not device_type_queue.empty():
                 return device_type_queue.get()
             if not self.main_queue.empty():
                 return self.main_queue.get()
@@ -122,7 +127,8 @@ def local_func(device_index):
             # so things can deadlock. I just went ahead and used a coarse-grained mutex
             # to guard all the scheduling logic and avoid any issues that could arise
             # from the extra queue-local lock.
-            if (local_queue.empty and main_queue.empty() and not tasks_in_progress) or raised_exception is not None:
+            if (local_queue.empty() and main_queue.empty() and not tasks_in_progress) or raised_exception is not None:
+                logger.debug("Exiting %d with (%r, %r, %r)", device_index, local_queue.empty(), tasks_in_progress, raised_exception)
                 break
             if not local_queue.empty():
                 work_item = local_queue.get()
@@ -143,8 +149,8 @@ def local_func(device_index):
             with mutex:
                 tasks_in_progress -= 1
 
-class Task:
 
+class Task:
     def __init__(self, func, inputs, dependencies, queue_index):
         self.func = func
         self.inputs = inputs
@@ -160,6 +166,7 @@ class Task:
                     dep.dependees.append(self)
             if not self.remaining_dependencies:
                 self.enqueue()
+        # logger.info("%r", self)
 
     def enqueue(self):
         # Requires mutex governing queues to be held.
@@ -174,6 +181,9 @@ class Task:
                 dependee.remaining_dependencies -= 1
                 if not dependee.remaining_dependencies:
                     dependee.enqueue()
+
+    def __repr__(self):
+        return "{func}{inputs}<{remaining_dependencies}, {completed}, {queue_index}>".format(**self.__dict__)
 
 # Lazily starting the thread pool like this still requires the code
 # to be organized so that there's a single "generation" task
