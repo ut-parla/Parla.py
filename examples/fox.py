@@ -8,6 +8,7 @@ from parla.tasks import *
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 """
 This is not actually runnable. Think of it as very detailed pseudocode.
@@ -73,6 +74,10 @@ def fox(y, A, x):
     yp = [[mem(i, j).np.empty(x[partition_slice(i, partitions_x)].shape)
               for j in range(partitions_x)]
           for i in range(partitions_y)]
+
+    logger.debug("Ap (placement) %r", [[v.device for v in r] for r in Ap])
+    logger.debug("xp (placement) %r", [[v.device for v in r] for r in xp])
+    logger.debug("yp (placement) %r", [[v.device for v in r] for r in yp])
 
     # broadcast along columns
     for j in range(0, partitions_x): # columns

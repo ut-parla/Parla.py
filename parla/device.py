@@ -13,6 +13,8 @@ import logging
 
 from .detail import Detail
 
+__all__ = ["MemoryKind", "Memory", "Device", "Architecture"]
+
 logger = logging.getLogger(__name__)
 
 class MemoryKind(Enum):

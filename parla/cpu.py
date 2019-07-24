@@ -17,6 +17,9 @@ class _CPUDevice(Device):
     def memory(self, kind: MemoryKind = None):
         return _CPUMemory(self, kind)
 
+    def __repr__(self):
+        return "<CPU>"
+
 
 class _CPUArchitecture(Architecture):
     def __call__(self, *args, **kwds):
