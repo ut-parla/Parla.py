@@ -65,8 +65,8 @@ def get_device_id():
     # TODO: Make this return some kind of actual device object.
     return get_thread_id()
 
-class Scheduler:
 
+class Scheduler:
     def __init__(self):
         self.mutex = threading.Lock()
         self.active = False
@@ -115,10 +115,13 @@ class Scheduler:
         with self.mutex:
             assert self.active
             if queue_identifier in known_device_types:
+                # logger.info("Adding to device queue %r: %r", queue_identifier, self)
                 self.device_queues[queue_identifier].put(task)
             elif queue_identifier is None:
+                # logger.info("Adding to main queue: %r", queue_identifier, self)
                 self.main_queue.put(task)
             else:
+                # logger.info("Adding to local queue %r: %r", queue_identifier, self)
                 self.local_queues[queue_identifier].put(task)
 
     def run_next(self):
@@ -156,7 +159,7 @@ class Scheduler:
 # runtime instead of just having it be here?
 scheduler = Scheduler()
 # Need a lock to ensure atomicity of appending/removing from raised_exceptions.
-# Could do this with atomics in a lower level language.
+# Could do this with atomics in a lower level language, or in any language that is less concurrency impoverished than Python.
 exception_log_mutex = threading.Lock()
 raised_exceptions = []
 pool_running = False
@@ -201,9 +204,10 @@ class Task:
                 self.enqueue()
 
     def enqueue(self):
-        scheduler.put(self)
+        scheduler.put(self, queue_identifier=self.queue_identifier)
 
     def run(self):
+        logger.debug("Running on %r (should be queue %r): %r", get_thread_id(), self.queue_identifier, self)
         self.func(*self.inputs)
         with self.mutex:
             self.completed = True
@@ -213,7 +217,7 @@ class Task:
                     dependee.enqueue()
 
     def __repr__(self):
-        return "{func}{inputs}<{remaining_dependencies}, {completed}, {queue_identifier}>".format(**self.__dict__)
+        return "{func}{inputs}<{remaining_dependencies}, {completed}, queue_id={queue_identifier}>".format(**self.__dict__)
 
 # Lazily starting the thread pool like this still requires the code
 # to be organized so that there's a single "generation" task
