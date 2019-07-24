@@ -46,7 +46,7 @@ class _GPUMemory(Memory):
     def __call__(self, target):
         old = cupy.cuda.Device()
         with self.device.context():
-            logger.info("On %r, moving data to %r, from %r", old, cupy.cuda.Device(), getattr(target, "device", None))
+            # logger.info("On %r, moving data to %r, from %r", old, cupy.cuda.Device(), getattr(target, "device", None))
             return cupy.asarray(target)
 
 

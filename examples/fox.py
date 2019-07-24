@@ -61,7 +61,7 @@ def fox(y, A, x):
     def partition_slice(i, p):
         return slice(i*(n//p),(i+1)*(n//p))
 
-    # FIXME: Assume that partitions_x exactly subdivides n.
+    # FIXME: Assumes that partitions_x exactly subdivides n.
     # partition A into Ap (partitions_x, partitions_y)
     Ap = [[mem(i, j)(A[partition_slice(i, partitions_x), partition_slice(j, partitions_y)])
             for j in range(partitions_x)]
@@ -98,10 +98,12 @@ def fox(y, A, x):
         @spawn(R[i], [M[i, 0:partitions_x]], placement=loc[(i, i)])
         def r():
             acc = yp[i][i]
+            # logger.info("acc = %r (at %r)", acc.device, get_current_device())
             for j in range(0, partitions_y): # columns
                 if i == j:
                     continue
                 t = mem(i, i)(yp[i][j])
+                # logger.info("%r, %r", t.device, yp[i][j].device)
                 acc = acc + t
             y[partition_slice(i, partitions_x)] = cpu(0).memory()(acc)
 
@@ -110,7 +112,6 @@ def fox(y, A, x):
     def done():
         pass
     return done # Return the join task
-
 
 
 @spawn(placement=cpu(0))
