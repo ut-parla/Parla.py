@@ -7,7 +7,7 @@ from parla.cuda import gpu
 from parla.tasks import *
 
 import logging
-logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 """
@@ -17,9 +17,9 @@ We will make it run soon-ish. Both library changes and code changes here will be
 
 loc = {
     (0, 0): gpu(0),
-    (0, 1): gpu(1),
-    (1, 0): gpu(2),
-    (1, 1): gpu(3),
+    (0, 1): gpu(0),
+    (1, 0): gpu(0),
+    (1, 1): gpu(0),
     }
 # Eventually: loc = infer_placements()
 # Or even better: loc = abstract_cartesian(n, n)
@@ -67,7 +67,7 @@ def fox(y, A, x):
             for j in range(partitions_x)]
           for i in range(partitions_y)]
 
-    xp = [[mem(i, j).np.empty(x[partition_slice(i, partitions_x)].shape)
+    xp = [[mem(i, j).np.empty(x[partition_slice(j, partitions_x)].shape)
               for j in range(partitions_x)]
           for i in range(partitions_y)]
 
@@ -84,17 +84,18 @@ def fox(y, A, x):
         for i in range(0, partitions_y): # rows
             @spawn(B[i, j], placement=loc[(i, j)])
             def b():
-                xp[i][j] = mem(i, j)(x[partition_slice(i, partitions_x)])
+                xp[i][j][:] = mem(i, j)(x[partition_slice(j, partitions_x)])
 
     # block-wise multiplication
     for i in range(0, partitions_y):  # rows
         for j in range(0, partitions_x): # columns
             @spawn(M[i, j], [B[i, j]], placement=loc[(i, j)])
             def m():
-                yp[i][j] = Ap[i][j] @ xp[i][j]
+                # TODO: Does cupy support the out parameter for matmul?
+                yp[i][j][:] = Ap[i][j] @ xp[i][j]
 
     # reduce along rows
-    for i in range(0, partitions_x): # rows
+    for i in range(0, partitions_y): # rows
         @spawn(R[i], [M[i, 0:partitions_x]], placement=loc[(i, i)])
         def r():
             acc = yp[i][i]
@@ -104,7 +105,7 @@ def fox(y, A, x):
                     continue
                 t = mem(i, i)(yp[i][j])
                 # logger.info("%r, %r", t.device, yp[i][j].device)
-                acc = acc + t
+                acc[:] = acc + t
             y[partition_slice(i, partitions_x)] = cpu(0).memory()(acc)
 
     # join the reduce tasks
@@ -113,12 +114,40 @@ def fox(y, A, x):
         pass
     return done # Return the join task
 
+def print_actual(A, x):
+    assert A.ndim == 2
+    assert x.ndim == 1
+    assert A.shape[0] == A.shape[1] == x.shape[0]
+    y = np.zeros_like(x)
+    dim_size = x.shape[0]
+    block_size_x = dim_size // partitions_x
+    block_size_y = dim_size // partitions_y
+    contributions = []
+    for i in range(partitions_y):
+        contributions.append([])
+        for j in range(partitions_x):
+            actual_contribution = A[i*block_size_y:(i+1)*block_size_y,j*block_size_x:(j+1)*block_size_x] @ x[j*block_size_x:(j+1)*block_size_x]
+            print("actual ({}, {}) A input block".format(i, j))
+            print(A[i*block_size_y:(i+1)*block_size_y,j*block_size_x:(j+1)*block_size_x])
+            print("actual ({}, {}) x input block".format(i, j))
+            print(x[j*block_size_x:(j+1)*block_size_x])
+            print("actual ({}, {}) output block:".format(i, j))
+            print(actual_contribution)
+            contributions[-1].append(actual_contribution)
+    for i in range(partitions_y):
+        y_slice = y[i*block_size_y:(i+1)*block_size_y]
+        for j in range(partitions_x):
+            y_slice += contributions[i][j]
+        print("actual contribution {}:".format(i))
+        print(y_slice)
+    assert np.allclose(A @ x, y)
 
 @spawn(placement=cpu(0))
 def test_fox():
     size_factor = 2*partitions_x
     A = np.random.rand(size_factor, size_factor)
     x = np.random.rand(size_factor)
+    #print_actual(A, x)
     res = A @ x
     print("=============", A.shape)
     print(res)
@@ -132,6 +161,7 @@ def test_fox():
     @spawn(None, [T], placement=cpu(0))
     def check():
         print("===========", A.shape)
+        print(res)
         print(out)
         print(A1)
         print(x)
