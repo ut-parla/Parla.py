@@ -91,7 +91,7 @@ def fox(y, A, x):
         for j in range(0, partitions_x): # columns
             @spawn(M[i, j], [B[i, j]], placement=loc[(i, j)])
             def m():
-                # TODO: Does cupy support the out parameter for matmul?
+                # TODO: Once cupy supports the out parameter for matmul, use that here instead.
                 yp[i][j][:] = Ap[i][j] @ xp[i][j]
 
     # reduce along rows
