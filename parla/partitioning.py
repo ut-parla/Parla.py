@@ -1,3 +1,21 @@
+"""
+This module implements graph/sparse matrix partitioning inspired by Gluon.
+The goal of this module is to allow simple algorithms to be written against the current sequential implementation,
+and eventually scale (without changes) to parallel or even distributed partitioning.
+As such, many functions guarantee much less than they currently provide
+(e.g., `~PartitioningAlgorithm.get_edge_master` is only guaranteed to see it's source and destination in `~PartitioningAlgorithm.vertex_masters` even though the initial sequential implementation will actually provide all masters.)
+
+The partitioner uses two functions getVertexMaster and getEdgeMaster similar to those used by Gluon, but also provides access to vertex attributes like position.
+The `~PartitioningAlgorithm.get_vertex_master` function selects the master based on vertex attributes or more typical graph properties.
+The `~PartitioningAlgorithm.get_edge_master` function selects the master based on edge properties and the masters selected for the endpoints.
+
+The partitioner also takes a `~PartitioningAlgorithm.neighborhood_size` parameter which specifies how far away from each vertex proxies are needed.
+Edge proxies are included for all edges between vertices present on each node (either as master or as a proxy).
+
+This module will work just like normal Gluon if neighborhood size is 1.
+For vertex position based partitioning, we can just assign the node masters based on position and set an appropriate neighborhood.
+For your sweeps algorithm, set neighborhood size to 2 and assign masters as needed.
+"""
 from abc import abstractmethod, ABCMeta, abstractproperty
 from collections import namedtuple
 from typing import Sequence, Set
@@ -111,7 +129,7 @@ class PartitioningAlgorithm(metaclass=ABCMeta):
     def get_edge_master(self, src_id: VertexID, dst_id: VertexID) -> PartitionID:
         """
         Compute the master partition ID for the specified edge.
-        This function may use `vertex_masters`, but the only elements guarenteed to be present are `src_id` and `dst_id`.
+        This function may use `vertex_masters`, but the only elements guaranteed to be present are `src_id` and `dst_id`.
         This function may use `graph_properties` freely.
 
         :param src_id: The global ID of the source vertex
