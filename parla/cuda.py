@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import cupy
-except ImportError as e:
+except (ImportError, AttributeError):
     import inspect
     # Ignore the exception if the stack includes the doc generator
     if all("sphinx" not in f.filename for f in inspect.getouterframes(inspect.currentframe())):

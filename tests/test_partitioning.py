@@ -7,11 +7,15 @@ from parla.partitioning import *
 
 def test_trivial_partitioning():
     class ContiguousSource(PartitioningAlgorithm):
+        @property
+        def neighborhood_size(self) -> int:
+            return 1
+
         def get_vertex_master(self, vertex_id: VertexID) -> PartitionID:
             block_size = ceil(self.graph_properties.n_vertices / self.n_partitions)
             return int(floor(vertex_id / block_size))
 
-        def get_edge_owner(self, src_id: VertexID, dst_id: VertexID) -> PartitionID:
+        def get_edge_master(self, src_id: VertexID, dst_id: VertexID) -> PartitionID:
             return self.vertex_masters[src_id]
 
         @property

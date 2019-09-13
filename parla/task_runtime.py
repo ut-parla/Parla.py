@@ -27,7 +27,7 @@ try:
             device_id += 1
             devices.append(device_id)
         return devices
-except ImportError:
+except (ImportError, AttributeError): # AttributeError is here to work around a bug in cupy
     def get_devices():
         return [0]
 
