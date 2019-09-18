@@ -192,6 +192,7 @@ class Task:
         self.remaining_dependencies = len(dependencies)
         self.dependees = []
         self.completed = False
+        self.result = None
         self.queue_identifier = queue_identifier
         self.mutex = threading.Lock()
         with self.mutex:
@@ -208,13 +209,16 @@ class Task:
 
     def run(self):
         logger.debug("Running on %r (should be queue %r): %r", get_thread_id(), self.queue_identifier, self)
-        self.func(*self.inputs)
+        self.func(self, *self.inputs)
         with self.mutex:
             self.completed = True
             for dependee in self.dependees:
                 dependee.remaining_dependencies -= 1
                 if not dependee.remaining_dependencies:
                     dependee.enqueue()
+
+    def __await__(self):
+        yield (None, [self], self)
 
     def __repr__(self):
         return "{func}{inputs}<{remaining_dependencies}, {completed}, queue_id={queue_identifier}>".format(**self.__dict__)

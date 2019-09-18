@@ -12,8 +12,8 @@ Parla supports simple task parallelism.
 import ctypes
 import logging
 import threading
-from collections import Sized
-from collections.abc import Iterable
+import inspect
+from typing import Awaitable, Collection, Iterable
 
 from parla import device
 from parla.device import Device
@@ -21,7 +21,6 @@ from parla.device import Device
 try:
     from parla import task_runtime
 except ImportError as e:
-    import inspect
     # Ignore the exception if the stack includes the doc generator
     if all("sphinx" not in f.filename for f in inspect.getouterframes(inspect.currentframe())):
         raise
@@ -29,7 +28,7 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaskID", "TaskSpace", "spawn", "get_current_device"
+    "TaskID", "TaskSpace", "spawn", "get_current_device", "tasks"
 ]
 
 
@@ -74,7 +73,40 @@ class TaskID:
         return self._name
 
     def __str__(self):
-        return "TaskID({}{}, task={})".format(self.name, self.id, self._task)
+        return "TaskID({}, {}, task={})".format(self.name, self.id, self._task)
+
+    def __await__(self):
+        yield (None, [self], self)
+
+
+class tasks(Awaitable, Collection):
+    """
+    An ad-hoc collection of tasks.
+    An instance is basically a reified dependency list as would be passed to `spawn`.
+    This object is awaitable and will block until all tasks are complete.
+
+    >>> await tasks(T1, T2)
+    >>> @spawn(None, tasks(T1, T2)) # Same as @spawn(None, [T1, T2])
+    >>> def f():
+    >>>     pass
+    """
+    __slots__ = ("args",)
+
+    def __init__(self, *args):
+        self.args = args
+
+    def __await__(self):
+        yield (None, self.args, None)
+
+    def __len__(self) -> int:
+        return len(self.args)
+
+    def __iter__(self):
+        return iter(self.args)
+
+    def __contains__(self, x) -> bool:
+        return x in self.args
+
 
 
 class TaskSpace:
@@ -160,24 +192,48 @@ class _TaskData:
 _task_locals = _TaskLocals()
 
 # _task_callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.py_object)
-
-
 # @_task_callback_type
-def _task_callback(data):
+
+def _task_callback(task, data):
     """
     A function which forwards to a python function in the appropriate device context.
     """
-    logger.debug("Starting: %s", data.taskid)
     try:
         with get_current_device().context():
-            data.body()
+            body = data.body
+            if inspect.iscoroutinefunction(body):
+                logger.debug("Constructing coroutine task: %s", data.taskid)
+                body = body()
+
+            if inspect.iscoroutine(body):
+                try:
+                    in_value_task = getattr(task, "value_task", None)
+                    logger.debug("Executing coroutine task: %s with input from %r", data.taskid, in_value_task)
+                    new_task_info = body.send(in_value_task and in_value_task.result)
+                    task.value_task = None
+                    if not isinstance(new_task_info, tuple) or len(new_task_info) != 3:
+                        raise TypeError("Parla coroutine tasks must yield a 3-tuple: (taskid, dependencies, value_task)")
+                    taskid, dependencies, value_task = new_task_info
+                    logger.debug("Spawning coroutine continuation: %s, %s, %s", taskid, dependencies, value_task)
+                    # Spawn the continuation as a new task
+                    t = spawn(taskid, dependencies, placement=get_current_device())(body)
+                    if value_task:
+                        t.value_task = value_task
+                except StopIteration as e:
+                    if e.args:
+                        (result,) = e.args
+                        task.result = result
+            else:
+                logger.debug("Executing function task: %s", data.taskid)
+                result = body()
+                task.result = result
     except:
         print("exiting because of unhandled exception.")
         print("Traceback was:")
         import traceback
         print(traceback.format_exc())
         import sys
-        sys.exit()
+        sys.exit(63)
     finally:
         logger.debug("Finished: %s", data.taskid)
     return 0
@@ -220,12 +276,13 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
 
     :see: :ref:`Blocked Cholesky` Example
 
-    .. todo:: Provide `placement` to parla_task and implement it in the runtime
-
     """
 
     def decorator(body):
         nonlocal taskid
+
+        if inspect.isgeneratorfunction(body):
+            raise TypeError("Spawned tasks must be normal functions or coroutines; not generators.")
 
         # Compute the flat dependency set (including unwrapping TaskID objects)
         deps = []
@@ -235,25 +292,31 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
             for d in ds:
                 if hasattr(d, "task"):
                     d = d.task
-                assert isinstance(d, task_runtime.Task)
+                if not isinstance(d, task_runtime.Task):
+                    raise TypeError("Dependencies must be TaskIDs or Tasks: " + str(d))
                 deps.append(d)
 
-        # Perform a horrifying hack to build a new function which will
-        # not be able to observe changes in the original cells in the
-        # tasks outer scope. To do this we build a new function with a
-        # replaced closure which contains new cells.
-        separated_body = type(body)(
-            body.__code__, body.__globals__, body.__name__, body.__defaults__,
-            closure=body.__closure__ and tuple(_make_cell(x.cell_contents) for x in body.__closure__))
-        separated_body.__annotations__ = body.__annotations__
-        separated_body.__doc__ = body.__doc__
-        separated_body.__kwdefaults__ = body.__kwdefaults__
-        separated_body.__module__ = body.__module__
+        if inspect.iscoroutine(body):
+            # An already running coroutine does not need changes since we assume
+            # it was changed correctly when the original function was spawned.
+            separated_body = body
+        else:
+            # Perform a horrifying hack to build a new function which will
+            # not be able to observe changes in the original cells in the
+            # tasks outer scope. To do this we build a new function with a
+            # replaced closure which contains new cells.
+            separated_body = type(body)(
+                body.__code__, body.__globals__, body.__name__, body.__defaults__,
+                closure=body.__closure__ and tuple(_make_cell(x.cell_contents) for x in body.__closure__))
+            separated_body.__annotations__ = body.__annotations__
+            separated_body.__doc__ = body.__doc__
+            separated_body.__kwdefaults__ = body.__kwdefaults__
+            separated_body.__module__ = body.__module__
 
         data = _TaskData(_task_locals, separated_body, dependencies)
 
         if not taskid:
-            taskid = TaskID("global", len(_task_locals.global_tasks))
+            taskid = TaskID("global_" + str(len(_task_locals.global_tasks)), len(_task_locals.global_tasks))
             _task_locals.global_tasks += [taskid]
         taskid.data = data
         taskid.dependencies = dependencies
