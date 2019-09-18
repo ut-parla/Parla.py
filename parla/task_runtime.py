@@ -218,7 +218,7 @@ class Task:
                     dependee.enqueue()
 
     def __await__(self):
-        yield (None, [self], self)
+        return (yield (None, [self], self))
 
     def __repr__(self):
         return "{func}{inputs}<{remaining_dependencies}, {completed}, queue_id={queue_identifier}>".format(**self.__dict__)

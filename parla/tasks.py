@@ -76,7 +76,7 @@ class TaskID:
         return "TaskID({}, {}, task={})".format(self.name, self.id, self._task)
 
     def __await__(self):
-        yield (None, [self], self)
+        return (yield (None, [self], self.task))
 
 
 class tasks(Awaitable, Collection):
@@ -208,8 +208,9 @@ def _task_callback(task, data):
             if inspect.iscoroutine(body):
                 try:
                     in_value_task = getattr(task, "value_task", None)
-                    logger.debug("Executing coroutine task: %s with input from %r", data.taskid, in_value_task)
-                    new_task_info = body.send(in_value_task and in_value_task.result)
+                    in_value = in_value_task and in_value_task.result
+                    logger.debug("Executing coroutine task: %s with input %s from %r", data.taskid, in_value_task, in_value)
+                    new_task_info = body.send(in_value)
                     task.value_task = None
                     if not isinstance(new_task_info, tuple) or len(new_task_info) != 3:
                         raise TypeError("Parla coroutine tasks must yield a 3-tuple: (taskid, dependencies, value_task)")
@@ -218,6 +219,7 @@ def _task_callback(task, data):
                     # Spawn the continuation as a new task
                     t = spawn(taskid, dependencies, placement=get_current_device())(body)
                     if value_task:
+                        assert isinstance(value_task, task_runtime.Task)
                         t.value_task = value_task
                 except StopIteration as e:
                     if e.args:
