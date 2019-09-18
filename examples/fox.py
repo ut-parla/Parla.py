@@ -1,19 +1,18 @@
-from typing import List
-
 import numpy as np
 
 from parla.cpu import cpu
 from parla.cuda import gpu
 from parla.tasks import *
 
-import logging
-#logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+import parla
 
-"""
-This is not actually runnable. Think of it as very detailed pseudocode.
-We will make it run soon-ish. Both library changes and code changes here will be needed.
-"""
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+parla.tasks.logger.setLevel(logging.DEBUG)
+parla.cuda.logger.setLevel(logging.DEBUG)
+parla.cpu.logger.setLevel(logging.DEBUG)
 
 loc = {
     (0, 0): gpu(0),
@@ -39,17 +38,40 @@ partitions_y = partitions_x
 #  Fox's Algorithm: Collective regular communication (broadcast and reduce)
 #  Cholesky: Less regular data movement and task placement, more complex dependencies.
 
+def partition_slice(i, p, n):
+    return slice(i * (n // p), (i + 1) * (n // p))
 
-def fox(y, A, x):
+def matvec_fox(y, A, x):
     """y = Ax
 
     Uses foxes algorithm with internal partitioning.
     """
 
-    B = TaskSpace()
-    M = TaskSpace()
-    R = TaskSpace()
+    n, yp, Ap, xp = partition_fox(y, A, x)
 
+    done = matvec_fox_partitioned(n, yp, Ap, xp)
+
+    return collect_fox(n, yp, y, done)
+
+
+def collect_fox(n, yp, y, done_task):
+    C = TaskSpace()
+
+    # reduce along rows
+    for i in range(0, partitions_y):  # rows
+        @spawn(C[i], [done_task], placement=cpu(0))
+        def c():
+            y[partition_slice(i, partitions_x, n)] = cpu(0).memory()(yp[i][i])
+
+    # join the collect tasks
+    @spawn(None, [C[0:partitions_y]], placement=cpu(0))
+    def done():
+        pass
+
+    return done  # Return the join task
+
+
+def partition_fox(y, A, x):
     # n is the size of the arrays
     n = y.shape[-1]
 
@@ -58,33 +80,36 @@ def fox(y, A, x):
     assert x.shape == (n,)
     assert A.shape == (n, n)
 
-    def partition_slice(i, p):
-        return slice(i*(n//p),(i+1)*(n//p))
-
     # FIXME: Assumes that partitions_x exactly subdivides n.
+    assert n / partitions_x == n // partitions_x
     # partition A into Ap (partitions_x, partitions_y)
-    Ap = [[mem(i, j)(A[partition_slice(i, partitions_x), partition_slice(j, partitions_y)])
-            for j in range(partitions_x)]
+    Ap = [[mem(i, j)(A[partition_slice(i, partitions_x, n), partition_slice(j, partitions_y, n)])
+           for j in range(partitions_x)]
           for i in range(partitions_y)]
-
-    xp = [[mem(i, j).np.empty(x[partition_slice(j, partitions_x)].shape)
-              for j in range(partitions_x)]
+    xp = [[mem(i, j)(x[partition_slice(j, partitions_x, n)]) if i == j else mem(i, j).np.empty(x[partition_slice(i, partitions_x, n)].shape)
+           for j in range(partitions_x)]
           for i in range(partitions_y)]
-
-    yp = [[mem(i, j).np.empty(x[partition_slice(i, partitions_x)].shape)
-              for j in range(partitions_x)]
+    yp = [[mem(i, j).np.empty(y[partition_slice(i, partitions_x, n)].shape)
+           for j in range(partitions_x)]
           for i in range(partitions_y)]
-
     logger.debug("Ap (placement) %r", [[v.device for v in r] for r in Ap])
     logger.debug("xp (placement) %r", [[v.device for v in r] for r in xp])
     logger.debug("yp (placement) %r", [[v.device for v in r] for r in yp])
+
+    return n, yp, Ap, xp
+
+
+def matvec_fox_partitioned(n, yp, Ap, xp):
+    B = TaskSpace()
+    M = TaskSpace()
+    R = TaskSpace()
 
     # broadcast along columns
     for j in range(0, partitions_x): # columns
         for i in range(0, partitions_y): # rows
             @spawn(B[i, j], placement=loc[(i, j)])
             def b():
-                xp[i][j][:] = mem(i, j)(x[partition_slice(j, partitions_x)])
+                xp[i][j][:] = mem(i, j)(xp[j][j])
 
     # block-wise multiplication
     for i in range(0, partitions_y):  # rows
@@ -100,19 +125,18 @@ def fox(y, A, x):
         def r():
             acc = yp[i][i]
             # logger.info("acc = %r (at %r)", acc.device, get_current_device())
-            for j in range(0, partitions_y): # columns
+            for j in range(0, partitions_x): # columns
                 if i == j:
                     continue
                 t = mem(i, i)(yp[i][j])
                 # logger.info("%r, %r", t.device, yp[i][j].device)
                 acc[:] = acc + t
-            y[partition_slice(i, partitions_x)] = cpu(0).memory()(acc)
 
     # join the reduce tasks
-    @spawn(None, [R[0:partitions_x]], placement=cpu(0))
+    @spawn(None, [R[0:partitions_y]], placement=cpu(0))
     def done():
         pass
-    return done # Return the join task
+    return done  # Return the join task
 
 def print_actual(A, x):
     assert A.ndim == 2
@@ -142,28 +166,24 @@ def print_actual(A, x):
         print(y_slice)
     assert np.allclose(A @ x, y)
 
-@spawn(placement=cpu(0))
-def test_fox():
-    size_factor = 2*partitions_x
-    A = np.random.rand(size_factor, size_factor)
-    x = np.random.rand(size_factor)
-    #print_actual(A, x)
-    res = A @ x
-    print("=============", A.shape)
-    print(res)
-    print(A)
-    print(x)
-    A1 = A.copy()
-    # print(a1)
-    # time.sleep(2)
-    out = np.empty_like(res)
-    T = fox(out, A, x)
-    @spawn(None, [T], placement=cpu(0))
-    def check():
-        print("===========", A.shape)
-        print(res)
-        print(out)
-        print(A1)
-        print(x)
+
+if __name__ == '__main__':
+    @spawn(placement=cpu(0))
+    async def test_fox():
+        size_factor = 4*partitions_x
+        A = np.random.rand(size_factor, size_factor)
+        x = np.random.rand(size_factor)
+        # print_actual(A, x)
+        res = A @ (A @ x)
+        print("----", A.shape)
+        out = np.empty_like(x)
+        n, yp, Ap, xp = partition_fox(out, A, x)
+        T1 = matvec_fox_partitioned(n, yp, Ap, xp)
+        await T1
+        done = matvec_fox_partitioned(n, xp, Ap, yp)
+        T = collect_fox(n, xp, out, done)
+        await T
+        print("++++", A.shape)
+        print(np.linalg.norm(res - out, ord=np.inf))
         assert np.allclose(res, out), "Parallel fox failed"
         print("Done")
