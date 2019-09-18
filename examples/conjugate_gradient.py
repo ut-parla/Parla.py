@@ -47,14 +47,24 @@ def discrete_laplacian(n):
     assert current_index == num_edges
     return ss.csc_matrix((data, indices, indptr), shape=(n, n))
 
-# Note: Overwrites the initial guess with the solution.
 def cg(A, x_initial, b, tol=1E-8, maxiters=100):
+    """
+    Solve A @ x = b for x.
+
+    :param A: A CSC matrix.
+    :param x_initial: The initial guess of x. Overwritten with the result.
+    :param b: A vector.
+    :param tol: The tolerance for convergence detection.
+    :param maxiters: The maximum number of iterations.
+    :return: a pair of the final x and the error vector r.
+    """
     x = x_initial
     r = b - A * x
     p = r.copy()
     r_norm2 = np.inner(r, r)
     for j in range(maxiters):
         Ap = A * p
+
         alpha = r_norm2 / np.inner(Ap, p)
         x += alpha * p
         r -= alpha * Ap
@@ -63,7 +73,6 @@ def cg(A, x_initial, b, tol=1E-8, maxiters=100):
         print(err)
         if err < tol:
             return x, r
-        z = r.copy()
         r_norm2_new = np.inner(r, r)
         p = r + (r_norm2_new / r_norm2) * p
         r_norm2 = r_norm2_new
@@ -75,7 +84,7 @@ def test_cg():
     b = np.ones(n)
     x = np.ones(n)
     x, residual = cg(A, x, b)
-    print(b - A * x)
+    # print(b - A * x)
     assert(np.linalg.norm(residual, ord=np.inf) < 1E-8)
 
 if __name__ == '__main__':
