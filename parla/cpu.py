@@ -1,7 +1,11 @@
+import logging
+
 import numpy
 
 from . import array
 from .device import Memory, Device, MemoryKind, Architecture, _register_archecture
+
+logger = logging.getLogger(__name__)
 
 
 class _CPUMemory(Memory):
@@ -10,6 +14,8 @@ class _CPUMemory(Memory):
         return numpy
 
     def __call__(self, target):
+        if getattr(target, "device", None) is not None:
+            logger.debug("Moving data: %r => CPU", getattr(target, "device", None))
         return array.asnumpy(target)
 
 
