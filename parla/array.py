@@ -2,7 +2,7 @@ import numpy as np
 
 try:
     import cupy
-except ImportError:
+except (ImportError, AttributeError):
     cupy = None
 
 __all__ = ["get_array_module"]
