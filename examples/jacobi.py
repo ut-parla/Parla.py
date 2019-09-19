@@ -6,6 +6,7 @@ import parla as pl
 from parla.function_decorators import specialized
 from parla.cuda import gpu
 from parla.cpu import cpu
+from parla.partitioning import partition1d, partition1d_tensor
 from parla.tasks import spawn, TaskSpace
 
 @specialized
@@ -46,10 +47,11 @@ def location(i):
     return cpu(0) if i < split else gpu(0)
 
 locations = [location(i) for i in range(divisions)]
-a0_row_groups = [locations[i].memory()(a0[max(0, i * rows_per_division - 1):min(n, (i+1) * rows_per_division + 1)])
-                 for i in range(divisions)]
-a1_row_groups = [locations[i].memory()(a1[max(0, i * rows_per_division - 1):min(n, (i+1) * rows_per_division + 1)])
-                 for i in range(divisions)]
+
+a0_row_groups = partition1d_tensor(divisions, a0, overlap=1,
+                                   memory=lambda i: locations[i].memory())
+a1_row_groups = partition1d_tensor(divisions, a1, overlap=1,
+                                   memory=lambda i: locations[i].memory())
 
 @spawn(placement=cpu(0))
 def run_jacobi():

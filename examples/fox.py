@@ -2,6 +2,7 @@ import numpy as np
 
 from parla.cpu import cpu
 from parla.cuda import gpu
+from parla.partitioning import partition2d, partition_slice, partition2d_tensor
 from parla.tasks import *
 
 import parla
@@ -16,9 +17,9 @@ parla.cpu.logger.setLevel(logging.DEBUG)
 
 loc = {
     (0, 0): gpu(0),
-    (0, 1): gpu(0),
-    (1, 0): gpu(0),
-    (1, 1): gpu(0),
+    (0, 1): gpu(1),
+    (1, 0): gpu(2),
+    (1, 1): gpu(3),
     }
 # Eventually: loc = infer_placements()
 # Or even better: loc = abstract_cartesian(n, n)
@@ -37,9 +38,6 @@ partitions_y = partitions_x
 # Examples:
 #  Fox's Algorithm: Collective regular communication (broadcast and reduce)
 #  Cholesky: Less regular data movement and task placement, more complex dependencies.
-
-def partition_slice(i, p, n):
-    return slice(i * (n // p), (i + 1) * (n // p))
 
 def matvec_fox(y, A, x):
     """y = Ax
@@ -61,7 +59,7 @@ def collect_fox(n, yp, y, done_task):
     for i in range(0, partitions_y):  # rows
         @spawn(C[i], [done_task], placement=cpu(0))
         def c():
-            y[partition_slice(i, partitions_x, n)] = cpu(0).memory()(yp[i][i])
+            y[partition_slice(i, n, partitions_x)] = cpu(0).memory()(yp[i][i])
 
     # join the collect tasks
     @spawn(None, [C[0:partitions_y]], placement=cpu(0))
@@ -82,14 +80,16 @@ def partition_fox(y, A, x):
 
     # FIXME: Assumes that partitions_x exactly subdivides n.
     assert n / partitions_x == n // partitions_x
+
     # partition A into Ap (partitions_x, partitions_y)
-    Ap = [[mem(i, j)(A[partition_slice(i, partitions_x, n), partition_slice(j, partitions_y, n)])
+    Ap = partition2d_tensor(partitions_x, partitions_y, A, mem)
+    # Ap = [[mem(i, j)(A[partition_slice(i, n, partitions_x), partition_slice(j, n, partitions_y)])
+    #        for j in range(partitions_x)]
+    #       for i in range(partitions_y)]
+    xp = [[mem(i, j)(x[partition_slice(j, n, partitions_x)]) if i == j else mem(i, j).np.empty(x[partition_slice(i, n, partitions_x)].shape)
            for j in range(partitions_x)]
           for i in range(partitions_y)]
-    xp = [[mem(i, j)(x[partition_slice(j, partitions_x, n)]) if i == j else mem(i, j).np.empty(x[partition_slice(i, partitions_x, n)].shape)
-           for j in range(partitions_x)]
-          for i in range(partitions_y)]
-    yp = [[mem(i, j).np.empty(y[partition_slice(i, partitions_x, n)].shape)
+    yp = [[mem(i, j).np.empty(y[partition_slice(i, n, partitions_x)].shape)
            for j in range(partitions_x)]
           for i in range(partitions_y)]
     logger.debug("Ap (placement) %r", [[v.device for v in r] for r in Ap])
@@ -178,11 +178,9 @@ if __name__ == '__main__':
         print("----", A.shape)
         out = np.empty_like(x)
         n, yp, Ap, xp = partition_fox(out, A, x)
-        T1 = matvec_fox_partitioned(n, yp, Ap, xp)
-        await T1
+        await matvec_fox_partitioned(n, yp, Ap, xp)
         done = matvec_fox_partitioned(n, xp, Ap, yp)
-        T = collect_fox(n, xp, out, done)
-        await T
+        await collect_fox(n, xp, out, done)
         print("++++", A.shape)
         print(np.linalg.norm(res - out, ord=np.inf))
         assert np.allclose(res, out), "Parallel fox failed"
