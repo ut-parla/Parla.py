@@ -49,15 +49,18 @@ def discrete_laplacian(n):
 
 def cg(A, x_initial, b, tol=1E-8, maxiters=100):
     """
-    Solve A @ x = b for x.
+    Solve A @ x = b for x (where A is symmetric and positive definite).
 
-    :param A: A CSC matrix.
+    :param A: A symmetric positive definite CSC or CSR matrix.
     :param x_initial: The initial guess of x. Overwritten with the result.
     :param b: A vector.
     :param tol: The tolerance for convergence detection.
     :param maxiters: The maximum number of iterations.
     :return: a pair of the final x and the error vector r.
     """
+    # The code here is written in terms of a CSC matrix, however,
+    # since the input matrix must be symmetric, everything will
+    # still work if the input matrix is in CSR format instead.
     x = x_initial
     r = b - A * x
     p = r.copy()
