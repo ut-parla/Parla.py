@@ -1,9 +1,24 @@
 from time import sleep
 
 import numpy as np
+from pytest import skip
 
 from parla.cpu import cpu
 from parla.tasks import *
+
+
+def repetitions():
+    """Return an iterable of the repetitions to perform for probabilistic/racy tests."""
+    return range(10)
+
+
+def sleep_until(predicate):
+    """Sleep until either `predicate()` is true or 2 seconds have passed."""
+    for _ in range(10):
+        if predicate():
+            break
+        sleep(0.2)
+    assert predicate()
 
 
 def test_spawn():
@@ -263,10 +278,38 @@ def test_fox_twice():
     assert done_flag
 
 
-def sleep_until(predicate):
-    for _ in range(10):
-        if predicate():
-            break
-        sleep(0.2)
-    assert predicate()
+def test_placement():
+    try:
+        from parla.cuda import gpu
+    except (ImportError, AttributeError):
+        skip("CUDA required for this test.")
+
+    for rep in repetitions():
+        task_results = []
+        for i in range(4):
+            @spawn(placement=gpu(i))
+            async def task():
+                task_results.append(get_current_device())
+            sleep_until(lambda: len(task_results) == i+1)
+
+        assert task_results == [gpu(0), gpu(1), gpu(2), gpu(3)]
+
+
+def test_placement_await():
+    try:
+        from parla.cuda import gpu
+    except (ImportError, AttributeError):
+        skip("CUDA required for this test.")
+
+    for rep in repetitions():
+        task_results = []
+        for i in range(4):
+            @spawn(placement=gpu(i))
+            async def task():
+                task_results.append(get_current_device())
+                await tasks() # Await nothing to force a new task.
+                task_results.append(get_current_device())
+            sleep_until(lambda: len(task_results) == (i+1)*2)
+
+        assert task_results == [gpu(0), gpu(0), gpu(1), gpu(1), gpu(2), gpu(2), gpu(3), gpu(3)]
 

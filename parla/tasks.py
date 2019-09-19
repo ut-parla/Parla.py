@@ -216,7 +216,7 @@ def _task_callback(task, data):
                         raise TypeError("Parla coroutine tasks must yield a 3-tuple: (taskid, dependencies, value_task)")
                     taskid, dependencies, value_task = new_task_info
                     logger.debug("Spawning coroutine continuation: %s, %s, %s", taskid, dependencies, value_task)
-                    # Spawn the continuation as a new task
+                    # Spawn the continuation as a new task and force it to be on the same device (not just in the originally selected set).
                     t = spawn(taskid, dependencies, placement=get_current_device())(body)
                     if value_task:
                         assert isinstance(value_task, task_runtime.Task)
@@ -340,7 +340,7 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
     return decorator
 
 
-def get_current_device():
+def get_current_device() -> Device:
     index = task_runtime.get_device_id()
     type = task_runtime.get_device_type(index)
     if type == "cpu":

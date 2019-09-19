@@ -11,6 +11,7 @@ __all__ = []
 
 try:
     import cupy
+    import parla.cuda # Import parla.cuda to force registration of the GPU devices
 
     def get_devices():
         # Hack to get around the fact that cupy doesn't expose
