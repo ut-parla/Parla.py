@@ -125,6 +125,22 @@ def test_spawn_await_multi_id():
     assert task_results == [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3]
 
 
+def test_finish():
+    task_results = []
+    @spawn()
+    async def task():
+        task_results.append(1)
+        async with finish():
+            for i in range(10):
+                @spawn()
+                def subtask():
+                    task_results.append(2)
+        task_results.append(3)
+
+    sleep_until(lambda: len(task_results) == 12)
+    assert task_results == [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3]
+
+
 def test_dependencies():
     task_results = []
     @spawn()
