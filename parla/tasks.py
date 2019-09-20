@@ -13,6 +13,7 @@ import ctypes
 import logging
 import threading
 import inspect
+from contextlib import contextmanager, asynccontextmanager
 from typing import Awaitable, Collection, Iterable
 
 from parla import device
@@ -28,7 +29,7 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaskID", "TaskSpace", "spawn", "get_current_device", "tasks"
+    "TaskID", "TaskSpace", "spawn", "get_current_device", "tasks", "finish"
 ]
 
 
@@ -162,6 +163,10 @@ class TaskSpace:
 
 
 class _TaskLocals(threading.local):
+    def __init__(self):
+        super(_TaskLocals, self).__init__()
+        self.task_scopes = []
+
     @property
     def ctx(self):
         return getattr(self, "_ctx", None)
@@ -334,10 +339,19 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
 
         logger.debug("Created: %s <%s, %s, %r>", taskid, placement, queue_index, body)
 
+        for scope in _task_locals.task_scopes:
+            scope.append(task)
+
         # Return the task object
         return task
 
     return decorator
+
+
+# def spawnf(*args, **kws):
+#     def spawnf_do(f):
+#         return spawn(*args, **kws)(f)
+#     return spawnf_do
 
 
 def get_current_device() -> Device:
@@ -355,14 +369,22 @@ def get_current_device() -> Device:
     d.index = index
     return d
 
-# @contextmanager
-# def finish():
-#     """
-#     Execute the body of the `with` normally and then perform a barrier applying to all tasks created.
-#     This block has the similar semantics to the ``sync`` in Cilk.
 
-#     >>> with finish():
-#     ...     code
+@asynccontextmanager
+async def finish():
+    """
+    Execute the body of the `with` normally and then perform a barrier applying to all tasks created.
+    This block has the similar semantics to the ``sync`` in Cilk.
 
-#     """
-#     yield
+    >>> async with finish():
+    ...     code
+
+    """
+    my_tasks = []
+    _task_locals.task_scopes.append(my_tasks)
+    try:
+        yield
+    finally:
+        removed_tasks = _task_locals.task_scopes.pop()
+        assert removed_tasks is my_tasks
+        await tasks(my_tasks)
