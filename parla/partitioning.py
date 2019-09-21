@@ -19,22 +19,15 @@ For your sweeps algorithm, set neighborhood size to 2 and assign masters as need
 from abc import abstractmethod, ABCMeta, abstractproperty
 from collections import namedtuple
 from typing import Sequence, Set
-from typing import Callable, Any, List
 
 import numpy as np
 import scipy.sparse
-
-from parla.device import Memory
 
 __all__ = [
     "VertexID",
     "PartitionID",
     "GraphProperties",
-    "PartitioningAlgorithm",
-    "partition1d",
-    "partition2d",
-    "partition1d_tensor",
-    "partition2d_tensor"
+    "PartitioningAlgorithm"
 ]
 
 VertexID = int
@@ -212,32 +205,3 @@ class PartitioningAlgorithm(metaclass=ABCMeta):
                 zip(partition_edges, partition_global_ids)]
 
 
-def partition_slice(i, n, partitions, overlap=0):
-    partition_size = n // partitions
-    return slice(max(0, i * partition_size - overlap), min(n, (i + 1) * partition_size + overlap))
-
-
-def partition1d(partitions: int, data: Callable[[int], Any], memory: Callable[[int], Memory]) -> List[Any]:
-    return [memory(i)(data(i)) for i in range(partitions)]
-
-
-def partition1d_tensor(partitions: int, data: np.ndarray, memory: Callable[[int], Memory],
-                       overlap: int = 0) -> List[Any]:
-    (n, *rest) = data.shape
-    return partition1d(partitions,
-                       lambda i: data[partition_slice(i, n, partitions, overlap), ...],
-                       memory)
-
-
-def partition2d(partitions_x: int, partitions_y: int, data: Callable[[int, int], Any],
-                memory: Callable[[int, int], Memory]) -> List[List[Any]]:
-    return [[memory(i, j)(data(i, j)) for j in range(partitions_y)] for i in range(partitions_x)]
-
-
-def partition2d_tensor(partitions_x: int, partitions_y: int, data: np.ndarray, memory: Callable[[int, int], Memory],
-                       overlap_x: int = 0, overlap_y: int = 0) -> List[List[Any]]:
-    (n_x, n_y, *rest) = data.shape
-    return partition2d(partitions_x, partitions_y,
-                       lambda i, j: data[partition_slice(i, n_x, partitions_x, overlap_x),
-                                         partition_slice(j, n_y, partitions_y, overlap_y), ...],
-                       memory)

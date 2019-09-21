@@ -2,11 +2,10 @@ import numpy as np
 import numba as nb
 import cupy as cp
 from numba import cuda
-import parla as pl
 from parla.function_decorators import specialized
 from parla.cuda import gpu
 from parla.cpu import cpu
-from parla.partitioning import partition1d, partition1d_tensor
+from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace
 
 @specialized
@@ -29,62 +28,60 @@ def jacobi_gpu(a0, a1):
     # Relying on numba/cupy interop here.
     gpu_jacobi_kernel[blocks_per_grid, threads_per_block](a0, a1)
 
-n = 4000
-steps = 6
 
-a0 = np.random.rand(n, n)
-a1 = a0.copy()
+def main():
+    n = 4000
+    steps = 6
 
-actual = a0.copy()
-for i in range(steps):
-    actual[1:-1,1:-1] = .25 * (actual[2:,1:-1] + actual[:-2,1:-1] + actual[1:-1,2:] + actual[1:-1,:-2])
+    a0 = np.random.rand(n, n)
+    a1 = a0.copy()
 
-divisions = 40
-rows_per_division = (n + divisions - 1) // divisions
+    actual = a0.copy()
+    for i in range(steps):
+        actual[1:-1,1:-1] = .25 * (actual[2:,1:-1] + actual[:-2,1:-1] + actual[1:-1,2:] + actual[1:-1,:-2])
 
-split = divisions // 2
-def location(i):
-    return cpu(0) if i < split else gpu(0)
+    divisions = 40
 
-locations = [location(i) for i in range(divisions)]
+    mapper = LDeviceSequenceBlocked(divisions)
 
-a0_row_groups = partition1d_tensor(divisions, a0, overlap=1,
-                                   memory=lambda i: locations[i].memory())
-a1_row_groups = partition1d_tensor(divisions, a1, overlap=1,
-                                   memory=lambda i: locations[i].memory())
+    a0_row_groups = mapper.partition_tensor(a0, overlap=1)
+    a1_row_groups = mapper.partition_tensor(a1, overlap=1)
 
-@spawn(placement=cpu(0))
-def run_jacobi():
-    assert steps > 0
-    in_blocks = a0_row_groups
-    out_blocks = a1_row_groups
-    previous_block_tasks = TaskSpace("block_tasks[0]")
-    for j, (location, in_block, out_block) in enumerate(zip(locations, in_blocks, out_blocks)):
-        @spawn(previous_block_tasks[j], placement=location)
-        def device_local_jacobi_task():
-            jacobi(in_block, out_block)
-    for i in range(1, steps):
-        in_blocks, out_blocks = out_blocks, in_blocks
-        current_block_tasks = TaskSpace("block_tasks[{}]".format(i))
-        for j, (location, in_block, out_block) in enumerate(zip(locations, in_blocks, out_blocks)):
-            @spawn(current_block_tasks[j],
-                   [previous_block_tasks[max(0, j-1):min(divisions, j+2)]],
-                   placement=location)
+    @spawn(placement=cpu(0))
+    def run_jacobi():
+        assert steps > 0
+        in_blocks = a0_row_groups
+        out_blocks = a1_row_groups
+        previous_block_tasks = TaskSpace("block_tasks[0]")
+        for j, (location, in_block, out_block) in enumerate(zip(mapper.assignments.values(), in_blocks, out_blocks)):
+            @spawn(previous_block_tasks[j], placement=location)
             def device_local_jacobi_task():
-                # communication
-                if j > 0:
-                    in_block[0] = location.memory()(in_blocks[j-1][-2])
-                if j < divisions - 1:
-                    in_block[-1] = location.memory()(in_blocks[j+1][1])
-                # computation
                 jacobi(in_block, out_block)
-        previous_block_tasks = current_block_tasks
-    # Aggregate the results into original a1 buffer
-    @spawn(None, [previous_block_tasks[0:divisions]], placement = cpu(0))
-    def aggregate():
-        for j in range(divisions):
-            start_index = 1 if j > 0 else 0
-            end_index = -1 if j < divisions - 1 else rows_per_division + 1
-            a1[j * rows_per_division:(j+1) * rows_per_division] = cpu(0).memory()(out_blocks[j][start_index:end_index])
+        for i in range(1, steps):
+            in_blocks, out_blocks = out_blocks, in_blocks
+            current_block_tasks = TaskSpace("block_tasks[{}]".format(i))
+            for j, (location, in_block, out_block) in enumerate(zip(mapper.assignments.values(), in_blocks, out_blocks)):
+                @spawn(current_block_tasks[j],
+                       [previous_block_tasks[max(0, j-1):min(divisions, j+2)]],
+                       placement=location)
+                def device_local_jacobi_task():
+                    # communication
+                    if j > 0:
+                        in_block[0] = location.memory()(in_blocks[j - 1][-2])
+                    if j < divisions - 1:
+                        in_block[-1] = location.memory()(in_blocks[j + 1][1])
+                    # computation
+                    jacobi(in_block, out_block)
+            previous_block_tasks = current_block_tasks
+        # Aggregate the results into original a1 buffer
+        @spawn(None, [previous_block_tasks[0:divisions]], placement = cpu(0))
+        def aggregate():
+            for j in range(divisions):
+                start_index = 1 if j > 0 else 0
+                end_index = -1 if j < divisions - 1 else None # None includes the last element of the dimension
+                a1[mapper.slice(j, len(a1))] = cpu(0).memory()(out_blocks[j][start_index:end_index])
 
-assert np.max(np.absolute(a1 - actual)) < 1E-14
+    assert np.max(np.absolute(a1 - actual)) < 1E-14
+
+if __name__ == '__main__':
+    main()

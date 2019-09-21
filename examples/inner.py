@@ -1,9 +1,9 @@
 import numpy as np
-import cupy as cp
 from parla.cuda import gpu
 from parla.cpu import cpu
-from parla.partitioning import partition1d_tensor
+from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import *
+
 
 def main():
     a = np.random.rand(10000000)
@@ -12,14 +12,15 @@ def main():
     divisions = 100
 
     # Map the divisions onto actual hardware locations
-    def location(i):
-        return cpu(0) if i < divisions // 2 else gpu(0)
+    mapper = LDeviceSequenceBlocked(divisions)
+    print(mapper)
 
-    def memory(i):
-        return location(i).memory()
-
-    a_part = partition1d_tensor(divisions, a, memory = memory)
-    b_part = partition1d_tensor(divisions, b, memory = memory)
+    a_part = mapper.partition_tensor(a)
+    b_part = mapper.partition_tensor(b)
+    # print(a)
+    # print(a_part)
+    # print(b)
+    # print(b_part)
 
     inner_result = np.empty(1)
 
@@ -29,7 +30,7 @@ def main():
         partial_sums = np.empty(divisions)
         async with finish():
             for i in range(divisions):
-                @spawn(placement = location(i))
+                @spawn(placement = mapper.device(i))
                 def inner_local():
                     partial_sums[i] = float(a_part[i] @ b_part[i])
         res = 0.
@@ -37,7 +38,7 @@ def main():
             res += partial_sums[i]
         inner_result[0] = res
 
-    # print(inner_result[0])
+    # print(np.inner(a, b), inner_result[0])
     assert np.allclose(np.inner(a, b), inner_result[0])
 
 
