@@ -1,4 +1,4 @@
-Logical Devices (parla.device)
+Devices (parla.device)
 ==============================
 
 .. testsetup::

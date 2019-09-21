@@ -10,6 +10,7 @@ The Parla Language
 
    parla.tasks
    parla.device
+   parla.ldevice
    parla.function_decorators
    parla.detail
    parla.partitioning
