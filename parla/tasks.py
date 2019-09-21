@@ -281,7 +281,7 @@ def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
     This same value is stored into the task space used in `taskid`.
 
-    :see: :ref:`Blocked Cholesky` Example
+    :see: :ref:`Fox's Algorithm` Example
 
     """
 

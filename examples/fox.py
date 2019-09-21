@@ -23,16 +23,6 @@ partitions_y = partitions_x
 mapper = LDeviceGridBlocked(partitions_x, partitions_y)
 print(mapper)
 
-# TODO: Compare to how this is done in HPF (High-Performance Fortran).
-#  Alignment: an abstract set of storage locations and then placement of data in those abstract locations.
-#  Distribution (at runtime): associate abstract locations to physical locations. This mapping was static.
-#
-# (Reference Pingali 1989)
-
-# Examples:
-#  Fox's Algorithm: Collective regular communication (broadcast and reduce)
-#  Cholesky: Less regular data movement and task placement, more complex dependencies.
-
 async def matvec_fox(y, A, x):
     """y = Ax
 

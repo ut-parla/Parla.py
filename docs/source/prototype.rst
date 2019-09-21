@@ -23,7 +23,8 @@ These limitations will be removed as we move towards a complete implementation.
 Physical Placement of Data and Computation
 ------------------------------------------
 
-For initial experimentation, Parla provides ways to place data and computation on specific physical devices.
+For initial experimentation, Parla provides ways to place data and computation on specific devices and some tools to
+map logical devices to physical ones.
 
 To copy data into a location, apply a memory detail to that value:
 
@@ -51,4 +52,16 @@ To place tasks at a location, provide the `placement` argument to `~parla.tasks.
         cholesky_inplace(a[j,j])
 
 The task will be run on the specific device provided and no other.
-As always, the task orchestration code will run on the CPU, but appropriate `~parla.function_decorators.specialized` function variant will be used and those should be setup to call device kernels.
+As always, the task orchestration code will run on the CPU, but appropriate `~parla.function_decorators.specialized`
+function variant will be used and those should be setup to call device kernels.
+
+Programs can also use logical devices:
+
+.. code-block:: python
+
+    mapper = LDeviceSequenceBlocked(n)
+    @spawn(placement=mapper.device(j))
+    def t2():
+        cholesky_inplace(a[j,j])
+
+See :ref:`Logical Devices` for more details and features.

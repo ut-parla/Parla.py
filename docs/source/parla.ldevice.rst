@@ -1,3 +1,5 @@
+.. _Logical Devices:
+
 Logical Devices (parla.ldevice)
 ===============================
 
