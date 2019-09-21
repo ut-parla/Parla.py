@@ -6,14 +6,14 @@ The model is used to describe the placement restrictions for computations and st
 from contextlib import contextmanager
 from enum import Enum
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, List, Mapping
 from abc import ABCMeta, abstractmethod, abstractproperty
 
 import logging
 
 from .detail import Detail
 
-__all__ = ["MemoryKind", "Memory", "Device", "Architecture"]
+__all__ = ["MemoryKind", "Memory", "Device", "Architecture", "get_all_devices"]
 
 logger = logging.getLogger(__name__)
 
@@ -130,11 +130,16 @@ class Architecture(metaclass=ABCMeta):
         """
         return Device(self, *args, **kwds)
 
+    @abstractproperty
+    def devices(self):
+        pass
+
     # def memory(self, kind: MemoryKind = None):
     #     return Memory(self, kind)
 
 
 _architectures = {}
+_architectures: Mapping[str, Architecture]
 
 
 def _get_architecture(name):
@@ -144,3 +149,10 @@ def _get_architecture(name):
 def _register_archecture(name, impl):
     assert name not in _architectures
     _architectures[name] = impl
+
+
+def get_all_devices() -> List[Device]:
+    """
+    :return: A list of all Devices in all Architectures.
+    """
+    return [d for arch in _architectures.values() for d in arch.devices]

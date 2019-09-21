@@ -71,6 +71,18 @@ class _GPUDevice(Device):
 
 
 class _GPUArchitecture(Architecture):
+    @property
+    def devices(self):
+        devices = []
+        for device_id in range(2**16):
+            next_device = cupy.cuda.Device(device_id)
+            try:
+                next_device.compute_capability
+            except cupy.cuda.runtime.CUDARuntimeError:
+                break
+            devices.append(gpu(device_id))
+        return devices
+
     def __call__(self, *args, **kwds):
         return _GPUDevice(self, *args, **kwds)
 

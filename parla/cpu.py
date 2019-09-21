@@ -28,6 +28,10 @@ class _CPUDevice(Device):
 
 
 class _CPUArchitecture(Architecture):
+    @property
+    def devices(self):
+        return [cpu()]
+
     def __call__(self, *args, **kwds):
         return _CPUDevice(self, 0, *args, **kwds)
 
