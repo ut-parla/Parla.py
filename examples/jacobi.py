@@ -129,6 +129,7 @@ def main():
                 a1[mapper.slice(j, len(a1))] = cpu(0).memory()(out_blocks[j][start_index:end_index])
     # Note: The outermost @spawn call blocks until all tasks are finished,
     # So execution blocks here until all tasks finish.
+    # Alternatives to this have been discussed, but aren't implemented yet.
 
     # Check that the heterogeneous computation matches
     # a very simple CPU only implementation.
