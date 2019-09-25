@@ -7,6 +7,7 @@ list(PREPEND CMAKE_MODULE_PATH
 include(UseCython)
 
 find_package(CUDA REQUIRED)
+find_package(LAPACK REQUIRED)
 find_package(Magma REQUIRED)
 find_package(Python COMPONENTS Development)
 
@@ -20,6 +21,6 @@ target_include_directories(cholesky_bench PRIVATE ${CUDA_INCLUDE_DIRS} ${Magma_I
 
 target_link_directories(cholesky_bench PRIVATE ${Magma_LIB_DIR})
 
-target_link_libraries(cholesky_bench PRIVATE ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES} ${CUDA_cusolver_LIBRARY} ${Magma_LIBRARIES})
+target_link_libraries(cholesky_bench PRIVATE ${LAPACK_LIBRARIES} ${CUDA_LIBRARIES} ${CUDA_CUBLAS_LIBRARIES} ${CUDA_cusolver_LIBRARY} ${CUDA_cusparse_LIBRARY} ${Magma_LIBRARIES})
 
 install(TARGETS cholesky_bench LIBRARY DESTINATION cholesky_bench)
