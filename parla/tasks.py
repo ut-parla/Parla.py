@@ -9,12 +9,12 @@ Parla supports simple task parallelism.
 
 """
 
-import ctypes
 import logging
 import threading
 import inspect
-from contextlib import contextmanager, asynccontextmanager
-from typing import Awaitable, Collection, Iterable
+from abc import abstractmethod, ABCMeta
+from contextlib import asynccontextmanager
+from typing import Awaitable, Collection, Iterable, Optional
 
 from parla import device
 from parla.device import Device
@@ -29,7 +29,7 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaskID", "TaskSpace", "spawn", "get_current_device", "tasks", "finish"
+    "TaskID", "TaskSpace", "spawn", "get_current_device", "tasks", "finish", "CompletedTaskSpace"
 ]
 
 
@@ -80,7 +80,30 @@ class TaskID:
         return (yield (None, [self], self.task))
 
 
-class tasks(Awaitable, Collection):
+class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
+    """
+    A collection of tasks.
+    """
+
+    @property
+    @abstractmethod
+    def _tasks(self) -> Collection:
+        pass
+
+    def __await__(self):
+        yield (None, tuple(self._tasks), None)
+
+    def __len__(self) -> int:
+        return len(self._tasks)
+
+    def __iter__(self):
+        return iter(self._tasks)
+
+    def __contains__(self, x) -> bool:
+        return x in self._tasks
+
+
+class tasks(TaskSet):
     """
     An ad-hoc collection of tasks.
     An instance is basically a reified dependency list as would be passed to `spawn`.
@@ -91,26 +114,18 @@ class tasks(Awaitable, Collection):
     >>> def f():
     >>>     pass
     """
+
+    @property
+    def _tasks(self) -> Collection:
+        return self.args
+
     __slots__ = ("args",)
 
     def __init__(self, *args):
         self.args = args
 
-    def __await__(self):
-        yield (None, self.args, None)
 
-    def __len__(self) -> int:
-        return len(self.args)
-
-    def __iter__(self):
-        return iter(self.args)
-
-    def __contains__(self, x) -> bool:
-        return x in self.args
-
-
-
-class TaskSpace:
+class TaskSpace(TaskSet):
     """A collection of tasks with IDs.
 
     A `TaskSpace` can be indexed using any hashable values and any
@@ -127,6 +142,10 @@ class TaskSpace:
 
     :note: `TaskSpace` does not support assignment to indicies.
     """
+
+    @property
+    def _tasks(self):
+        return self._data.values()
 
     def __init__(self, name=""):
         """Create an empty TaskSpace.
@@ -160,6 +179,19 @@ class TaskSpace:
         if len(ret) == 1:
             return ret[0]
         return ret
+
+
+class CompletedTaskSpace(TaskSet):
+    """
+    A task space that returns completed tasks instead of unused tasks.
+    """
+
+    @property
+    def _tasks(self) -> Collection:
+        return []
+
+    def __getitem__(self, index):
+        return tasks()
 
 
 class _TaskLocals(threading.local):
@@ -260,7 +292,7 @@ def _make_cell(val):
     return closure.__closure__[0]
 
 
-def spawn(taskid: TaskID = None, dependencies=(), *, placement: Device = None):
+def spawn(taskid: Optional[TaskID] = None, dependencies = (), *, placement: Device = None):
     """
     Execute the body of the function as a new task. The task may start
     executing immediately, so it may execute in parallel with any
