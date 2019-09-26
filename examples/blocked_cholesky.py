@@ -2,6 +2,7 @@ import numpy as np
 import cupy
 from numba import jit, void, float64
 import math
+import time
 
 from parla.tasks import *
 from parla.cuda import *
@@ -87,26 +88,24 @@ def cholesky_blocked_inplace(a):
 def main():
     @spawn(placement=cpu(0))
     async def test_blocked_cholesky():
-        # Test all the above cholesky versions.
-        size_factor = 8
-        a = np.random.rand(16 * size_factor * size_factor, 16 * size_factor * size_factor)
+        n = 6000
+        np.random.seed(0)
+        num_runs = 50
+        a = np.random.rand(n, n)
+        block_size = 125
+        assert not n % block_size
         a = a @ a.T
         res = np.tril(np.linalg.cholesky(a))
-        print("----", a.shape)
-        # a1 = a.copy()
-        # cholesky_inplace(a1)
-        # print(a1)
-        # print("=============", a.shape)
-        # assert np.allclose(res, np.tril(a1)), "Sequential cholesky_inplace failed"
-        a1 = a.copy()
-        # print(a1)
-        ap = a1.reshape(4*size_factor,4*size_factor,4*size_factor,4*size_factor).swapaxes(1,2)
-        print(ap.shape)
-        await cholesky_blocked_inplace(ap)
-        print("++++", a.shape)
+        times = []
+        for i in range(num_runs):
+            a1 = a.copy()
+            ap = a1.reshape(n // block_size, block_size, n // block_size, block_size).swapaxes(1,2)
+            start = time.perf_counter()
+            await cholesky_blocked_inplace(ap)
+            end = time.perf_counter()
+            times.append(end - start)
         assert np.allclose(res, np.tril(a1)), "Parallel cholesky_blocked_inplace failed"
-        print("Done")
-
+        print(*times)
 
 if __name__ == '__main__':
     main()
