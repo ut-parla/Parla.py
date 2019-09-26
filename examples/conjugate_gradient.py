@@ -2,9 +2,7 @@
 # See Algorithm 9.1 of Iterative Methods for Sparse Linear Systems.
 
 import numpy as np
-from scipy import linalg as la
-import scipy.sparse as ss
-import scipy.sparse.linalg as sla
+import scipy.sparse as sp
 
 # Note: this example uses CSC format throughout.
 
@@ -45,7 +43,7 @@ def discrete_laplacian(n):
         current_indptr += 1
     assert current_indptr == n + 1
     assert current_index == num_edges
-    return ss.csc_matrix((data, indices, indptr), shape=(n, n))
+    return sp.csc_matrix((data, indices, indptr), shape=(n, n))
 
 def cg(A, x_initial, b, tol=1E-8, maxiters=100):
     """
@@ -81,7 +79,7 @@ def cg(A, x_initial, b, tol=1E-8, maxiters=100):
         r_norm2 = r_norm2_new
     return x, r
 
-def test_cg():
+def main():
     n = 64
     A = discrete_laplacian(n)
     b = np.ones(n)
@@ -91,5 +89,5 @@ def test_cg():
     assert(np.linalg.norm(residual, ord=np.inf) < 1E-8)
 
 if __name__ == '__main__':
-    test_cg()
+    main()
     print("success")

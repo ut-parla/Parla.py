@@ -2,9 +2,7 @@
 # See Algorithm 9.1 of Iterative Methods for Sparse Linear Systems.
 
 import numpy as np
-from scipy import linalg as la
-import scipy.sparse as ss
-import scipy.sparse.linalg as sla
+import scipy.sparse as sp
 
 # Note: this example uses CSC format throughout.
 
@@ -43,7 +41,7 @@ def discrete_laplacian(n):
         current_indptr += 1
     assert current_indptr == n + 1
     assert current_index == num_edges
-    return ss.csc_matrix((data, indices, indptr), shape=(n, n))
+    return sp.csc_matrix((data, indices, indptr), shape=(n, n))
 
 # Placeholder serial routine to be replaced by something better optimized.
 # Note, with this loop order on CSC matrices, the dependencies follow the

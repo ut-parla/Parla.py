@@ -1,6 +1,5 @@
 import numpy as np
-import numba as nb
-from numba import cuda
+import numba.cuda
 from parla.function_decorators import specialized
 from parla.cuda import gpu
 from parla.cpu import cpu
@@ -11,16 +10,16 @@ from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
 # CPU code to perform a single step in the Jacobi iteration.
 # Specialized later by jacobi_gpu
 @specialized
-@nb.njit(parallel=True)
+@numba.njit(parallel=True)
 def jacobi(a0, a1):
     a1[1:-1,1:-1] = .25 * (a0[2:,1:-1] + a0[:-2,1:-1] + a0[1:-1,2:] + a0[1:-1,:-2])
 
 
 # Actual cuda kernel to do a single step
-@cuda.jit
+@numba.cuda.jit
 def gpu_jacobi_kernel(a0, a1):
-    start = cuda.grid(1)
-    stride = cuda.gridsize(1)
+    start = numba.cuda.grid(1)
+    stride = numba.cuda.gridsize(1)
     for i in range(start + 1, a0.shape[0] - 1, stride):
         for j in range(1, a1.shape[1] - 1):
             a1[i,j] = .25 * (a0[i-1,j] + a0[i+1,j] + a0[i,j-1] + a0[i,j+1])

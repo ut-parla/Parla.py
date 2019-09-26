@@ -5,7 +5,9 @@ In this case, Parla orchestrates low-level array operations and other existing h
 """
 
 # For now, with the prototype, force underlying BLAS libs to run sequentially.
-import os as _os
+import os
 
-_os.environ["OMP_NUM_THREADS"] = "1"
-_os.environ["MKL_THREADING_LAYER"] = "SEQUENTIAL"
+__all__ = []
+
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_THREADING_LAYER"] = "SEQUENTIAL"
