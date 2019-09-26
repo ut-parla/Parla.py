@@ -8,8 +8,6 @@ cdef extern from "magma.h":
     magma_int_t MAGMA_SUCCESS
     magma_int_t magma_init()
     magma_int_t magma_finalize()
-
-cdef extern from "magma_d.h":
     enum magma_uplo_t:
         MagmaUpper
         MagmaLower
