@@ -2,6 +2,7 @@
 
 import numpy as np
 import cupy as cp
+import time
 
 from libc.stdlib cimport malloc, free
 
@@ -39,15 +40,16 @@ cdef int get_ngpu():
     return ngpu
 
 def bench_cholesky():
+    num_runs = 50
     np.random.seed(0)
-    cdef int n = 16 * 8**2
+    cdef int n = 6000
     cdef magma_int_t status
     status = magma_init()
     assert status == MAGMA_SUCCESS
     cdef int nb = magma_get_dpotrf_nb(n)
     data = np.random.rand(n, n)
     cdef double[:,:] a = data @ data.T
-    a_c = np.copy(a)
+    cdef double[:,:] a_c = np.copy(a)
     # Reference result to compare against.
     res = np.tril(np.linalg.cholesky(a))
     cdef int ngpu = get_ngpu()
@@ -66,13 +68,19 @@ def bench_cholesky():
     cdef magma_queue_t *queues = <magma_queue_t*>malloc(ngpu * sizeof(magma_queue_t))
     for i in range(ngpu):
         magma_queue_create(i, &queues[i])
-    magma_dsetmatrix_1D_col_bcyclic(ngpu, n, n, nb, &a[0,0], n, <double**>&d_IA[0], n, &queues[0])
-    magma_dpotrf_mgpu(ngpu, MagmaUpper, n, <double**>&d_IA[0], n, &info)
-    assert not info
-    magma_dgetmatrix_1D_col_bcyclic(ngpu, n, n, nb, <double**>&d_IA[0], n, &a[0,0], n, &queues[0])
+    times = []
+    for i in range(num_runs):
+        start = time.perf_counter()
+        magma_dsetmatrix_1D_col_bcyclic(ngpu, n, n, nb, &a[0,0], n, <double**>&d_IA[0], n, &queues[0])
+        magma_dpotrf_mgpu(ngpu, MagmaUpper, n, <double**>&d_IA[0], n, &info)
+        assert not info, info
+        magma_dgetmatrix_1D_col_bcyclic(ngpu, n, n, nb, <double**>&d_IA[0], n, &a_c[0,0], n, &queues[0])
+        end = time.perf_counter()
+        times.append(end - start)
     for i in range(ngpu):
         magma_queue_destroy(queues[i])
     free(<void*>queues)
     status = magma_finalize()
     assert status == MAGMA_SUCCESS
-    assert np.allclose(res, np.tril(a))
+    assert np.allclose(res, np.tril(a_c))
+    print(*times)
