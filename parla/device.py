@@ -160,6 +160,9 @@ class Architecture(metaclass=ABCMeta):
 _architectures = {}
 _architectures: Mapping[str, Architecture]
 
+_architectures_list = []
+_architectures_list: List[Architecture]
+
 
 def _get_architecture(name):
     return _architectures[name]
@@ -169,17 +172,18 @@ def _register_architecture(name, impl):
     if name in _architectures:
         raise ValueError("Architecture {} is already registered".format(name))
     _architectures[name] = impl
+    _architectures_list.append(impl)
 
 
 def get_all_devices() -> List[Device]:
     """
     :return: A list of all Devices in all Architectures.
     """
-    return [d for arch in _architectures.values() for d in arch.devices]
+    return [d for arch in _architectures_list for d in arch.devices]
 
 
 def get_all_architectures() -> List[Architecture]:
     """
     :return: A list of all Architectures.
     """
-    return list(_architectures.values())
+    return list(_architectures_list)

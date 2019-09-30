@@ -11,9 +11,9 @@ __all__ = []
 
 thread_contexts = threading.local()
 
+
 class PerThreadContext:
-    def __init__(self, thread_id, device: Device, scheduler: "Scheduler"):
-        self.thread_id = thread_id
+    def __init__(self, device: Device, scheduler: "Scheduler"):
         self.device = device
         self.scheduler = scheduler
     def __enter__(self):
@@ -21,8 +21,6 @@ class PerThreadContext:
     def __exit__(self, exception_type, exception_value, traceback):
         delattr(thread_contexts, "context")
 
-def get_thread_id():
-    return thread_contexts.context.thread_id
 
 def get_device() -> Device:
     return thread_contexts.context.device
@@ -33,7 +31,6 @@ class Scheduler:
         self.mutex = threading.Lock()
         self.active = False
         self.counter_mutex = threading.Lock()
-        self.n_management_threads = len(get_all_devices())
 
         # Need a lock to ensure atomicity of appending/removing from raised_exceptions.
         # Could do this with atomics in a lower level language, or in any language that is less concurrency impoverished than Python.
@@ -43,27 +40,26 @@ class Scheduler:
     def __enter__(self):
         self.active = True
         self.main_queue = SimpleQueue()
-        self.local_queues = [SimpleQueue() for d in range(self.n_management_threads)]
-        self.device_queues = {arch : SimpleQueue() for arch in get_all_architectures()}
+        self.device_queues = {device: SimpleQueue() for device in get_all_devices()}
+        self.architecture_queues = {arch: SimpleQueue() for arch in get_all_architectures()}
         self.tasks_in_progress = 0
 
     def __exit__(self, exception_type, exception_value, traceback):
         self.active = False
         del self.main_queue
-        del self.local_queues
         del self.device_queues
+        del self.architecture_queues
         del self.tasks_in_progress
 
     def get(self):
         with self.mutex:
             assert self.active
-            thread_id = get_thread_id()
-            local_queue = self.local_queues[thread_id]
-            if not local_queue.empty():
-                return local_queue.get()
-            device_type_queue = self.device_queues[get_device().architecture]
-            if not device_type_queue.empty():
-                return device_type_queue.get()
+            device_queue = self.device_queues[get_device()]
+            if not device_queue.empty():
+                return device_queue.get()
+            architecture_queue = self.architecture_queues[get_device().architecture]
+            if not architecture_queue.empty():
+                return architecture_queue.get()
             if not self.main_queue.empty():
                 return self.main_queue.get()
             return None
@@ -83,13 +79,13 @@ class Scheduler:
             assert self.active
             if queue_identifier in get_all_architectures():
                 # logger.info("Adding to device queue %r: %r", queue_identifier, self)
-                self.device_queues[queue_identifier].put(task)
+                self.architecture_queues[queue_identifier].put(task)
             elif queue_identifier is None:
                 # logger.info("Adding to main queue: %r", queue_identifier, self)
                 self.main_queue.put(task)
             else:
                 # logger.info("Adding to local queue %r: %r", queue_identifier, self)
-                self.local_queues[queue_identifier].put(task)
+                self.device_queues[queue_identifier].put(task)
 
     def run_next(self):
         next_task = self.get()
@@ -98,6 +94,7 @@ class Scheduler:
         with self.counter_mutex:
             self.tasks_in_progress += 1
         try:
+            logger.debug("Running task {} on thread ({})".format(next_task, get_device()))
             next_task.run()
         finally:
             with self.counter_mutex:
@@ -110,16 +107,16 @@ class Scheduler:
             with self.counter_mutex:
                 if self.tasks_in_progress:
                     return False
-            for queue in self.local_queues:
+            for queue in self.device_queues.values():
                 if not queue.empty():
                     return False
-            for device_type, queue in self.device_queues.items():
+            for queue in self.architecture_queues.values():
                 if not queue.empty():
                     return False
             if not self.main_queue.empty():
                 return False
-        logger.debug("Exiting %d with (%r, %d, %r)", map(lambda q: q.qsize(), self.local_queues), self.main_queue.qsize(),
-                     self.tasks_in_progress)
+        logger.debug("Exiting %r thread with (%r, %r, %r)", get_device(),
+                     map(lambda q: q.qsize(), self.device_queues), self.main_queue.qsize(), self.tasks_in_progress)
         return True
 
 
@@ -129,7 +126,8 @@ pool_running = False
 # (or as a wrapper around) whatever we are using as a thread pool.
 def local_func(arg):
     scheduler, thread_id, device = arg
-    with PerThreadContext(thread_id, device, scheduler):
+    with PerThreadContext(device, scheduler):
+        logger.debug("Starting worker thread: {}".format(arg))
         while not scheduler.finished():
             with scheduler.exception_log_mutex:
                 if scheduler.raised_exceptions:
@@ -171,7 +169,7 @@ class Task:
         self.scheduler.put(self, queue_identifier=self.queue_identifier)
 
     def run(self):
-        logger.debug("Running on %r (should be queue %r): %r", get_thread_id(), self.queue_identifier, self)
+        # logger.debug("Running on %r (should be queue %r): %r", get_device(), self.queue_identifier, self)
         self.func(self, *self.inputs)
         with self.mutex:
             self.completed = True
@@ -220,6 +218,6 @@ def run_task(func, inputs, dependencies, queue_identifier = None):
                 # TODO: Handle multiple exception case better
                 exc = scheduler.raised_exceptions[0]
                 raised_exceptions = []
-                raise exc
+                raise Exception("An error occurred in a worker thread.") from exc
         pool_running = False
         return root_task

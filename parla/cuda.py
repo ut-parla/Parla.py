@@ -53,13 +53,9 @@ class _GPUMemory(Memory):
 
 
 class _GPUDevice(Device):
-    def __init__(self, architecture, device_number, **kwds):
-        self.device_number = device_number
-        super().__init__(architecture, device_number+1, *(device_number,), **kwds)
-
     @contextmanager
     def context(self):
-        with cupy.cuda.Device(self.device_number):
+        with cupy.cuda.Device(self.index):
             yield
 
     @lru_cache(None)
@@ -67,7 +63,7 @@ class _GPUDevice(Device):
         return _GPUMemory(self, kind)
 
     def __repr__(self):
-        return "<CUDA {}>".format(self.device_number)
+        return "<CUDA {}>".format(self.index)
 
 
 class _GPUArchitecture(Architecture):

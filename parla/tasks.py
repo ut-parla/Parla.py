@@ -360,15 +360,13 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *, placement: Devi
         taskid.dependencies = dependencies
         data.taskid = taskid
 
-        queue_index = None if placement is None else placement.index
-
         # Spawn the task via the Parla runtime API
-        task = task_runtime.run_task(_task_callback, (data,), deps, queue_identifier=queue_index)
+        task = task_runtime.run_task(_task_callback, (data,), deps, queue_identifier=placement)
 
         # Store the task object in it's ID object
         taskid.task = task
 
-        logger.debug("Created: %s <%s, %s, %r>", taskid, placement, queue_index, body)
+        logger.debug("Created: %s <%s, %s, %r>", taskid, placement, body)
 
         for scope in _task_locals.task_scopes:
             scope.append(task)
