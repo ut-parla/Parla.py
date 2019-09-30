@@ -16,7 +16,6 @@ from abc import abstractmethod, ABCMeta
 from contextlib import asynccontextmanager
 from typing import Awaitable, Collection, Iterable, Optional
 
-from parla import device
 from parla.device import Device
 
 try:
@@ -380,26 +379,8 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *, placement: Devi
     return decorator
 
 
-# def spawnf(*args, **kws):
-#     def spawnf_do(f):
-#         return spawn(*args, **kws)(f)
-#     return spawnf_do
-
-
 def get_current_device() -> Device:
-    index = task_runtime.get_device_id()
-    type = task_runtime.get_device_type(index)
-    if type == "cpu":
-        arch = device._get_architecture("cpu")
-        arch_index = index
-    elif type == "gpu":
-        arch = device._get_architecture("gpu")
-        arch_index = index - 1
-    else:
-        raise ValueError("Could not find device for this thread.")
-    d = arch(arch_index)
-    d.index = index
-    return d
+    return task_runtime.get_device()
 
 
 @asynccontextmanager

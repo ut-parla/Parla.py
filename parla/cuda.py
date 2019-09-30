@@ -71,20 +71,24 @@ class _GPUDevice(Device):
 
 
 class _GPUArchitecture(Architecture):
-    @property
-    def devices(self):
+    def __init__(self, name, id):
+        super().__init__(name, id)
         devices = []
         for device_id in range(2**16):
-            next_device = cupy.cuda.Device(device_id)
+            cupy_device = cupy.cuda.Device(device_id)
             try:
-                next_device.compute_capability
+                cupy_device.compute_capability
             except cupy.cuda.runtime.CUDARuntimeError:
                 break
-            devices.append(gpu(device_id))
-        return devices
+            devices.append(self(device_id))
+        self._devices = devices
 
-    def __call__(self, *args, **kwds):
-        return _GPUDevice(self, *args, **kwds)
+    @property
+    def devices(self):
+        return self._devices
+
+    def __call__(self, index, *args, **kwds):
+        return _GPUDevice(self, index, *args, **kwds)
 
 
 gpu = _GPUArchitecture("GPU", "gpu")
@@ -93,4 +97,4 @@ gpu.__doc__ = """The `Architecture` for CUDA GPUs.
 >>> gpu(0)
 """
 
-device._register_archecture("gpu", gpu)
+device._register_architecture("gpu", gpu)
