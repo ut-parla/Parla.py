@@ -12,10 +12,10 @@ from parla.tasks import *
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.DEBUG)
 # parla.tasks.logger.setLevel(logging.DEBUG)
-parla.cuda.logger.setLevel(logging.DEBUG)
-parla.cpu.logger.setLevel(logging.DEBUG)
+# parla.cuda.logger.setLevel(logging.DEBUG)
+# parla._cpuutils.logger.setLevel(logging.DEBUG)
 
 partitions_x = 8
 partitions_y = partitions_x

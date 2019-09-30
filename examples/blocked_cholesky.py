@@ -88,7 +88,7 @@ def main():
     @spawn(placement=cpu(0))
     async def test_blocked_cholesky():
         # Test all the above cholesky versions.
-        size_factor = 8
+        size_factor = 2
         a = np.random.rand(16 * size_factor * size_factor, 16 * size_factor * size_factor)
         a = a @ a.T
         res = np.tril(np.linalg.cholesky(a))

@@ -1,6 +1,6 @@
 import numpy as np
 from parla.cuda import gpu
-from parla.cpu import cpu
+from parla.cpucores import cpu
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import *
 
@@ -24,13 +24,12 @@ def main():
 
     inner_result = np.empty(1)
 
-    @spawn(placement = cpu(0))
+    @spawn(placement=cpu(0))
     async def inner_part():
-        divisions = len(a_part)
         partial_sums = np.empty(divisions)
         async with finish():
             for i in range(divisions):
-                @spawn(placement = mapper.device(i))
+                @spawn(placement=mapper.device(i))
                 def inner_local():
                     partial_sums[i] = float(a_part[i] @ b_part[i])
         res = 0.
