@@ -1,3 +1,4 @@
+import parla.cpu
 from parla.task_runtime import run_task, Task
 
 def test_flag_increment():

@@ -1,11 +1,18 @@
 import numpy as np
 import numba.cuda
-from parla.function_decorators import specialized
 from parla.cuda import gpu
-from parla.cpu import cpu
+from parla.cpucores import cpu
+from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
+import parla
 
+import logging
+logging.basicConfig(level=logging.INFO)
+# parla.tasks.logger.setLevel(logging.DEBUG)
+# parla.task_runtime.logger.setLevel(logging.DEBUG)
+# parla.cuda.logger.setLevel(logging.DEBUG)
+# parla._cpuutils.logger.setLevel(logging.DEBUG)
 
 # CPU code to perform a single step in the Jacobi iteration.
 # Specialized later by jacobi_gpu

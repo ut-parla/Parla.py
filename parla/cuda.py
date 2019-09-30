@@ -53,13 +53,9 @@ class _GPUMemory(Memory):
 
 
 class _GPUDevice(Device):
-    def __init__(self, architecture, device_number, **kwds):
-        self.device_number = device_number
-        super().__init__(architecture, device_number+1, *(device_number,), **kwds)
-
     @contextmanager
     def context(self):
-        with cupy.cuda.Device(self.device_number):
+        with cupy.cuda.Device(self.index):
             yield
 
     @lru_cache(None)
@@ -67,24 +63,28 @@ class _GPUDevice(Device):
         return _GPUMemory(self, kind)
 
     def __repr__(self):
-        return "<CUDA {}>".format(self.device_number)
+        return "<CUDA {}>".format(self.index)
 
 
 class _GPUArchitecture(Architecture):
-    @property
-    def devices(self):
+    def __init__(self, name, id):
+        super().__init__(name, id)
         devices = []
         for device_id in range(2**16):
-            next_device = cupy.cuda.Device(device_id)
+            cupy_device = cupy.cuda.Device(device_id)
             try:
-                next_device.compute_capability
+                cupy_device.compute_capability
             except cupy.cuda.runtime.CUDARuntimeError:
                 break
-            devices.append(gpu(device_id))
-        return devices
+            devices.append(self(device_id))
+        self._devices = devices
 
-    def __call__(self, *args, **kwds):
-        return _GPUDevice(self, *args, **kwds)
+    @property
+    def devices(self):
+        return self._devices
+
+    def __call__(self, index, *args, **kwds):
+        return _GPUDevice(self, index, *args, **kwds)
 
 
 gpu = _GPUArchitecture("GPU", "gpu")
@@ -93,4 +93,4 @@ gpu.__doc__ = """The `Architecture` for CUDA GPUs.
 >>> gpu(0)
 """
 
-device._register_archecture("gpu", gpu)
+device._register_architecture("gpu", gpu)

@@ -13,7 +13,9 @@ import logging
 
 from .detail import Detail
 
-__all__ = ["MemoryKind", "Memory", "Device", "Architecture", "get_all_devices"]
+__all__ = [
+    "MemoryKind", "Memory", "Device", "Architecture", "get_all_devices", "get_all_architectures"
+]
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +81,7 @@ class Memory(Detail, metaclass=ABCMeta):
 
 class Device(metaclass=ABCMeta):
     """
-    An instance of `Device` represents a **logical** compute device and its associated memory.
+    An instance of `Device` represents a compute device and its associated memory.
     Every device can directly access its own memory, but may be able to directly or indirectly access other devices memories.
     Depending on the system configuration, potential devices include: One NUMA node of a larger system, all CPUs (in multiple NUMA nodes) combined, a whole GPU.
 
@@ -93,7 +95,7 @@ class Device(metaclass=ABCMeta):
 
     def __init__(self, architecture, index, *args, **kwds):
         """
-        Construct a new **logical** Device with a specific architecture.
+        Construct a new Device with a specific architecture.
         """
         self.architecture = architecture
         self.index = index
@@ -106,6 +108,16 @@ class Device(metaclass=ABCMeta):
 
     def memory(self, kind: MemoryKind = None):
         return Memory(self, kind)
+
+    def __eq__(self, o: object) -> bool:
+        return isinstance(o, type(self)) and \
+               self.architecture == o.architecture and \
+               self.index == o.index and \
+               self.args == o.args and \
+               self.kwds == o.kwds
+
+    def __hash__(self):
+        return hash(self.architecture) + hash(self.index)*37
 
 
 class Architecture(metaclass=ABCMeta):
@@ -137,22 +149,41 @@ class Architecture(metaclass=ABCMeta):
     # def memory(self, kind: MemoryKind = None):
     #     return Memory(self, kind)
 
+    def __eq__(self, o: object) -> bool:
+        return isinstance(o, type(self)) and \
+               self.id == o.id and self.name == o.name
+
+    def __hash__(self):
+        return hash(self.id)
+
 
 _architectures = {}
 _architectures: Mapping[str, Architecture]
+
+_architectures_list = []
+_architectures_list: List[Architecture]
 
 
 def _get_architecture(name):
     return _architectures[name]
 
 
-def _register_archecture(name, impl):
-    assert name not in _architectures
+def _register_architecture(name, impl):
+    if name in _architectures:
+        raise ValueError("Architecture {} is already registered".format(name))
     _architectures[name] = impl
+    _architectures_list.append(impl)
 
 
 def get_all_devices() -> List[Device]:
     """
     :return: A list of all Devices in all Architectures.
     """
-    return [d for arch in _architectures.values() for d in arch.devices]
+    return [d for arch in _architectures_list for d in arch.devices]
+
+
+def get_all_architectures() -> List[Architecture]:
+    """
+    :return: A list of all Architectures.
+    """
+    return list(_architectures_list)

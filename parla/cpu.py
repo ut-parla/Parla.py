@@ -1,39 +1,22 @@
-import logging
+from parla._cpuutils import _CPUDevice
+from .device import Architecture, _register_architecture
 
-import numpy
-
-from . import array
-from .device import Memory, Device, MemoryKind, Architecture, _register_archecture
-
-logger = logging.getLogger(__name__)
-
-
-class _CPUMemory(Memory):
-    @property
-    def np(self):
-        return numpy
-
-    def __call__(self, target):
-        if getattr(target, "device", None) is not None:
-            logger.debug("Moving data: %r => CPU", getattr(target, "device", None))
-        return array.asnumpy(target)
-
-
-class _CPUDevice(Device):
-    def memory(self, kind: MemoryKind = None):
-        return _CPUMemory(self, kind)
-
-    def __repr__(self):
-        return "<CPU>"
-
+__all__ = ["cpu"]
 
 class _CPUArchitecture(Architecture):
+
+    def __init__(self, name, id):
+        super().__init__(name, id)
+        self._device = self()
+
     @property
     def devices(self):
-        return [cpu()]
+        return [self._device]
 
-    def __call__(self, *args, **kwds):
-        return _CPUDevice(self, 0, *args, **kwds)
+    def __call__(self, id=0, *args, **kwds):
+        if id != 0:
+            raise ValueError("Parla only supports a single CPU device in non-'cores' mode.")
+        return _CPUDevice(self, id, *args, **kwds)
 
 
 cpu = _CPUArchitecture("CPU", "cpu")
@@ -42,4 +25,4 @@ cpu.__doc__ = """The `Architecture` for CPUs.
 >>> cpu()
 """
 
-_register_archecture("cpu", cpu)
+_register_architecture("cpu", cpu)
