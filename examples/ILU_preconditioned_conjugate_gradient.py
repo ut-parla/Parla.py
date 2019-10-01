@@ -4,44 +4,9 @@
 import numpy as np
 import scipy.sparse as sp
 
-# Note: this example uses CSC format throughout.
+from test_data import discrete_laplacian, discrete_laplacian_3d
 
-# Generate sparse matrix for testing.
-def discrete_laplacian(n):
-    assert n > 0
-    offset = int(np.sqrt(n))
-    num_edges = n + 2 * (n - 1 - (n - 1) // offset) + 2 * (n - offset)
-    indptr = np.empty(n + 1, np.uint64)
-    indices = np.empty(num_edges, np.uint64)
-    data = np.empty(num_edges)
-    indptr[0] = 0
-    current_indptr = 1
-    current_index = 0
-    for i in range(n):
-        if i >= offset:
-            data[current_index] = -1.
-            indices[current_index] = i - offset
-            current_index += 1
-        if i >= 1 and i % offset:
-            data[current_index] = -1.
-            indices[current_index] = i - 1
-            current_index += 1
-        data[current_index] = 16
-        indices[current_index] = i
-        current_index += 1
-        if i < n - 1 and (i + 1) % offset:
-            data[current_index] = -1.
-            indices[current_index] = i + 1
-            current_index += 1
-        if i < n - offset:
-            data[current_index] = -1.
-            indices[current_index] = i + offset
-            current_index += 1
-        indptr[current_indptr] = current_index
-        current_indptr += 1
-    assert current_indptr == n + 1
-    assert current_index == num_edges
-    return sp.csc_matrix((data, indices, indptr), shape=(n, n))
+# Note: this example uses CSC format throughout.
 
 # Placeholder serial routine to be replaced by something better optimized.
 # Note, with this loop order on CSC matrices, the dependencies follow the
@@ -146,7 +111,7 @@ def pcg(A, x_initial, b, tol=1E-8, maxiters=100):
         r -= alpha * Ap
         # Just use inf. norm for convergence (for simplicity)
         err = np.linalg.norm(r, ord=np.inf)
-        #print(err)
+        print(err)
         if err < tol:
             return x, r
         z_part = upper_triangular_solve_csc(ilu, r)
@@ -157,12 +122,11 @@ def pcg(A, x_initial, b, tol=1E-8, maxiters=100):
     return x, r
 
 def test_pcg():
-    n = 64
+    n = 52488
     A = discrete_laplacian(n)
     b = np.ones(n)
     x = np.ones(n)
-    x, residual = pcg(A, x, b)
-    print(b - A * x)
+    x, residual = pcg(A, x, b, maxiters=300)
     assert(np.linalg.norm(residual, ord=np.inf) < 1E-5)
 
 if __name__ == '__main__':
