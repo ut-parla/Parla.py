@@ -3,17 +3,10 @@
 
 import numpy as np
 from scipy import sparse as sp
+from numba import jit
 
-# Generate sparse matrix for testing.
-# This is the matrix representation of
-# a 5 point stencil on a 2D grid.
-def discrete_laplacian(n):
-    assert n > 0
-    offset = int(np.sqrt(n))
-    num_edges = n + 2 * (n - 1 - (n - 1) // offset) + 2 * (n - offset)
-    indptr = np.empty(n + 1, np.uint64)
-    indices = np.empty(num_edges, np.uint64)
-    data = np.empty(num_edges)
+@jit
+def laplacian_helper(n, offset, num_edges, data, indices, indptr):
     indptr[0] = 0
     current_indptr = 1
     current_index = 0
@@ -40,26 +33,23 @@ def discrete_laplacian(n):
         indptr[current_indptr] = current_index
         current_indptr += 1
     assert current_indptr == n + 1
-    assert current_index == num_edges
-    return sp.csc_matrix((data, indices, indptr), shape=(n, n))
+    assert current_index == num_edges 
 
-# Same, but for a 3d grid.
-def discrete_laplacian_3d(n):
+# Generate sparse matrix for testing.
+# This is the matrix representation of
+# a 5 point stencil on a 2D grid.
+def discrete_laplacian(n):
     assert n > 0
-    inner_offset = int(np.cbrt(n))
-    outer_offset = inner_offset**2
-    num_edges = n + 2 * (n - 1 - (n - 1) // inner_offset)
-    num_whole_diagonal_blocks = n // outer_offset
-    last_block_partial = n % outer_offset
-    num_edges = n
-    num_edges += 2 * (n - 1 - (n - 1) // inner_offset)
-    num_edges += 2 * (num_whole_diagonal_blocks * (inner_offset - 1) * inner_offset)
-    if last_block_partial > inner_offset:
-        num_edges += 2 * (last_block_partial - inner_offset)
-    num_edges += 2 * (n - outer_offset)
+    offset = int(np.sqrt(n))
+    num_edges = n + 2 * (n - 1 - (n - 1) // offset) + 2 * (n - offset)
     indptr = np.empty(n + 1, np.uint64)
     indices = np.empty(num_edges, np.uint64)
     data = np.empty(num_edges)
+    laplacian_helper(n, offset, num_edges, data, indices, indptr)
+    return sp.csc_matrix((data, indices, indptr), shape=(n, n))
+
+@jit
+def laplacian_3d_helper(n, inner_offset, outer_offset, num_edges, data, indices, indptr):
     indptr[0] = 0
     current_indptr = 1
     current_index = 0
@@ -95,4 +85,23 @@ def discrete_laplacian_3d(n):
         current_indptr += 1
     assert current_indptr == n + 1
     assert current_index == num_edges
+
+# Same, but for a 3d grid.
+def discrete_laplacian_3d(n):
+    assert n > 0
+    inner_offset = int(np.cbrt(n))
+    outer_offset = inner_offset**2
+    num_edges = n + 2 * (n - 1 - (n - 1) // inner_offset)
+    num_whole_diagonal_blocks = n // outer_offset
+    last_block_partial = n % outer_offset
+    num_edges = n
+    num_edges += 2 * (n - 1 - (n - 1) // inner_offset)
+    num_edges += 2 * (num_whole_diagonal_blocks * (inner_offset - 1) * inner_offset)
+    if last_block_partial > inner_offset:
+        num_edges += 2 * (last_block_partial - inner_offset)
+    num_edges += 2 * (n - outer_offset)
+    indptr = np.empty(n + 1, np.uint64)
+    indices = np.empty(num_edges, np.uint64)
+    data = np.empty(num_edges)
+    laplacian_3d_helper(n, inner_offset, outer_offset, num_edges, data, indices, indptr)
     return sp.csc_matrix((data, indices, indptr), shape=(n, n))
