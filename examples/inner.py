@@ -3,7 +3,7 @@ from parla.cuda import gpu
 from parla.cpucores import cpu
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import *
-
+import time
 
 def main():
     a = np.random.rand(10000000)
@@ -11,16 +11,12 @@ def main():
 
     divisions = 100
 
+    start = time.perf_counter()
     # Map the divisions onto actual hardware locations
     mapper = LDeviceSequenceBlocked(divisions)
-    print(mapper)
 
     a_part = mapper.partition_tensor(a)
     b_part = mapper.partition_tensor(b)
-    # print(a)
-    # print(a_part)
-    # print(b)
-    # print(b_part)
 
     inner_result = np.empty(1)
 
@@ -37,7 +33,9 @@ def main():
             res += partial_sums[i]
         inner_result[0] = res
 
-    # print(np.inner(a, b), inner_result[0])
+    end = time.perf_counter()
+    print(end - start)
+
     assert np.allclose(np.inner(a, b), inner_result[0])
 
 
