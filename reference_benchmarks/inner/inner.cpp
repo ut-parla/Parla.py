@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cstddef>
 #include <iostream>
+#include <mutex>
 #include <random>
 #include <thread>
 #include <utility>
@@ -12,7 +13,7 @@
 
 int main() {
   std::size_t n = 10000000ull;
-  std::size_t partitions;
+  std::size_t partitions = 100ull;
   std::mt19937 gen{0};
   std::uniform_real_distribution<> dis(-1., 1.);
   auto x = std::make_unique<double[]>(n);
@@ -35,10 +36,11 @@ int main() {
   auto per_device_block_indices = std::make_unique<std::size_t[]>(devices + 1);
   per_device_block_indices.get()[0] = 0;
   int previous_device = 0;
-  for (std::size_t i = 0; i < partitions; partitions++) {
+  for (std::size_t i = 0; i < partitions; i++) {
     x_input_ptrs.get()[i] = x.get() + i * (n / partitions);
     y_input_ptrs.get()[i] = y.get() + i * (n / partitions);
-    std::size_t size = i < partitions - 1 ? n / partitions : n % (n / partitions);
+    std::size_t default_size = (n + partitions - 1) / partitions;
+    std::size_t size = i < partitions - 1 ? default_size : ((n - 1) % default_size) + 1;
     sizes.get()[i] = size;
     int location = i / devices;
     locations.get()[i] = location;
@@ -71,8 +73,8 @@ int main() {
         assert(stat2 == cudaSuccess);
         stat2 = cudaMalloc(&y_dev_block, size * sizeof(double));
         assert(stat2 == cudaSuccess);
-        cublasSetVector(size, sizeof(double), x_input_ptrs.get() + j, 1, x_dev_block, 1);
-        cublasSetVector(size, sizeof(double), y_input_ptrs.get() + j, 1, y_dev_block, 1);
+        cublasSetVector(size, sizeof(double), x_input_ptrs.get()[j], 1, x_dev_block, 1);
+        cublasSetVector(size, sizeof(double), y_input_ptrs.get()[j], 1, y_dev_block, 1);
         cublasDdot(handle, size, x_dev_block, 1, y_dev_block, 1, &partial_sums.get()[j]);
         cudaFree(x_dev_block);
         cudaFree(y_dev_block);
