@@ -2,7 +2,6 @@
 #include <chrono>
 #include <cstddef>
 #include <iostream>
-#include <mutex>
 #include <random>
 #include <thread>
 #include <utility>
