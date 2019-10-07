@@ -3,6 +3,8 @@ from contextlib import contextmanager
 import logging
 from functools import wraps, lru_cache
 
+from parla import array
+from parla.array import ArrayType
 from . import device
 from .device import *
 
@@ -76,7 +78,8 @@ class _GPUArchitecture(Architecture):
                 cupy_device.compute_capability
             except cupy.cuda.runtime.CUDARuntimeError:
                 break
-            devices.append(self(device_id))
+            assert cupy_device.id == device_id
+            devices.append(self(cupy_device.id))
         self._devices = devices
 
     @property
@@ -94,3 +97,14 @@ gpu.__doc__ = """The `Architecture` for CUDA GPUs.
 """
 
 device._register_architecture("gpu", gpu)
+
+
+class _CuPyArrayType(ArrayType):
+    def get_memory(self, a):
+        return gpu(a.device.id).memory()
+
+    def get_array_module(self, a):
+        return cupy.get_array_module(a)
+
+
+array._register_array_type(cupy.ndarray, _CuPyArrayType())

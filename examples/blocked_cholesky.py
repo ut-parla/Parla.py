@@ -4,6 +4,7 @@ from numba import jit, void, float64
 import math
 import time
 
+from parla.array import copy, clone_here
 from parla.tasks import *
 from parla.cuda import *
 from parla.cpu import *
@@ -29,10 +30,10 @@ def cholesky_inplace(a):
 def cholesky_inplace(a):
     if a.shape[0] != a.shape[1]:
         raise ValueError("A square array is required.")
-    ca = get_current_device().memory()(a) # dtype='f'
+    ca = clone_here(a) # dtype='f'
     # print("CUDA:", a, ca)
     ca[:] = cupy.linalg.cholesky(ca)
-    a[:] = cpu(0).memory()(ca)
+    copy(a, ca)
     # print("CUDA:", a, ca)
 
 # This is a naive version of dtrsm.
@@ -64,6 +65,8 @@ def cholesky_blocked_inplace(a):
         raise ValueError("A square matrix is required.")
     if a.shape[0] != a.shape[1]:
         raise ValueError("Non-square blocks are not supported.")
+
+    # TODO: This should support multiple GPUs.
 
     for j in range(a.shape[0]):
         # Batched BLAS operations could help here.

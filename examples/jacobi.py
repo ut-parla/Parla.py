@@ -1,7 +1,9 @@
 import numpy as np
 import numba.cuda
+
+from parla.array import copy
 from parla.cuda import gpu
-from parla.cpucores import cpu
+from parla.cpu import cpu
 from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
@@ -12,7 +14,6 @@ logging.basicConfig(level=logging.INFO)
 # parla.tasks.logger.setLevel(logging.DEBUG)
 # parla.task_runtime.logger.setLevel(logging.DEBUG)
 # parla.cuda.logger.setLevel(logging.DEBUG)
-# parla._cpuutils.logger.setLevel(logging.DEBUG)
 
 # CPU code to perform a single step in the Jacobi iteration.
 # Specialized later by jacobi_gpu
@@ -110,9 +111,9 @@ def main():
                     # Read boundary values from adjacent blocks in the partition.
                     # This may communicate across device boundaries.
                     if j > 0:
-                        in_block[0] = device.memory()(in_blocks[j - 1][-2])
+                        copy(in_block[0], in_blocks[j - 1][-2])
                     if j < divisions - 1:
-                        in_block[-1] = device.memory()(in_blocks[j + 1][1])
+                        copy(in_block[-1], in_blocks[j + 1][1])
                     # Run the computation, dispatching to device specific code.
                     jacobi(in_block, out_block)
             # For the next iteration, use the newly created tasks as
@@ -124,7 +125,7 @@ def main():
         for j in range(divisions):
             start_index = 1 if j > 0 else 0
             end_index = -1 if j < divisions - 1 else None  # None indicates the last element of the dimension
-            a1[mapper.slice(j, len(a1))] = cpu(0).memory()(out_blocks[j][start_index:end_index])
+            copy(a1[mapper.slice(j, len(a1))], out_blocks[j][start_index:end_index])
     # Check that the heterogeneous computation matches
     # a very simple CPU only implementation.
     assert np.max(np.absolute(a1 - actual)) < 1E-14

@@ -1,4 +1,6 @@
 import numpy as np
+
+from parla.array import copy
 from parla.cuda import gpu
 from parla.cpucores import cpu
 from parla.ldevice import LDeviceSequenceBlocked
@@ -27,7 +29,7 @@ def main():
             for i in range(divisions):
                 @spawn(placement=mapper.device(i))
                 def inner_local():
-                    partial_sums[i] = float(a_part[i] @ b_part[i])
+                    copy(partial_sums[i:i+1], a_part[i] @ b_part[i])
         res = 0.
         for i in range(divisions):
             res += partial_sums[i]

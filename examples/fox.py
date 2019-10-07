@@ -4,6 +4,7 @@ import logging
 import numpy as np
 
 import parla
+from parla.array import copy
 from parla.cpu import cpu
 from parla.cuda import gpu
 from parla.device import get_all_devices
@@ -42,7 +43,7 @@ def collect_fox(n, yp, y):
     for i in range(0, partitions_y):  # rows
         @spawn(C[i], placement=cpu(0))
         def c():
-            y[mapper.slice_x(i, n)] = cpu(0).memory()(yp[i][i])
+            copy(y[mapper.slice_x(i, n)], yp[i][i])
 
     # join the collect tasks
     @spawn(None, [C[0:partitions_y]], placement=cpu(0))

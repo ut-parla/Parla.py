@@ -3,6 +3,7 @@ import logging
 import numpy
 
 from parla import array
+from parla.array import ArrayType
 from parla.device import Memory, Device, MemoryKind
 
 logger = logging.getLogger(__name__)
@@ -25,3 +26,14 @@ class _CPUDevice(Device):
 
     def __repr__(self):
         return "<CPU {} ({}, {}, {})>".format(self.index, self.architecture, self.args, self.kwds)
+
+
+class _NumPyArrayType(ArrayType):
+    def get_memory(self, a):
+        return _CPUMemory(None)
+
+    def get_array_module(self, a):
+        return numpy
+
+
+array._register_array_type(numpy.ndarray, _NumPyArrayType())
