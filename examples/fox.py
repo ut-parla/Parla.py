@@ -111,19 +111,6 @@ def main():
     @spawn(placement=cpu(0))
     async def test_fox():
         size_factor = 1024
-        A = np.random.rand(size_factor/2, size_factor)
-        x = np.random.rand(size_factor)
-
-        res = A @ x
-        print("----", A.shape)
-        out = np.empty_like(x)
-        out1 = await matvec_fox(out, A, x)
-        assert out is out1
-        print("++++", A.shape)
-        print(np.linalg.norm(res - out, ord=np.inf))
-        assert np.allclose(res, out), "Parallel fox failed"
-
-        size_factor = 1024
         A = np.random.rand(size_factor, size_factor)
         x = np.random.rand(size_factor)
 
