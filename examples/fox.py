@@ -33,10 +33,10 @@ async def matvec_fox(y, A, x):
 
     await matvec_fox_partitioned(n, yp, Ap, xp)
 
-    return collect_fox(n, yp, y)
+    return await collect_fox(n, yp, y)
 
 
-def collect_fox(n, yp, y):
+async def collect_fox(n, yp, y):
     C = TaskSpace()
 
     # Collect from diagonal
@@ -46,11 +46,9 @@ def collect_fox(n, yp, y):
             copy(y[mapper.slice_x(i, n)], yp[i][i])
 
     # join the collect tasks
-    @spawn(None, [C[0:partitions_y]], placement=cpu(0))
-    def done():
-        pass
+    await C
 
-    return done  # Return the join task
+    return y
 
 
 def partition_fox(y, A, x):
@@ -77,7 +75,7 @@ def partition_fox(y, A, x):
     return n, yp, Ap, xp
 
 
-def matvec_fox_partitioned(n, yp, Ap, xp):
+async def matvec_fox_partitioned(n, yp, Ap, xp):
     B = TaskSpace()
     M = TaskSpace()
     R = TaskSpace()
@@ -106,26 +104,46 @@ def matvec_fox_partitioned(n, yp, Ap, xp):
                 acc[:] = acc + mapper.memory(i, i)(yp[i][j])
 
     # join the reduce tasks
-    @spawn(None, [R[0:partitions_y]], placement=cpu(0))
-    def done():
-        pass
-
-    return done  # Return the join task
+    await R
 
 
 def main():
     @spawn(placement=cpu(0))
     async def test_fox():
         size_factor = 1024
+        A = np.random.rand(size_factor/2, size_factor)
+        x = np.random.rand(size_factor)
+
+        res = A @ x
+        print("----", A.shape)
+        out = np.empty_like(x)
+        out1 = await matvec_fox(out, A, x)
+        assert out is out1
+        print("++++", A.shape)
+        print(np.linalg.norm(res - out, ord=np.inf))
+        assert np.allclose(res, out), "Parallel fox failed"
+
+        size_factor = 1024
         A = np.random.rand(size_factor, size_factor)
         x = np.random.rand(size_factor)
+
+        res = A @ x
+        print("----", A.shape)
+        out = np.empty_like(x)
+        out1 = await matvec_fox(out, A, x)
+        assert out is out1
+        print("++++", A.shape)
+        print(np.linalg.norm(res - out, ord=np.inf))
+        assert np.allclose(res, out), "Parallel fox failed"
+
         res = A @ (A @ x)
         print("----", A.shape)
         out = np.empty_like(x)
         n, yp, Ap, xp = partition_fox(out, A, x)
         await matvec_fox_partitioned(n, yp, Ap, xp)
         await matvec_fox_partitioned(n, xp, Ap, yp)
-        await collect_fox(n, xp, out)
+        out1 = await collect_fox(n, xp, out)
+        assert out is out1
         print("++++", A.shape)
         print(np.linalg.norm(res - out, ord=np.inf))
         assert np.allclose(res, out), "Parallel fox failed"
