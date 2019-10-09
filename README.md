@@ -1,13 +1,45 @@
-# Languages
+# Parla
 
-This directory contains documentation for the languages for our PSAAP proposal: Parla (surface language) and Gergo (core language).
-The goal of Parla is to provide a simple but usable set of high-performance programming features and allow automatic optimizations while still allowing programming control in all cases.
-Parla should be usable by real world programmers.
-The Parla documentation/specification is written as a well documented Python library.
-The Python files are in the package parla in this directory and additional documentation files are in docs.
-The documentation is built with Sphinx.
-A prebuilt version is maintained at: http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html
+Parla is a prototype high level tasking system for orchestrating many heterogeneous kernel calls.
 
-The goal of Gergo is to provide a *minimal* but expressive set of primitives to describe and optimize Parla programs.
-Gergo will not be usable by programmers, but will be simpler and more uniform to make optimization easier.
-Gergo also doesn't have any documentation and is almost entirely undefined.
+# Installation
+
+Parla is available as a conda package. It requires Python 3.7, numpy, and cupy. The examples also make extensive use of numba.
+
+To install miniconda you can follow the instructions available at [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
+If you have `wget` available, you can download and install miniconda into the miniconda subdirectory of your home directory by running
+
+```
+wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh
+bash miniconda.sh -b -p $HOME/miniconda
+rm miniconda.sh
+```
+
+To make miniconda available on your path in a given terminal session run
+```
+export PATH=$HOME/miniconda/bin:$PATH
+source activate
+```
+
+Once that's done, you can install parla by running
+
+```
+conda install -c insertinterestingnamehere parla
+```
+
+If you have already installed parla but need to access your miniconda installation from a new terminal session just run (as before)
+```
+export PATH=$HOME/miniconda/bin:$PATH
+source activate
+```
+
+Once parla is installed and your environment is configured to use it, all the scripts in this repository's examples directory are runnable as normal python scripts.
+If git is installed you can clone the repository and run the inner product example by running:
+
+```
+git clone https://github.com/ut-parla/Parla.py
+python Parla.py/examples/inner.py
+```
+
+If git is not available, you can just install it as a conda package alongside parla by running `conda install git` once the miniconda installation is accessible from a given terminal session.
+
