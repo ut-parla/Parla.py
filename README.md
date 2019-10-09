@@ -4,7 +4,7 @@ Parla is a prototype high level tasking system for orchestrating many heterogene
 
 # Installation
 
-Parla is available as a conda package. It requires Python 3.7, numpy, and cupy. The examples also make extensive use of numba.
+Parla is available as a conda package. A docker image with the conda package already set up is also available. Parla requires Python 3.7, numpy, cupy, scipy, and numba (currently needed only for the examples)
 
 To use the conda package, you must first install miniconda.
 To install miniconda you can follow the detailed instructions available at [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
