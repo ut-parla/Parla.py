@@ -41,7 +41,7 @@ int main() {
     std::size_t default_size = (n + partitions - 1) / partitions;
     std::size_t size = i < partitions - 1 ? default_size : ((n - 1) % default_size) + 1;
     sizes.get()[i] = size;
-    int location = i / devices;
+    int location = (i * devices) / partitions;
     locations.get()[i] = location;
     if (location != previous_device) {
       previous_device = location;
