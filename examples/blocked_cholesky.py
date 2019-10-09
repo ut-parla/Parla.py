@@ -30,11 +30,9 @@ def cholesky_inplace(a):
 def cholesky_inplace(a):
     if a.shape[0] != a.shape[1]:
         raise ValueError("A square array is required.")
-    ca = clone_here(a) # dtype='f'
-    # print("CUDA:", a, ca)
+    ca = clone_here(a)
     ca[:] = cupy.linalg.cholesky(ca)
     copy(a, ca)
-    # print("CUDA:", a, ca)
 
 # This is a naive version of dtrsm.
 # The result is written over the input array 'b'.
@@ -71,29 +69,35 @@ def cholesky_blocked_inplace(a):
     for j in range(a.shape[0]):
         # Batched BLAS operations could help here.
         for k in range(j):
-            @spawn(T1[j, k], [T4[j, k]], placement=gpu(0))
+            @spawn(T1[j, k], [T4[j, k]])
             def t1():
-                a[j,j] -= a[j,k] @ a[j,k].T
-        @spawn(T2[j], [T1[j, 0:j]], placement=gpu(0))
+                out = clone_here(a[j,j])
+                rhs = clone_here(a[j,k])
+                out -= rhs @ rhs.T
+                copy(a[j,j], out)
+        @spawn(T2[j], [T1[j, 0:j]])
         def t2():
             cholesky_inplace(a[j,j])
         for i in range(j+1, a.shape[0]):
             for k in range(j):
-                @spawn(T3[i, j, k], [T4[j, k], T4[i, k]], placement=gpu(0))
+                @spawn(T3[i, j, k], [T4[j, k], T4[i, k]])
                 def t3():
-                    a[i,j] -= a[i,k] @ a[j,k].T
+                    out = clone_here(a[i,j])
+                    rhs1 = clone_here(a[i,k])
+                    rhs2 = clone_here(a[j,k])
+                    out -= rhs1 @ rhs2.T
+                    copy(a[i,j], out)
             @spawn(T4[i, j], [T3[i, j, 0:j], T2[j]], placement=cpu(0))
             def t4():
                 ltriang_solve(a[j,j], a[i,j].T)
     return T2[a.shape[0]-1]
-
 
 def main():
     @spawn(placement=cpu(0))
     async def test_blocked_cholesky():
         n = 6000
         np.random.seed(0)
-        num_runs = 50
+        num_runs = 1
         a = np.random.rand(n, n)
         block_size = 125
         assert not n % block_size
@@ -107,7 +111,8 @@ def main():
             await cholesky_blocked_inplace(ap)
             end = time.perf_counter()
             times.append(end - start)
-        assert np.allclose(res, np.tril(a1)), "Parallel cholesky_blocked_inplace failed"
+        computed_L = np.tril(a1)
+        assert(np.max(np.absolute(a - computed_L @ computed_L.T)) < 1E-8)
         print(*times)
 
 if __name__ == '__main__':
