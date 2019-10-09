@@ -6,7 +6,7 @@ package:
 
 build:
   noarch: python
-  number: 2
+  number: 3
   script: |
     cd $RECIPE_DIR/..
     "{{ PYTHON }}" -m pip install . --no-deps --ignore-installed
@@ -15,10 +15,8 @@ requirements:
   host:
     - python
     - pip
-    - parla_task
   run:
     - python
-    - parla_task
 
 about:
   license: BSD
