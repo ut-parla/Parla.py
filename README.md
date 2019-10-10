@@ -35,7 +35,7 @@ export PATH=$HOME/miniconda/bin:$PATH
 source activate
 ```
 
-A docker container with the above steps already completed is available at [https://hub.docker.com/r/insertinterestingnamehere/parla](https://hub.docker.com/r/insertinterestingnamehere/parla). You can get a shell in this docker container by running
+A docker container with the above steps already completed is available at [https://hub.docker.com/r/insertinterestingnamehere/parla](https://hub.docker.com/r/insertinterestingnamehere/parla). You can get a shell in this docker container by running (using `sudo` may be required, depending on how docker is set up)
 
 ```
 docker run -it insertinterestingnamehere/parla
