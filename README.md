@@ -12,7 +12,7 @@ Abbreviated instructions are included here.
 If you are running Linux and have `wget` available, you can download and install miniconda into the miniconda subdirectory of your home directory by running
 
 ```
-wget https://repo.continuum.io/miniconda/Miniconda2-latest-Linux-x86_64.sh -O miniconda.sh
+wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
 bash miniconda.sh -b -p $HOME/miniconda
 rm miniconda.sh
 ```
@@ -26,7 +26,7 @@ source activate
 Once that's done, you can install parla by running
 
 ```
-conda install -c insertinterestingnamehere parla
+conda install -y -c insertinterestingnamehere parla
 ```
 
 If you have already installed parla but need to access your miniconda installation from a new terminal session just run (as before)
@@ -49,5 +49,5 @@ git clone https://github.com/ut-parla/Parla.py
 python Parla.py/examples/inner.py
 ```
 
-If git is not available, you can install it as a conda package alongside parla by running `conda install git` from a terminal session configured to use miniconda.
+If git is not available, you can install it as a conda package alongside parla by running `conda install -y git` from a terminal session configured to use miniconda.
 
