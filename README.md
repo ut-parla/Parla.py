@@ -35,7 +35,11 @@ export PATH=$HOME/miniconda/bin:$PATH
 source activate
 ```
 
-A docker container with the above steps already completed is available at [https://hub.docker.com/r/insertinterestingnamehere/parla](https://hub.docker.com/r/insertinterestingnamehere/parla). You can get a shell in this docker container by running `docker run -it insertinterestingnamehere/parla`.
+A docker container with the above steps already completed is available at [https://hub.docker.com/r/insertinterestingnamehere/parla](https://hub.docker.com/r/insertinterestingnamehere/parla). You can get a shell in this docker container by running
+
+```
+docker run -it insertinterestingnamehere/parla
+```
 
 Once parla is installed and your environment is configured to use it, all the scripts in this repository's examples directory are runnable as normal python scripts.
 If git is installed you can clone the repository and run the inner product example by running:
