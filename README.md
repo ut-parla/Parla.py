@@ -6,8 +6,6 @@ Parla is a prototype high level tasking system for orchestrating many heterogene
 
 Parla is available as a conda package. A docker image with the conda package already set up is also available. Parla requires Python 3.7, numpy, cupy, scipy, and numba (currently needed only for the examples)
 
-The docker image is available at insertinterestingnamehere/parla on dockerhub.
-
 To use the conda package, you must first install miniconda.
 To install miniconda you can follow the detailed instructions available at [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
 Abbreviated instructions are included here.
@@ -37,6 +35,8 @@ export PATH=$HOME/miniconda/bin:$PATH
 source activate
 ```
 
+A docker container with the above steps already completed is available at [https://hub.docker.com/r/insertinterestingnamehere/parla](https://hub.docker.com/r/insertinterestingnamehere/parla). You can get a shell in this docker container by running `docker run -it insertinterestingnamehere/parla`.
+
 Once parla is installed and your environment is configured to use it, all the scripts in this repository's examples directory are runnable as normal python scripts.
 If git is installed you can clone the repository and run the inner product example by running:
 
@@ -45,5 +45,5 @@ git clone https://github.com/ut-parla/Parla.py
 python Parla.py/examples/inner.py
 ```
 
-If git is not available, you can just install it as a conda package alongside parla by running `conda install git` once the miniconda installation is accessible from a given terminal session.
+If git is not available, you can install it as a conda package alongside parla by running `conda install git` from a terminal session configured to use miniconda.
 
