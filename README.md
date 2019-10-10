@@ -1,6 +1,6 @@
 # Parla
 
-Parla is a prototype high level tasking system for orchestrating many heterogeneous kernel calls.
+Parla is a prototype high level system for orchestrating data movement and kernel calls for all the CPUs and GPUs available on a given machine.
 
 # Installation
 
