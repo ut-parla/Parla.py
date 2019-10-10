@@ -2,7 +2,7 @@ import itertools
 import logging
 
 import numpy as np
-from mpi4py import MPI, MPI as mpi
+from mpi4py import MPI
 
 from parla.array import copy
 from parla.cpu import cpu
