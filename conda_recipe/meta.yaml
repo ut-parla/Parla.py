@@ -21,6 +21,7 @@ requirements:
     - cupy
     - scipy
     - numba
+    - mpi4py
 
 about:
   license: BSD
