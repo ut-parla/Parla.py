@@ -48,6 +48,9 @@ python Parla.py/examples/inner.py
 
 If git is not available, you can install it as a conda package alongside parla by running `conda install -y git` from a terminal session configured to use miniconda.
 
+Note: Anaconda's cuda setup assumes that `libcuda.so.1` can be found by the dynamic linker when loading the Python modules for CuPy.
+If `libcuda.so.1` isn't located somewhere where the dynamic linker is configured to for it, a simple way to ensure that the conda installed packages do find it is to create a symlink at `$HOME/miniconda/lib/libcuda.so.1` that points to the correct libcuda.
+
 ## Running the Docker Container
 
 To get a shell inside the provided docker container run
