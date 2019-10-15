@@ -56,7 +56,7 @@ If `libcuda.so.1` isn't located somewhere where the dynamic linker is configured
 To get a shell inside the provided docker container run
 
 ```
-docker run --gpus all --rm -it insertinterestingnamehere/parla
+docker run --gpus all --rm -it utparla/parla
 ```
 
 Depending on how your machine is set up, you may need to run this command as root using `sudo` or some other method.
