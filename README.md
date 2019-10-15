@@ -29,7 +29,7 @@ source activate
 Once that's done, you can install parla by running
 
 ```
-conda install -y -c insertinterestingnamehere parla
+conda install -y -c ut-parla parla
 ```
 
 If you have already installed parla but need to access your miniconda installation from a new terminal session just run (as before)
