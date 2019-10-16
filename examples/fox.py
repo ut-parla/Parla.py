@@ -81,17 +81,19 @@ async def matvec_fox_partitioned(n, yp, Ap, xp):
     R = TaskSpace()
 
     # broadcast along columns
-    for j, i in itertools.product(range(0, partitions_x), range(0, partitions_y)):
-        @spawn(B[i, j], placement=mapper.device(i, j))
-        def b():
-            xp[i][j][:] = mapper.memory(i, j)(xp[j][j])
+    for j in range(0, partitions_x):
+        for i in range(0, partitions_y):
+            @spawn(B[i, j], placement=mapper.device(i, j))
+            def b():
+                xp[i][j][:] = mapper.memory(i, j)(xp[j][j])
 
     # block-wise multiplication
-    for i, j in itertools.product(range(0, partitions_y), range(0, partitions_x)):
-        @spawn(M[i, j], [B[i, j]], placement=mapper.device(i, j))
-        def m():
-            # TODO: Once cupy supports the out parameter for matmul, use that here instead.
-            yp[i][j][:] = Ap[i][j] @ xp[i][j]
+    for i in range(0, partitions_y):
+        for j in range(0, partitions_x):
+            @spawn(M[i, j], [B[i, j]], placement=mapper.device(i, j))
+            def m():
+                # TODO: Once cupy supports the out parameter for matmul, use that here instead.
+                yp[i][j][:] = Ap[i][j] @ xp[i][j]
 
     # reduce along rows
     for i in range(0, partitions_y):  # rows
