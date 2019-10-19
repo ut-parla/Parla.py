@@ -1,7 +1,9 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <iostream>
+#include <string>
 #include <random>
 #include <thread>
 #include <utility>
@@ -11,7 +13,7 @@
 #include <cuda_runtime.h>
 
 int main() {
-  std::size_t n = 10000000ull;
+  std::size_t n = 3*100000000ull;
   std::size_t partitions = 100ull;
   std::mt19937 gen{0};
   std::uniform_real_distribution<> dis(-1., 1.);
@@ -27,6 +29,9 @@ int main() {
   auto stat = cudaGetDeviceCount(&devices);
   assert(stat == cudaSuccess);
   assert(devices > 0);
+  if (std::getenv("N_DEVICES")) {
+	devices = std::stoi(std::getenv("N_DEVICES"));
+  } 
   auto start = std::chrono::high_resolution_clock::now();
   auto locations = std::make_unique<int[]>(partitions);
   auto x_input_ptrs = std::make_unique<double*[]>(partitions);

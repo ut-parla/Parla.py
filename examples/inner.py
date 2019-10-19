@@ -2,20 +2,25 @@ import numpy as np
 
 from parla.array import copy
 from parla.cuda import gpu
-from parla.cpucores import cpu
+from parla.cpu import cpu
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import *
 import time
+import os
 
 def main():
-    a = np.random.rand(10000000)
-    b = np.random.rand(10000000)
+    n = 3*100000000
+    a = np.random.rand(n)
+    b = np.random.rand(n)
 
     divisions = 100
 
     start = time.perf_counter()
     # Map the divisions onto actual hardware locations
-    mapper = LDeviceSequenceBlocked(divisions)
+    devs = list(gpu.devices) + list(cpu.devices)
+    if "N_DEVICES" in os.environ:
+        devs = devs[:int(os.environ.get("N_DEVICES"))]
+    mapper = LDeviceSequenceBlocked(divisions, devices=devs)
 
     a_part = mapper.partition_tensor(a)
     b_part = mapper.partition_tensor(b)
