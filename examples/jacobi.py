@@ -23,20 +23,37 @@ def jacobi(a0, a1):
 # Actual cuda kernel to do a single step
 @numba.cuda.jit
 def gpu_jacobi_kernel(a0, a1):
-    start = numba.cuda.grid(1)
-    stride = numba.cuda.gridsize(1)
-    for i in range(start + 1, a0.shape[0] - 1, stride):
-        for j in range(1, a1.shape[1] - 1):
-            a1[i,j] = .25 * (a0[i-1,j] + a0[i+1,j] + a0[i,j-1] + a0[i,j+1])
-
+    i, j = numba.cuda.grid(2)
+    if 0 < i < a1.shape[0]-1 and 0 < j < a1.shape[1]-1:
+        a1[i,j] = .25 * (a0[i-1,j] + a0[i+1,j] + a0[i,j-1] + a0[i,j+1])
 
 # GPU kernel call to perform a single step in the Jacobi iteration.
 @jacobi.variant(gpu)
 def jacobi_gpu(a0, a1):
-    threads_per_block = 128
-    blocks_per_grid = (a0.shape[0] + (threads_per_block - 1)) // threads_per_block
+    threads_per_block_x = 32
+    threads_per_block_y = 1024//threads_per_block_x
+    blocks_per_grid_x = (a0.shape[0] + (threads_per_block_x - 1)) // threads_per_block_x
+    blocks_per_grid_y = (a0.shape[1] + (threads_per_block_y - 1)) // threads_per_block_y
     # Relying on numba/cupy interop here.
-    gpu_jacobi_kernel[blocks_per_grid, threads_per_block](a0, a1)
+    gpu_jacobi_kernel[(blocks_per_grid_x,blocks_per_grid_y), (threads_per_block_x,threads_per_block_y)](a0, a1)
+
+# # Actual cuda kernel to do a single step
+# @numba.cuda.jit
+# def gpu_jacobi_kernel(a0, a1):
+#     start = numba.cuda.grid(1)
+#     stride = numba.cuda.gridsize(1)
+#     for i in range(start + 1, a0.shape[0] - 1, stride):
+#         for j in range(1, a1.shape[1] - 1):
+#             a1[i,j] = .25 * (a0[i-1,j] + a0[i+1,j] + a0[i,j-1] + a0[i,j+1])
+#
+#
+# # GPU kernel call to perform a single step in the Jacobi iteration.
+# @jacobi.variant(gpu)
+# def jacobi_gpu(a0, a1):
+#     threads_per_block = 128
+#     blocks_per_grid = (a0.shape[0] + (threads_per_block - 1)) // threads_per_block
+#     # Relying on numba/cupy interop here.
+#     gpu_jacobi_kernel[blocks_per_grid, threads_per_block](a0, a1)
 
 
 def main():
