@@ -9,11 +9,8 @@ from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
 import parla
 
-import logging
-logging.basicConfig(level=logging.INFO)
-# parla.tasks.logger.setLevel(logging.DEBUG)
-# parla.task_runtime.logger.setLevel(logging.DEBUG)
-# parla.cuda.logger.setLevel(logging.DEBUG)
+import os
+import time
 
 # CPU code to perform a single step in the Jacobi iteration.
 # Specialized later by jacobi_gpu
@@ -36,7 +33,7 @@ def gpu_jacobi_kernel(a0, a1):
 # GPU kernel call to perform a single step in the Jacobi iteration.
 @jacobi.variant(gpu)
 def jacobi_gpu(a0, a1):
-    threads_per_block = 64
+    threads_per_block = 128
     blocks_per_grid = (a0.shape[0] + (threads_per_block - 1)) // threads_per_block
     # Relying on numba/cupy interop here.
     gpu_jacobi_kernel[blocks_per_grid, threads_per_block](a0, a1)
@@ -45,8 +42,8 @@ def jacobi_gpu(a0, a1):
 def main():
     # Set up an "n" x "n" grid of values and run
     # "steps" number of iterations of the 4 point stencil on it.
-    n = 4000
-    steps = 6
+    n = 25000
+    steps = 200
 
     # Set up two arrays containing the input data.
     # This demo uses the standard technique of computing
@@ -57,17 +54,12 @@ def main():
     a0 = np.random.rand(n, n)
     a1 = a0.copy()
 
-    # Get the correct result using only the CPU to check
-    # that the heterogeneous code is correct.
-    actual = a0.copy()
-    for i in range(steps):
-        actual[1:-1,1:-1] = .25 * (actual[2:,1:-1] + actual[:-2,1:-1] + actual[1:-1,2:] + actual[1:-1,:-2])
-
-    # Number of blocks in the partition across devices
-    divisions = 40
-
+    devs = list(gpu.devices) + list(cpu.devices)
+    if "N_DEVICES" in os.environ:
+        devs = devs[:int(os.environ.get("N_DEVICES"))]
+    divisions = len(devs)
     # An object that distributes arrays across all the given devices.
-    mapper = LDeviceSequenceBlocked(divisions)
+    mapper = LDeviceSequenceBlocked(divisions, devices=devs)
 
     # Partition a0 and a1.
     # Here we just partition the rows across the different devices.
@@ -75,6 +67,7 @@ def main():
     a0_row_groups = mapper.partition_tensor(a0, overlap=1)
     a1_row_groups = mapper.partition_tensor(a1, overlap=1)
 
+    start = time.perf_counter()
     # Main parla task.
     @spawn(placement=cpu(0))
     async def run_jacobi():
@@ -126,10 +119,8 @@ def main():
             start_index = 1 if j > 0 else 0
             end_index = -1 if j < divisions - 1 else None  # None indicates the last element of the dimension
             copy(a1[mapper.slice(j, len(a1))], out_blocks[j][start_index:end_index])
-    # Check that the heterogeneous computation matches
-    # a very simple CPU only implementation.
-    assert np.max(np.absolute(a1 - actual)) < 1E-14
-    print("success")
+    end = time.perf_counter()
+    print(end - start)
 
 
 if __name__ == '__main__':
