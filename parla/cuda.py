@@ -60,7 +60,9 @@ class _GPUDevice(Device):
     @contextmanager
     def context(self):
         with cupy.cuda.Device(self.index):
-            yield
+            with cupy.cuda.Stream(null=False, non_blocking=True) as stream:
+                yield
+                stream.synchronize()
 
     @lru_cache(None)
     def memory(self, kind: MemoryKind = None):
