@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import numba.cuda
 
@@ -7,7 +9,9 @@ from parla.cpu import cpu
 from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
-import parla
+import parla.array
+
+import cupy
 
 import os
 import time
@@ -57,6 +61,11 @@ def jacobi_gpu(a0, a1):
 
 
 def main():
+    devs = list(gpu.devices) + list(cpu.devices)
+    if "N_DEVICES" in os.environ:
+        devs = devs[:int(os.environ.get("N_DEVICES"))]
+    divisions = len(devs)*1
+
     # Set up an "n" x "n" grid of values and run
     # "steps" number of iterations of the 4 point stencil on it.
     n = 25000
@@ -71,10 +80,6 @@ def main():
     a0 = np.random.rand(n, n)
     a1 = a0.copy()
 
-    devs = list(gpu.devices) + list(cpu.devices)
-    if "N_DEVICES" in os.environ:
-        devs = devs[:int(os.environ.get("N_DEVICES"))]
-    divisions = len(devs)
     # An object that distributes arrays across all the given devices.
     mapper = LDeviceSequenceBlocked(divisions, devices=devs)
 
@@ -120,24 +125,30 @@ def main():
                 def device_local_jacobi_task():
                     # Read boundary values from adjacent blocks in the partition.
                     # This may communicate across device boundaries.
+                    c_start = time.perf_counter()
                     if j > 0:
                         copy(in_block[0], in_blocks[j - 1][-2])
                     if j < divisions - 1:
                         copy(in_block[-1], in_blocks[j + 1][1])
+                    c_end = time.perf_counter()
+                    print(device, j, i, "copy", c_end - c_start, in_block[0].shape)
                     # Run the computation, dispatching to device specific code.
+                    w_start = time.perf_counter()
                     jacobi(in_block, out_block)
+                    cupy.cuda.get_current_stream().synchronize()
+                    w_end = time.perf_counter()
+                    print(device, j, i, "work", w_end - w_start, in_block.shape)
             # For the next iteration, use the newly created tasks as
             # the tasks from the previous step.
             previous_block_tasks = current_block_tasks
         await previous_block_tasks
-        # Gather the results of the computation back into the original a1 array.
+        end = time.perf_counter()
+        print(end - start)
         # This depends on all the tasks from the last iteration step.
         for j in range(divisions):
             start_index = 1 if j > 0 else 0
             end_index = -1 if j < divisions - 1 else None  # None indicates the last element of the dimension
             copy(a1[mapper.slice(j, len(a1))], out_blocks[j][start_index:end_index])
-    end = time.perf_counter()
-    print(end - start)
 
 
 if __name__ == '__main__':
