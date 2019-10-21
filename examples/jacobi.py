@@ -16,6 +16,13 @@ import cupy
 import os
 import time
 
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
+# logger.setLevel(logging.DEBUG)
+# parla.array.logger.setLevel(logging.DEBUG)
+# parla.cuda.logger.setLevel(logging.DEBUG)
+# parla._cpuutils.logger.setLevel(logging.DEBUG)
+
 # CPU code to perform a single step in the Jacobi iteration.
 # Specialized later by jacobi_gpu
 @specialized
@@ -64,10 +71,11 @@ def main():
     devs = list(gpu.devices) + list(cpu.devices)
     if "N_DEVICES" in os.environ:
         devs = devs[:int(os.environ.get("N_DEVICES"))]
-    divisions = len(devs)*1
+    divisions = len(devs)*2
 
     # Set up an "n" x "n" grid of values and run
     # "steps" number of iterations of the 4 point stencil on it.
+    # n = int(25000*divisions**0.5)
     n = 25000
     steps = 200
 
@@ -82,12 +90,30 @@ def main():
 
     # An object that distributes arrays across all the given devices.
     mapper = LDeviceSequenceBlocked(divisions, devices=devs)
+    # print(mapper.devices)
 
     # Partition a0 and a1.
     # Here we just partition the rows across the different devices.
     # Other partitioning schemes are possible.
     a0_row_groups = mapper.partition_tensor(a0, overlap=1)
     a1_row_groups = mapper.partition_tensor(a1, overlap=1)
+
+    # Trigger JIT
+    start = time.perf_counter()
+    @spawn(placement=cpu(0))
+    async def warmups():
+        warmup = TaskSpace()
+        for i in range(divisions):
+            @spawn(warmup[i], placement=mapper.device(i))
+            async def w():
+                jacobi(a0_row_groups[i], a1_row_groups[i])
+                cupy.cuda.get_current_stream().synchronize()
+                cupy.cuda.Stream.null.synchronize()
+        await warmup
+    end = time.perf_counter()
+    # print("warmup", end - start)
+
+    time.sleep(5)
 
     start = time.perf_counter()
     # Main parla task.
@@ -125,23 +151,25 @@ def main():
                 def device_local_jacobi_task():
                     # Read boundary values from adjacent blocks in the partition.
                     # This may communicate across device boundaries.
-                    c_start = time.perf_counter()
+                    # c_start = time.perf_counter()
                     if j > 0:
                         copy(in_block[0], in_blocks[j - 1][-2])
                     if j < divisions - 1:
                         copy(in_block[-1], in_blocks[j + 1][1])
-                    c_end = time.perf_counter()
-                    print(device, j, i, "copy", c_end - c_start, in_block[0].shape)
+                    # c_end = time.perf_counter()
+                    # print(device, j, i, "copy", c_end - c_start, in_block[0].shape)
                     # Run the computation, dispatching to device specific code.
-                    w_start = time.perf_counter()
+                    # w_start = time.perf_counter()
                     jacobi(in_block, out_block)
-                    cupy.cuda.get_current_stream().synchronize()
-                    w_end = time.perf_counter()
-                    print(device, j, i, "work", w_end - w_start, in_block.shape)
+                    # cupy.cuda.get_current_stream().synchronize()
+                    # w_end = time.perf_counter()
+                    # print(device, j, i, "work", w_end - w_start, in_block.shape)
             # For the next iteration, use the newly created tasks as
             # the tasks from the previous step.
             previous_block_tasks = current_block_tasks
         await previous_block_tasks
+        cupy.cuda.get_current_stream().synchronize()
+        cupy.cuda.Stream.null.synchronize()
         end = time.perf_counter()
         print(end - start)
         # This depends on all the tasks from the last iteration step.
@@ -152,4 +180,11 @@ def main():
 
 
 if __name__ == '__main__':
+    # import yappi
+    #
+    # yappi.start()
+
     main()
+
+    # yappi.get_func_stats().print_all()
+    # yappi.get_thread_stats().print_all()
