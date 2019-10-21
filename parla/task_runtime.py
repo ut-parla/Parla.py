@@ -2,6 +2,7 @@ import logging
 from queue import SimpleQueue
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import time
 
 from .device import get_all_devices, get_all_architectures, Device
 
@@ -102,11 +103,11 @@ class Scheduler:
         return True
 
     def finished(self):
+        with self.counter_mutex:
+            if self.tasks_in_progress:
+                return False
         with self.mutex:
             assert self.active
-            with self.counter_mutex:
-                if self.tasks_in_progress:
-                    return False
             for queue in self.device_queues.values():
                 if not queue.empty():
                     return False
@@ -135,6 +136,8 @@ def local_func(arg):
                     break
             try:
                 did_work = scheduler.run_next()
+                if not did_work:
+                    time.sleep(50 / 1000)
             except Exception as exc:
                 with scheduler.exception_log_mutex:
                     scheduler.raised_exceptions.append(exc)
