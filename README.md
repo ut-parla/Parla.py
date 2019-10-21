@@ -2,6 +2,7 @@
 
 Parla is a high-level programming system for running numerical simulations on heterogeneous architectures.
 The current prototype emphasizes orchestrating data movement and kernel calls across all the CPUs and GPUs available on a given machine.
+API documentation is available at (http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html)[http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html].
 
 # Installation
 
