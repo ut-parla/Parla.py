@@ -1,3 +1,4 @@
+import logging
 from abc import ABCMeta, abstractmethod
 from typing import Dict
 
@@ -5,16 +6,35 @@ import numpy as np
 
 from parla.tasks import get_current_device
 
+logger = logging.getLogger(__name__)
+
 __all__ = ["get_array_module", "get_memory", "is_array", "asnumpy", "copy", "clone_here"]
 
 
 class ArrayType(metaclass=ABCMeta):
     @abstractmethod
     def get_memory(self, a):
+        """
+        :param a: An array of self's type.
+        :return: The memory containing `a`.
+        """
+        pass
+
+    @abstractmethod
+    def can_assign_from(self, a, b):
+        """
+        :param a: An array of self's type.
+        :param b: An array of any type.
+        :return: True iff `a` supports assignments from `b`.
+        """
         pass
 
     @abstractmethod
     def get_array_module(self, a):
+        """
+        :param a: An array of self's type.
+        :return: The `numpy` compatible module for the array `a`.
+        """
         pass
 
 
@@ -23,6 +43,15 @@ _array_types: Dict[type, ArrayType] = dict()
 
 def _register_array_type(ty, get_memory_impl: ArrayType):
     _array_types[ty] = get_memory_impl
+
+
+def can_assign_from(a, b):
+    """
+    :param a: An array.
+    :param b: An array.
+    :return: True iff `a` supports assignments from `b`.
+    """
+    return _array_types[type(a)].can_assign_from(a, b)
 
 
 def get_array_module(a):
@@ -57,7 +86,7 @@ def get_memory(a):
     for instance, in which case this will return one of the equivalent memories, but not necessarily the one used
     to create the array.)
     """
-    if type(a) not in _array_types:
+    if not is_array(a):
         raise TypeError("Array required, given value of type {}".format(type(a)))
     return _array_types[type(a)].get_memory(a)
 
@@ -70,7 +99,12 @@ def copy(destination, source):
     :param source: The array to read from or the scalar value to put in destination.
     """
     if is_array(source):
-        destination[:] = get_memory(destination)(source)
+        if can_assign_from(destination, source):
+            logger.debug("Direct assign from %r to %r", get_memory(source), get_memory(destination))
+            destination[:] = source
+        else:
+            logger.debug("Copy then assign from %r to %r", get_memory(source), get_memory(destination))
+            destination[:] = get_memory(destination)(source)
     else:
         # We assume all non-array types are by-value and hence already exist in the Python interpreter
         # and don't need to be copied.

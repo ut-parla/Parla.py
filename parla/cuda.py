@@ -3,6 +3,8 @@ from contextlib import contextmanager
 import logging
 from functools import wraps, lru_cache
 
+import numpy
+
 from parla import array
 from parla.array import ArrayType
 from . import device
@@ -100,6 +102,9 @@ device._register_architecture("gpu", gpu)
 
 
 class _CuPyArrayType(ArrayType):
+    def can_assign_from(self, a, b):
+        return isinstance(b, (cupy.ndarray, numpy.ndarray))
+
     def get_memory(self, a):
         return gpu(a.device.id).memory()
 

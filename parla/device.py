@@ -78,6 +78,9 @@ class Memory(Detail, metaclass=ABCMeta):
         """
         raise NotImplementedError()
 
+    def __repr__(self):
+        return "<{} {} {}>".format(type(self).__name__, self.device, self.kind)
+
 
 class Device(metaclass=ABCMeta):
     """
@@ -142,7 +145,8 @@ class Architecture(metaclass=ABCMeta):
         """
         return Device(self, *args, **kwds)
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def devices(self):
         pass
 

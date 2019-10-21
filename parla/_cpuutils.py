@@ -29,6 +29,9 @@ class _CPUDevice(Device):
 
 
 class _NumPyArrayType(ArrayType):
+    def can_assign_from(self, a, b):
+        return isinstance(b, numpy.ndarray)
+
     def get_memory(self, a):
         return _CPUMemory(None)
 
