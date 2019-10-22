@@ -70,7 +70,7 @@ def main():
     devs = list(gpu.devices) + list(cpu.devices)
     if "N_DEVICES" in os.environ:
         devs = devs[:int(os.environ.get("N_DEVICES"))]
-    divisions = len(devs) * 2
+    divisions = len(devs)
 
     # Set up an "n" x "n" grid of values and run
     # "steps" number of iterations of the 4 point stencil on it.
@@ -79,8 +79,8 @@ def main():
     #steps = 6
     #overlap = 3
     n = 25000
-    steps = 200
-    overlap = 10
+    steps = 10000
+    overlap = 200
 
     # Set up two arrays containing the input data.
     # This demo uses the standard technique of computing
