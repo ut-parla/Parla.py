@@ -79,7 +79,7 @@ def main():
     #steps = 6
     #overlap = 3
     n = 25000
-    steps = 10000
+    steps = 50000
     overlap = 200
 
     # Set up two arrays containing the input data.
