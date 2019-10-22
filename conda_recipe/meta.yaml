@@ -6,7 +6,7 @@ package:
 
 build:
   noarch: python
-  number: 4
+  number: 5
   script: |
     cd $RECIPE_DIR/..
     "{{ PYTHON }}" -m pip install . --no-deps --ignore-installed
@@ -21,7 +21,7 @@ requirements:
     - cupy
     - scipy
     - numba
-    - mpi4py
+    #- mpi4py
 
 about:
   license: BSD
