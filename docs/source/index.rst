@@ -16,7 +16,6 @@ The Parla Language
    parla.partitioning
    prototype
    examples
-   todos
 
 
 Indices

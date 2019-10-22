@@ -19,6 +19,7 @@ except (ImportError, AttributeError):
     # Ignore the exception if the stack includes the doc generator
     if all("sphinx" not in f.filename for f in inspect.getouterframes(inspect.currentframe())):
         raise
+    cupy = None
 
 __all__ = ["gpu"]
 
@@ -76,6 +77,8 @@ class _GPUArchitecture(Architecture):
     def __init__(self, name, id):
         super().__init__(name, id)
         devices = []
+        if not cupy:
+            return
         for device_id in range(2**16):
             cupy_device = cupy.cuda.Device(device_id)
             try:
@@ -114,4 +117,5 @@ class _CuPyArrayType(ArrayType):
         return cupy.get_array_module(a)
 
 
-array._register_array_type(cupy.ndarray, _CuPyArrayType())
+if cupy:
+    array._register_array_type(cupy.ndarray, _CuPyArrayType())
