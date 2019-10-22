@@ -1,4 +1,5 @@
 import logging
+import os
 from queue import SimpleQueue
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -201,6 +202,8 @@ class Task:
 #  have "new work" condition that the threads block on and run_task
 #  asserts if it is called from a non-pool thread.
 
+_threads_per_device = int(os.environ.get("PARLA_THREADS_PER_DEVICE", "1"))
+
 def run_task(func, inputs, dependencies, queue_identifier = None):
     global pool_running
     if pool_running:
@@ -209,7 +212,7 @@ def run_task(func, inputs, dependencies, queue_identifier = None):
         # TODO: Do we want an interface that lets the scheduler be specified at
         # runtime instead of just having it be here?
         scheduler = Scheduler()
-        devices = get_all_devices()
+        devices = list(get_all_devices()) * _threads_per_device
         pool_running = True
         with scheduler, ThreadPoolExecutor(len(devices)) as pool:
             root_task = Task(func, inputs, dependencies, queue_identifier, scheduler)
