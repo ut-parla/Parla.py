@@ -75,12 +75,12 @@ def main():
     # Set up an "n" x "n" grid of values and run
     # "steps" number of iterations of the 4 point stencil on it.
     # n = int(25000*divisions**0.5)
-    n = 36
-    steps = 6
-    overlap = 3
-    #n = 25000
-    #steps = 200
-    #overlap = 10
+    #n = 36
+    #steps = 6
+    #overlap = 3
+    n = 25000
+    steps = 200
+    overlap = 10
 
     # Set up two arrays containing the input data.
     # This demo uses the standard technique of computing
@@ -106,7 +106,6 @@ def main():
     a1_row_groups = mapper.partition_tensor(a1, overlap=overlap)
 
     # Trigger JIT
-    """
     start = time.perf_counter()
     @spawn(placement=cpu(0))
     async def warmups():
@@ -120,7 +119,6 @@ def main():
         await warmup
     end = time.perf_counter()
     # print("warmup", end - start)
-    """
 
     start = time.perf_counter()
     # Main parla task.
@@ -137,9 +135,6 @@ def main():
         previous_communication_tasks = CompletedTaskSpace()
         # Now create the tasks for subsequent iteration steps.
         for i in range(0, steps, overlap):
-            # Swap input and output blocks for the next step.
-            if overlap % 2:
-                in_blocks, out_blocks = out_blocks, in_blocks
             # Create a new set of labels for the tasks that do this iteration step.
             current_block_tasks = TaskSpace("block_tasks[{}]".format(i))
             current_communication_tasks = TaskSpace("communcation[{}]".format(i))
@@ -177,10 +172,11 @@ def main():
                     # cupy.cuda.get_current_stream().synchronize()
                     # w_end = time.perf_counter()
                     # print(device, j, i, "work", w_end - w_start, in_block.shape)
+            if overlap % 2:
+                in_blocks, out_blocks = out_blocks, in_blocks
             if i + overlap >= steps:
                 previous_communication_tasks = current_block_tasks
                 break
-            communicating_blocks = out_blocks if overlap % 2 else in_blocks
             for j in range(divisions):
                 device = mapper.device(j)
                 @spawn(current_communication_tasks[j],
@@ -188,9 +184,9 @@ def main():
                        placement=device)
                 def device_local_data_movement():
                     if j > 0:
-                        copy(communicating_blocks[j][:overlap], communicating_blocks[j - 1][-2*overlap:-overlap])
+                        copy(in_blocks[j][:overlap], in_blocks[j - 1][-2*overlap:-overlap])
                     if j < divisions - 1:
-                        copy(communicating_blocks[j][-overlap:], communicating_blocks[j + 1][overlap:2*overlap])
+                        copy(in_blocks[j][-overlap:], in_blocks[j + 1][overlap:2*overlap])
             # For the next iteration, use the newly created tasks as
             # the tasks from the previous step.
             previous_communication_tasks = current_communication_tasks
@@ -201,8 +197,7 @@ def main():
         for j in range(divisions):
             start_index = overlap if j > 0 else 0
             end_index = -overlap if j < divisions - 1 else None  # None indicates the last element of the dimension
-            output = out_blocks if overlap % 2 else in_blocks
-            copy(a1[mapper.slice(j, len(a1))], output[j][start_index:end_index])
+            copy(a1[mapper.slice(j, len(a1))], in_blocks[j][start_index:end_index])
         #assert(np.absolute(actual - a1).max() < 1E-7)
 
 
