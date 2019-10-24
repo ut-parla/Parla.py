@@ -1,3 +1,9 @@
+"""
+Multi-device Jacobi iteration using entirely Parla kernels.
+
+This example shows how to write CUDA style kernels within Parla to optimize GPU kernels.
+"""
+
 import os
 import time
 

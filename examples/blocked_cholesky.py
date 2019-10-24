@@ -1,3 +1,10 @@
+"""
+A naive implementation of blocked cholesky using Numba kernels on CPUs and cuBLAS on GPUs.
+
+This implementation does not optimize data movement *at all*. The goal is to demonstrate the simplest possible method
+of transitioning from a Parla kernel implementation to an external kernel.
+"""
+
 import numpy as np
 import cupy
 from numba import jit, void, float64
@@ -9,9 +16,6 @@ from parla.tasks import *
 from parla.cuda import *
 from parla.cpu import *
 from parla.function_decorators import *
-
-import logging
-# logging.basicConfig(level=logging.INFO)
 
 # Naive version of dpotrf
 # Write results into lower triangle of the input array.
@@ -52,22 +56,20 @@ def ltriang_solve(a, b):
 # The input array 4 dimensional. The first and second index select
 # the block (row first, then column). The third and fourth index
 # select the entry within the given block.
-# @jit(void(float64[:,:,:,:]))
 def cholesky_blocked_inplace(a):
-    T1 = TaskSpace("T1")
-    T2 = TaskSpace("T2")
-    T3 = TaskSpace("T3")
-    T4 = TaskSpace("T4")
-
     if a.shape[0] * a.shape[2] != a.shape[1] * a.shape[3]:
         raise ValueError("A square matrix is required.")
     if a.shape[0] != a.shape[1]:
         raise ValueError("Non-square blocks are not supported.")
 
-    # TODO: This should support multiple GPUs.
+    # Define task spaces
+    T1 = TaskSpace("T1") # TODO: Document what each kind of task does.
+    T2 = TaskSpace("T2") # Cholesky on block
+    T3 = TaskSpace("T3") # TODO: ???
+    T4 = TaskSpace("T4") # Triangular solve
 
+    # TODO: Document in detail.
     for j in range(a.shape[0]):
-        # Batched BLAS operations could help here.
         for k in range(j):
             @spawn(T1[j, k], [T4[j, k]])
             def t1():
@@ -95,22 +97,31 @@ def cholesky_blocked_inplace(a):
 def main():
     @spawn(placement=cpu(0))
     async def test_blocked_cholesky():
+        # Configure environment
         n = 6000
         np.random.seed(0)
         num_runs = 1
-        a = np.random.rand(n, n)
         block_size = 125
         assert not n % block_size
+
+        # Construct input data
+        a = np.random.rand(n, n)
         a = a @ a.T
-        res = np.tril(np.linalg.cholesky(a))
+
         times = []
         for i in range(num_runs):
+            # Copy and layout input
             a1 = a.copy()
             ap = a1.reshape(n // block_size, block_size, n // block_size, block_size).swapaxes(1,2)
             start = time.perf_counter()
+
+            # Call Parla cholesky result and wait for completion
             await cholesky_blocked_inplace(ap)
+
             end = time.perf_counter()
             times.append(end - start)
+
+        # Check result
         computed_L = np.tril(a1)
         assert(np.max(np.absolute(a - computed_L @ computed_L.T)) < 1E-8)
         print(*times)

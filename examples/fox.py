@@ -1,5 +1,9 @@
-import logging
+"""
+An implementation of multi-devices Fox's algorithm for matrix vector multiply.
 
+This implementation is split into multiple functions to allow repeated multiplies without collecting the result back
+to system memory.
+"""
 import numpy as np
 
 from parla.array import copy
@@ -8,18 +12,10 @@ from parla.cuda import gpu
 from parla.ldevice import LDeviceGridBlocked
 from parla.tasks import *
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-# logger.setLevel(logging.DEBUG)
-# parla.tasks.logger.setLevel(logging.DEBUG)
-# parla.cuda.logger.setLevel(logging.DEBUG)
-# parla._cpuutils.logger.setLevel(logging.DEBUG)
-
 partitions_x = 8
 partitions_y = partitions_x
 
 mapper = LDeviceGridBlocked(partitions_x, partitions_y)
-print(mapper)
 
 
 async def matvec_fox(y, A, x):
@@ -175,3 +171,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+__all__ = ["matvec_fox", "partition_fox", "collect_fox", "matvec_fox_partitioned",
+           "mapper", "partitions_x", "partitions_y"]

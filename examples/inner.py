@@ -1,3 +1,8 @@
+"""
+A simple inner product implemented in Parla.
+
+This is probably the most basic example of Parla.
+"""
 import numpy as np
 
 from parla.array import copy
@@ -29,12 +34,17 @@ def main():
 
     @spawn(placement=cpu(0))
     async def inner_part():
+        # Create array to store partial sums from each logical device
         partial_sums = np.empty(divisions)
+
+        # Start a block of tasks that much all complete before leaving the block.
         async with finish():
+            # For each logical device, perform the local inner product using the numpy multiply operation, @.
             for i in range(divisions):
                 @spawn(placement=mapper.device(i))
                 def inner_local():
                     copy(partial_sums[i:i+1], a_part[i] @ b_part[i])
+        # Recude the partial results (sequentially)
         res = 0.
         for i in range(divisions):
             res += partial_sums[i]
