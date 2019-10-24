@@ -1,0 +1,14 @@
+Running on Device-1
+Running on Device-1
+Running on Device1
+Running on Device1
+Running on Device0
+Running on Device0
+Running on Device2
+Running on Device3
+Running on Device2
+Running on Device3
+..Starting main parla task..
+The sum is 50000005000000.0
+This is correct.
+..Exiting main parla task..
