@@ -1,25 +1,46 @@
-import parla.cpu
-from parla.task_runtime import run_task, Task
+from parla.cpucores import cpu
+from parla.task_runtime import Scheduler, Task, TaskCompleted, TaskRunning
+from parla.tasks import TaskID
+
+task_id_next = 0
+
+
+def simple_task(func, args=(), dependencies=(), taskid=None,
+                resources=None, reads=(), writes=(), cost=lambda a: 1, constraints=lambda d: True):
+    if resources is None:
+        resources = [{cpu: 1}]
+    global task_id_next
+    taskid = taskid or TaskID("Dummy {}".format(task_id_next), task_id_next)
+    task_id_next += 1
+    return Task(func, args, dependencies, taskid, resources, reads, writes, cost, constraints)
+
 
 def test_flag_increment():
     external_flag = 0
     def increment_flag(task):
         nonlocal external_flag
         external_flag += 1
-    tsk = run_task(increment_flag, tuple(), [])
+    with Scheduler(4):
+        simple_task(increment_flag, tuple(), [])
     assert external_flag
 
+
 def test_deps():
-    def tasks_with_deps(task):
-        counter = 0
-        def increment(task):
-            nonlocal counter
-            counter += 1
-        def check(task):
-            assert counter == 1
-        first = run_task(increment, tuple(), [])
-        second = run_task(check, tuple(), [])
-    run_task(tasks_with_deps, tuple(), [])
+    external_flag = 0
+    with Scheduler(4):
+        def tasks_with_deps(task):
+            counter = 0
+            def increment(task):
+                nonlocal counter
+                counter += 1
+            first = simple_task(increment)
+            def check(task):
+                assert counter == 1
+                nonlocal external_flag
+                external_flag += 1
+            simple_task(check, dependencies=[first])
+        simple_task(tasks_with_deps)
+    assert external_flag
 
 def test_recursion_without_continuation():
     def recursion_without_continuation(task):
@@ -32,29 +53,30 @@ def test_recursion_without_continuation():
                 counter_vals[counter] = False
                 counter += 1
             else:
-                run_task(recurse, (val-1,), [])
-                run_task(recurse, (val-1,), [])
-        run_task(recurse, [2], [])
-    run_task(recursion_without_continuation, tuple(), [])
+                simple_task(recurse, (val-1,), [])
+                simple_task(recurse, (val-1,), [])
+        simple_task(recurse, [2], [])
+    with Scheduler(4):
+        simple_task(recursion_without_continuation, tuple(), [])
 
 def test_recursion_with_finalization():
-    outermost = []
     counter = 0
-    def recursion_with_manual_continuation(task, val):
-        if val == 0:
-            nonlocal counter
-            counter += 1
-        else:
-            t1 = run_task(recursion_with_manual_continuation, (val-1,), [])
-            t2 = run_task(recursion_with_manual_continuation, (val-1,), [])
-            if val == 1:
-                nonlocal outermost
-                outermost.append(t1)
-                outermost.append(t2)
-    run_task(recursion_with_manual_continuation, (3,), [])
-    def check_counter(task):
-        assert counter == 8
-    run_task(check_counter, tuple(), outermost)
+    with Scheduler(4):
+        def recursion_with_manual_continuation(task, val):
+            if val == 0:
+                nonlocal counter
+                counter += 1
+                return TaskCompleted(None)
+            else:
+                t1 = simple_task(recursion_with_manual_continuation, (val-1,), [])
+                t2 = simple_task(recursion_with_manual_continuation, (val-1,), [])
+                def k(task):
+                    if val == 3:
+                        assert counter == 8
+                    return TaskCompleted(None)
+                return TaskRunning(k, (), [t1, t2])
+        simple_task(recursion_with_manual_continuation, (3,), [])
+
 
 def test_exception_handling():
     class CustomException(Exception):
@@ -62,12 +84,14 @@ def test_exception_handling():
     def raise_exc(task):
         raise CustomException("error")
     try:
-        tsk = run_task(raise_exc, tuple(), [])
+        with Scheduler(4):
+            simple_task(raise_exc, tuple(), [])
     except:
         success = True
     else:
         success = False
     assert success
+
 
 def test_exception_handling_state_restoration():
     test_flag_increment()

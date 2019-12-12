@@ -109,6 +109,10 @@ class Device(metaclass=ABCMeta):
     def context(self):
         yield
 
+    @property
+    def amount_available(self):
+        return 1.
+
     def memory(self, kind: MemoryKind = None):
         return Memory(self, kind)
 
@@ -159,6 +163,9 @@ class Architecture(metaclass=ABCMeta):
 
     def __hash__(self):
         return hash(self.id)
+
+    def __repr__(self):
+        return type(self).__name__
 
 
 _architectures = {}

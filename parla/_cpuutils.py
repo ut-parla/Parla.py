@@ -25,7 +25,7 @@ class _CPUDevice(Device):
         return _CPUMemory(self, kind)
 
     def __repr__(self):
-        return "<CPU {} ({}, {}, {})>".format(self.index, self.architecture, self.args, self.kwds)
+        return "<CPU {} {}>".format(self.index, self.architecture)
 
 
 class _NumPyArrayType(ArrayType):

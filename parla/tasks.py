@@ -13,10 +13,12 @@ import logging
 import threading
 import inspect
 from abc import abstractmethod, ABCMeta
+from collections import namedtuple
 from contextlib import asynccontextmanager
-from typing import Awaitable, Collection, Iterable, Optional
+from typing import Awaitable, Collection, Iterable, Optional, Dict, Any, Union, Callable
 
-from parla.device import Device
+from parla.device import Device, Architecture
+from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState
 
 try:
     from parla import task_runtime
@@ -76,7 +78,7 @@ class TaskID:
         return "TaskID({}, {}, task={})".format(self.name, self.id, self._task)
 
     def __await__(self):
-        return (yield (None, [self], self.task))
+        return (yield TaskAwaitTasks([self.task], self.task))
 
 
 class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
@@ -89,8 +91,23 @@ class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
     def _tasks(self) -> Collection:
         pass
 
+    @property
+    def _flat_tasks(self) -> Collection:
+        # Compute the flat dependency set (including unwrapping TaskID objects)
+        deps = []
+        for ds in self._tasks:
+            if not isinstance(ds, Iterable):
+                ds = (ds,)
+            for d in ds:
+                if hasattr(d, "task"):
+                    d = d.task
+                if not isinstance(d, task_runtime.Task):
+                    raise TypeError("Dependencies must be TaskIDs or Tasks: " + str(d))
+                deps.append(d)
+        return tuple(deps)
+
     def __await__(self):
-        yield (None, tuple(self._tasks), None)
+        return (yield TaskAwaitTasks(self._flat_tasks, None))
 
     def __len__(self) -> int:
         return len(self._tasks)
@@ -215,56 +232,44 @@ class _TaskLocals(threading.local):
         self._global_tasks = v
 
 
-class _TaskData:
-    def __init__(self, _task_locals, body, dependencies):
-        self._task_locals = _task_locals
-        self.body = body
-        self.dependencies = dependencies
-
-    def __repr__(self):
-        return "<TaskData {body}>".format(**self.__dict__)
-
-
 _task_locals = _TaskLocals()
 
-# _task_callback_type = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.py_object)
-# @_task_callback_type
 
-def _task_callback(task, data):
+def _task_callback(task, body) -> TaskState:
     """
     A function which forwards to a python function in the appropriate device context.
     """
     try:
         with get_current_device().context():
-            body = data.body
+            body = body
             if inspect.iscoroutinefunction(body):
-                logger.debug("Constructing coroutine task: %s", data.taskid)
+                logger.debug("Constructing coroutine task: %s", task.taskid)
                 body = body()
 
             if inspect.iscoroutine(body):
                 try:
                     in_value_task = getattr(task, "value_task", None)
                     in_value = in_value_task and in_value_task.result
-                    logger.debug("Executing coroutine task: %s with input %s from %r", data.taskid, in_value_task, in_value)
+                    logger.debug("Executing coroutine task: %s with input %s from %r", task.taskid, in_value_task, in_value)
                     new_task_info = body.send(in_value)
                     task.value_task = None
-                    if not isinstance(new_task_info, tuple) or len(new_task_info) != 3:
-                        raise TypeError("Parla coroutine tasks must yield a 3-tuple: (taskid, dependencies, value_task)")
-                    taskid, dependencies, value_task = new_task_info
-                    logger.debug("Spawning coroutine continuation: %s, %s, %s", taskid, dependencies, value_task)
-                    # Spawn the continuation as a new task and force it to be on the same device (not just in the originally selected set).
-                    t = spawn(taskid, dependencies, placement=get_current_device())(body)
+                    if not isinstance(new_task_info, TaskAwaitTasks):
+                        raise TypeError("Parla coroutine tasks must yield a TaskAwaitTasks")
+                    dependencies = new_task_info.dependencies
+                    value_task = new_task_info.value_task
                     if value_task:
                         assert isinstance(value_task, task_runtime.Task)
-                        t.value_task = value_task
+                        task.value_task = value_task
+                    return TaskRunning(_task_callback, (body,), dependencies)
                 except StopIteration as e:
+                    result = None
                     if e.args:
                         (result,) = e.args
-                        task.result = result
+                    return TaskCompleted(result)
             else:
-                logger.debug("Executing function task: %s", data.taskid)
+                logger.debug("Executing function task: %s", task.taskid)
                 result = body()
-                task.result = result
+                return TaskCompleted(result)
     except:
         print("exiting because of unhandled exception.")
         print("Traceback was:")
@@ -273,15 +278,15 @@ def _task_callback(task, data):
         import sys
         sys.exit(63)
     finally:
-        logger.debug("Finished: %s", data.taskid)
-    return 0
+        logger.debug("Finished: %s", task.taskid)
+    assert False
 
 
 def _make_cell(val):
     """
     Create a new Python closure cell object.
 
-    You should not be using this.
+    You should not be using this. I shouldn't be either, but I don't know a way around Python's broken semantics.
     """
     x = val
 
@@ -290,8 +295,16 @@ def _make_cell(val):
 
     return closure.__closure__[0]
 
+AccessSetType = Collection[Any]
+CostFunctionType = Callable[[Architecture], int]
+ConstraintType = Callable[[Device], bool]
 
-def spawn(taskid: Optional[TaskID] = None, dependencies = (), *, placement: Device = None):
+
+def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
+          resources: Collection[Dict[Architecture, Union[int, float]]] = None,
+          reads: AccessSetType = (), writes: AccessSetType = (),
+          cost: CostFunctionType = lambda a: 1,
+          constraints: ConstraintType = lambda d: True):
     """
     Execute the body of the function as a new task. The task may start
     executing immediately, so it may execute in parallel with any
@@ -301,13 +314,23 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *, placement: Devi
     ... def t():
     ...     code
 
-    >>> @spawn(T1, [T0], placement=cpu())
+    >>> @spawn(T1, [T0], resources=[{cpu: 1}])
     ... def t():
     ...     code
 
     :param taskid: the ID of the task in a `TaskSpace` or None if the task does not have an ID.
-    :param dependencies: any number of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or iterables of Tasks or TaskIDs.
-    :param placement: a device on which the task should run.
+    :param dependencies: any numer of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or iterables of Tasks or TaskIDs.
+    :param resources: A collection of dicts each mapping resources (architectures, for the moment) to amounts needed.
+    :param reads: A collection of data (e.g., arrays) which are read by this task.
+    :param writes: A collection of data (e.g., arrays) which are written by this task.
+    :param cost: A function from an architecture to the estimated amount of time the task will take (assuming the
+        resources requested for that architecture are provided). The "time" need not be in any specific units as long
+        as the costs of all tasks are in the same units.
+    :param constraints: A predicate on the specific assigned resources (just a device, at the moment). If this returns
+        `False`, that resource will not be used. The more this returns `False` the slower the scheduler will be, since
+        this rejects schedules forcing the scheduler to backtrack.
+    # :param placement: a device on which the task should run. This overrides any other resources control parameters and
+    #     is illegal if those other arguments are provided.
 
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
     This same value is stored into the task space used in `taskid`.
@@ -351,22 +374,18 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *, placement: Devi
             separated_body.__kwdefaults__ = body.__kwdefaults__
             separated_body.__module__ = body.__module__
 
-        data = _TaskData(_task_locals, separated_body, dependencies)
-
         if not taskid:
             taskid = TaskID("global_" + str(len(_task_locals.global_tasks)), len(_task_locals.global_tasks))
             _task_locals.global_tasks += [taskid]
-        taskid.data = data
         taskid.dependencies = dependencies
-        data.taskid = taskid
 
         # Spawn the task via the Parla runtime API
-        task = task_runtime.run_task(_task_callback, (data,), deps, queue_identifier=placement)
+        task = task_runtime.get_scheduler_context().spawn_task(
+            _task_callback, (separated_body,), deps, taskid=taskid,
+            resources=resources, reads=reads, writes=writes,
+            cost=cost, constraints=constraints)
 
-        # Store the task object in it's ID object
-        taskid.task = task
-
-        logger.debug("Created: %s <%s, %s, %r>", taskid, placement, body)
+        logger.debug("Created: %s %r", taskid, body)
 
         for scope in _task_locals.task_scopes:
             scope.append(task)
@@ -384,11 +403,20 @@ def get_current_device() -> Device:
 @asynccontextmanager
 async def finish():
     """
-    Execute the body of the `with` normally and then perform a barrier applying to all tasks created.
-    This block has the similar semantics to the ``sync`` in Cilk.
+    Execute the body of the `with` normally and then perform a barrier applying to all tasks created within this block
+    and in this task.
+
+    `finish` does not wait for tasks which are created by the tasks it waits on. This is because tasks are allowed to
+    complete before tasks they create. This is a difference from Cilk.
 
     >>> async with finish():
-    ...     code
+    ...     @spawn()
+    ...     def task():
+    ...         @spawn()
+    ...         def subtask():
+    ...              code
+    ...         code
+    ... # After the finish block, task will be complete, but subtask may not be.
 
     """
     my_tasks = []

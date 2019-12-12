@@ -3,27 +3,28 @@ from time import sleep
 import numpy as np
 from pytest import skip
 
-from parla.cpu import cpu
+from parla.cpucores import cpu
 from parla.tasks import *
 
+default_resources = [{cpu: 1}]
 
 def repetitions():
     """Return an iterable of the repetitions to perform for probabilistic/racy tests."""
     return range(10)
 
 
-def sleep_until(predicate):
+def sleep_until(predicate, timeout=2, period=0.05):
     """Sleep until either `predicate()` is true or 2 seconds have passed."""
-    for _ in range(10):
+    for _ in range(int(timeout/period)):
         if predicate():
             break
-        sleep(0.2)
-    assert predicate()
+        sleep(period)
+    assert predicate(), "sleep_until timed out ({}s)".format(timeout)
 
 
-def test_spawn():
+def test_spawn(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
     def task():
         task_results.append(1)
 
@@ -31,12 +32,13 @@ def test_spawn():
     assert task_results == [1]
 
 
-def test_spawn_await():
+def test_spawn_await(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
     async def task():
         task_results.append(1)
-        @spawn()
+
+        @spawn(resources=default_resources)
         def subtask():
             task_results.append(2)
         await subtask
@@ -46,12 +48,13 @@ def test_spawn_await():
     assert task_results == [1, 2, 3]
 
 
-def test_spawn_await_async():
+def test_spawn_await_async(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
     async def task():
         task_results.append(1)
-        @spawn()
+
+        @spawn(resources=default_resources)
         async def subtask():
             sleep(0.01)
             await tasks()
@@ -64,11 +67,11 @@ def test_spawn_await_async():
     assert task_results == [1, 2, 3]
 
 
-def test_await_value():
+def test_await_value(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
     async def task():
-        @spawn()
+        @spawn(resources=default_resources)
         def subtask():
             return 42
         v = (await subtask)
@@ -79,11 +82,11 @@ def test_await_value():
     assert task_results == [42]
 
 
-def test_await_value_async_source():
+def test_await_value_async_source(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
     async def task():
-        @spawn()
+        @spawn(resources=default_resources)
         async def subtask():
             return 42
         task_results.append(await subtask)
@@ -92,13 +95,13 @@ def test_await_value_async_source():
     assert task_results == [42]
 
 
-def test_spawn_await_id():
+def test_spawn_await_id(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
     async def task():
         task_results.append(1)
         B = TaskSpace()
-        @spawn(B[0])
+        @spawn(B[0], resources=default_resources)
         def subtask():
             task_results.append(2)
         await B[0]
@@ -108,14 +111,14 @@ def test_spawn_await_id():
     assert task_results == [1, 2, 3]
 
 
-def test_spawn_await_multi_id():
+def test_spawn_await_multi_id(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
     async def task():
         task_results.append(1)
         B = TaskSpace()
         for i in range(10):
-            @spawn(B[i])
+            @spawn(B[i], resources=default_resources)
             def subtask():
                 task_results.append(2)
         await tasks(B[0:10])
@@ -125,15 +128,16 @@ def test_spawn_await_multi_id():
     assert task_results == [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3]
 
 
-def test_finish():
+def test_finish(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
     async def task():
         task_results.append(1)
         async with finish():
             for i in range(10):
-                @spawn()
+                @spawn(resources=default_resources)
                 def subtask():
+                    sleep(0.05)
                     task_results.append(2)
         task_results.append(3)
 
@@ -141,76 +145,85 @@ def test_finish():
     assert task_results == [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3]
 
 
-def test_dependencies():
+def test_finish_nested(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
+    async def task():
+        task_results.append(1)
+        async with finish():
+            for i in range(3):
+                @spawn(resources=default_resources)
+                async def subtask():
+                    @spawn(resources=default_resources)
+                    def subsubtask():
+                        sleep(0.4)
+                        task_results.append(2)
+                    await subsubtask
+        task_results.append(3)
+
+    sleep_until(lambda: len(task_results) == 5)
+    assert task_results == [1, 2, 2, 2, 3]
+
+
+def test_dependencies(runtime_sched):
+    task_results = []
+    @spawn(resources=default_resources)
     async def task():
         B = TaskSpace()
         C = TaskSpace()
         for i in range(10):
-            @spawn(B[i], [C[i-1]] if i > 0 else [])
+            @spawn(B[i], [C[i-1]] if i > 0 else [], resources=default_resources)
             def subtask():
                 task_results.append(i)
-            @spawn(C[i], [B[i]])
+            @spawn(C[i], [B[i]], resources=default_resources)
             def subtask():
-                sleep(0.1) # Required delay to allow out of order execution without dependencies
+                sleep(0.05) # Required delay to allow out of order execution without dependencies
                 task_results.append(i+1)
 
     sleep_until(lambda: len(task_results) == 20)
     assert task_results == [0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10]
 
 
-def test_closure_detachment():
+def test_closure_detachment(runtime_sched):
     task_results = []
-    @spawn()
+    @spawn(resources=default_resources)
     async def task():
         C = TaskSpace()
         for i in range(10):
-            @spawn(C[i], [C[i-1]] if i > 0 else [])
+            @spawn(C[i], [C[i-1]] if i > 0 else [], resources=default_resources)
             def subtask():
-                sleep(0.1) # Required delay to allow out of order execution without dependencies
+                sleep(0.05) # Required delay to allow out of order execution without dependencies
                 task_results.append(i)
 
     sleep_until(lambda: len(task_results) == 10)
     assert task_results == list(range(10))
 
 
-def test_placement():
-    try:
-        from parla.cuda import gpu
-    except (ImportError, AttributeError):
-        skip("CUDA required for this test.")
-
-    devices = [cpu(0), gpu(0)]
+def test_placement(runtime_sched):
+    devices = [cpu(0), cpu(1), cpu(6)]
 
     for rep in repetitions():
         task_results = []
-        for i in range(2):
-            @spawn(placement=devices[i])
-            async def task():
+        for (i, dev) in enumerate(devices):
+            @spawn(resources=[{cpu: 1}], constraints=lambda d: d == dev)
+            def task():
                 task_results.append(get_current_device())
             sleep_until(lambda: len(task_results) == i+1)
 
         assert task_results == devices
 
 
-def test_placement_await():
-    try:
-        from parla.cuda import gpu
-    except (ImportError, AttributeError):
-        skip("CUDA required for this test.")
-
-    devices = [cpu(0), gpu(0)]
+def test_placement_await(runtime_sched):
+    devices = [cpu(0), cpu(1), cpu(6)]
 
     for rep in repetitions():
         task_results = []
-        for i in range(2):
-            @spawn(placement=devices[i])
+        for (i, dev) in enumerate(devices):
+            @spawn(resources=[{cpu: 1}], constraints=lambda d: d == dev)
             async def task():
                 task_results.append(get_current_device())
                 await tasks() # Await nothing to force a new task.
                 task_results.append(get_current_device())
             sleep_until(lambda: len(task_results) == (i+1)*2)
 
-        assert task_results == [cpu(0), cpu(0), gpu(0), gpu(0)]
-
+        assert task_results == [cpu(0), cpu(0), cpu(1), cpu(1), cpu(6), cpu(6)]

@@ -30,6 +30,9 @@ class _CPUCoresArchitecture(Architecture):
     def __call__(self, id, *args, **kwds):
         return _CPUDevice(self, id, *args, **kwds)
 
+    def __repr__(self):
+        return "CPUCoresArchitecture"
+
 cpu = _CPUCoresArchitecture("CPU Cores", "cpu")
 cpu.__doc__ = """The `Architecture` for CPUs.
 

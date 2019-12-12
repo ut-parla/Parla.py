@@ -18,6 +18,9 @@ class _CPUArchitecture(Architecture):
             raise ValueError("Parla only supports a single CPU device in non-'cores' mode.")
         return _CPUDevice(self, id, *args, **kwds)
 
+    def __repr__(self):
+        return "CPUSystemArchitecture"
+
 
 cpu = _CPUArchitecture("CPU", "cpu")
 cpu.__doc__ = """The `Architecture` for CPUs.
