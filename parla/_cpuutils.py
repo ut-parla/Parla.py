@@ -1,12 +1,25 @@
 import logging
+import os
+from abc import abstractmethod
+from typing import Dict
 
 import numpy
 
 from parla import array
 from parla.array import ArrayType
-from parla.device import Memory, Device, MemoryKind
+from parla.device import Memory, Device, MemoryKind, Gib
 
 logger = logging.getLogger(__name__)
+
+_MEMORY_FRACTION = 15/16 # The fraction of total memory Parla should assume it can use.
+
+
+def get_n_cores():
+    return len(os.sched_getaffinity(0))
+
+
+def get_total_memory():
+    return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
 
 
 class _CPUMemory(Memory):
@@ -21,6 +34,15 @@ class _CPUMemory(Memory):
 
 
 class _CPUDevice(Device):
+    def __init__(self, architecture: "Architecture", index, *args, n_cores, **kws):
+        super().__init__(architecture, index, *args, **kws)
+        self.n_cores = n_cores or get_n_cores()
+        self.available_memory = get_total_memory()*_MEMORY_FRACTION / get_n_cores() * self.n_cores
+
+    @property
+    def resources(self) -> Dict[str, float]:
+        return dict(threads=self.n_cores, memory=self.available_memory)
+
     def memory(self, kind: MemoryKind = None):
         return _CPUMemory(self, kind)
 

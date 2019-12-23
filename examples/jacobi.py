@@ -11,6 +11,7 @@ import numpy as np
 import numba.cuda
 import cupy
 
+from parla import task_runtime
 from parla.array import copy
 from parla.cuda import gpu
 from parla.cpu import cpu
@@ -52,7 +53,7 @@ def main():
 
     # Set up an "n" x "n" grid of values and run
     # "steps" number of iterations of the 4 point stencil on it.
-    n = 25000
+    n = 12000
     steps = 200
 
     # Set up two arrays containing the input data.
@@ -74,7 +75,7 @@ def main():
     a1_row_groups = mapper.partition_tensor(a1, overlap=1)
 
     # Trigger JIT
-    @spawn(placement=cpu(0))
+    @spawn()
     async def warmups():
         warmup = TaskSpace()
         for i in range(divisions):
@@ -146,4 +147,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    with task_runtime.Scheduler(16):
+        main()

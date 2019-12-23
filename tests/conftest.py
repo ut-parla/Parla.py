@@ -14,6 +14,8 @@ if os.getenv("LOG_LEVEL") is not None:
     logger.setLevel(logging.INFO)
     parla.tasks.logger.setLevel(level)
     parla.task_runtime.logger.setLevel(level)
+else:
+    logging.basicConfig(level=logging.INFO)
 
 
 @pytest.fixture

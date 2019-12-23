@@ -1,7 +1,6 @@
 import logging
-import os
 
-from parla._cpuutils import _CPUDevice
+from parla._cpuutils import _CPUDevice, get_n_cores
 from .device import Architecture, _register_architecture
 
 __all__ = ["cpu"]
@@ -16,7 +15,7 @@ class _CPUCoresArchitecture(Architecture):
     """
     def __init__(self, name, id):
         super().__init__(name, id)
-        self.n_cores = len(os.sched_getaffinity(0))
+        self.n_cores = get_n_cores()
         self._devices = [self(i) for i in range(self.n_cores)]
         logger.info("CPU 'cores mode' enabled. "
                     "Do not use parallel kernels in this mode (it will cause massive over subscription of the CPU). ")
@@ -28,7 +27,7 @@ class _CPUCoresArchitecture(Architecture):
         return self._devices
 
     def __call__(self, id, *args, **kwds):
-        return _CPUDevice(self, id, *args, **kwds)
+        return _CPUDevice(self, id, *args, **kwds, n_cores=1)
 
     def __repr__(self):
         return "CPUCoresArchitecture"

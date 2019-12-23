@@ -6,6 +6,7 @@ to system memory.
 """
 import numpy as np
 
+from parla import task_runtime
 from parla.array import copy
 from parla.cpu import cpu
 from parla.cuda import gpu
@@ -170,7 +171,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    with task_runtime.Scheduler(16):
+        main()
 
 __all__ = ["matvec_fox", "partition_fox", "collect_fox", "matvec_fox_partitioned",
            "mapper", "partitions_x", "partitions_y"]

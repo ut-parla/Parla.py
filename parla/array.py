@@ -8,7 +8,7 @@ from parla.tasks import get_current_device
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["get_array_module", "get_memory", "is_array", "asnumpy", "copy", "clone_here"]
+__all__ = ["get_array_module", "get_memory", "is_array", "asnumpy", "copy", "clone_here", "storage_size"]
 
 
 class ArrayType(metaclass=ABCMeta):
@@ -122,3 +122,9 @@ def clone_here(source, kind=None):
     else:
         raise TypeError("Array required, given value of type {}".format(type(source)))
 
+
+def storage_size(*arrays):
+    """
+    :return: the total size of the arrays passed as arguments.
+    """
+    return sum(a.size * a.itemsize for a in arrays)

@@ -2,6 +2,7 @@ from contextlib import contextmanager
 
 import logging
 from functools import wraps, lru_cache
+from typing import Dict
 
 import numpy
 
@@ -58,6 +59,13 @@ class _GPUMemory(Memory):
 
 
 class _GPUDevice(Device):
+    @property
+    def resources(self) -> Dict[str, float]:
+        dev = cupy.cuda.Device(self.index)
+        free, total = dev.mem_info
+        attrs = dev.attributes
+        return dict(threads=attrs["MultiProcessorCount"] * attrs["MaxThreadsPerMultiProcessor"], memory=total)
+
     @contextmanager
     def context(self):
         with cupy.cuda.Device(self.index):

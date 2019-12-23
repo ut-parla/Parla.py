@@ -11,6 +11,7 @@ from numba import jit, void, float64
 import math
 import time
 
+from parla import task_runtime
 from parla.array import copy, clone_here
 from parla.tasks import *
 from parla.cuda import *
@@ -127,4 +128,5 @@ def main():
         print(*times)
 
 if __name__ == '__main__':
-    main()
+    with task_runtime.Scheduler(16):
+        main()

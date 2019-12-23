@@ -8,17 +8,18 @@ Parla supports simple task parallelism.
     from .cpu import cpu
 
 """
-
+import abc
 import logging
 import threading
 import inspect
 from abc import abstractmethod, ABCMeta
 from collections import namedtuple
 from contextlib import asynccontextmanager
+from numbers import Number
 from typing import Awaitable, Collection, Iterable, Optional, Dict, Any, Union, Callable
 
 from parla.device import Device, Architecture
-from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState
+from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceDescriptor, Req, Opt
 
 try:
     from parla import task_runtime
@@ -30,7 +31,8 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaskID", "TaskSpace", "spawn", "get_current_device", "tasks", "finish", "CompletedTaskSpace"
+    "TaskID", "TaskSpace", "spawn", "get_current_device", "tasks", "finish", "CompletedTaskSpace",
+    "DeviceDescriptor", "Req", "Opt"
 ]
 
 
@@ -295,16 +297,10 @@ def _make_cell(val):
 
     return closure.__closure__[0]
 
-AccessSetType = Collection[Any]
-CostFunctionType = Callable[[Architecture], int]
-ConstraintType = Callable[[Device], bool]
-
 
 def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
-          resources: Collection[Dict[Architecture, Union[int, float]]] = None,
-          reads: AccessSetType = (), writes: AccessSetType = (),
-          cost: CostFunctionType = lambda a: 1,
-          constraints: ConstraintType = lambda d: True):
+          devices: Collection[DeviceDescriptor] = (Req(),),
+          placement: Device = None):
     """
     Execute the body of the function as a new task. The task may start
     executing immediately, so it may execute in parallel with any
@@ -320,17 +316,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
     :param taskid: the ID of the task in a `TaskSpace` or None if the task does not have an ID.
     :param dependencies: any numer of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or iterables of Tasks or TaskIDs.
-    :param resources: A collection of dicts each mapping resources (architectures, for the moment) to amounts needed.
-    :param reads: A collection of data (e.g., arrays) which are read by this task.
-    :param writes: A collection of data (e.g., arrays) which are written by this task.
-    :param cost: A function from an architecture to the estimated amount of time the task will take (assuming the
-        resources requested for that architecture are provided). The "time" need not be in any specific units as long
-        as the costs of all tasks are in the same units.
-    :param constraints: A predicate on the specific assigned resources (just a device, at the moment). If this returns
-        `False`, that resource will not be used. The more this returns `False` the slower the scheduler will be, since
-        this rejects schedules forcing the scheduler to backtrack.
-    # :param placement: a device on which the task should run. This overrides any other resources control parameters and
-    #     is illegal if those other arguments are provided.
+    :param devices: A collection of `DeviceDescriptor` objects
 
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
     This same value is stored into the task space used in `taskid`.
@@ -340,7 +326,12 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     """
 
     def decorator(body):
-        nonlocal taskid
+        nonlocal taskid, devices
+
+        if placement is not None:
+            if devices != (Req(),):
+                raise ValueError("Only specify one of placement or devices.")
+            devices = (Req(placement),)
 
         if inspect.isgeneratorfunction(body):
             raise TypeError("Spawned tasks must be normal functions or coroutines; not generators.")
@@ -381,9 +372,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
         # Spawn the task via the Parla runtime API
         task = task_runtime.get_scheduler_context().spawn_task(
-            _task_callback, (separated_body,), deps, taskid=taskid,
-            resources=resources, reads=reads, writes=writes,
-            cost=cost, constraints=constraints)
+            _task_callback, (separated_body,), deps, taskid=taskid, devices=devices)
 
         logger.debug("Created: %s %r", taskid, body)
 

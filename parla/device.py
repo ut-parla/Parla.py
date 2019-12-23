@@ -6,7 +6,7 @@ The model is used to describe the placement restrictions for computations and st
 from contextlib import contextmanager
 from enum import Enum
 from functools import lru_cache
-from typing import Optional, List, Mapping
+from typing import Optional, List, Mapping, Dict
 from abc import ABCMeta, abstractmethod, abstractproperty
 
 import logging
@@ -14,10 +14,17 @@ import logging
 from .detail import Detail
 
 __all__ = [
-    "MemoryKind", "Memory", "Device", "Architecture", "get_all_devices", "get_all_architectures"
+    "MemoryKind", "Memory", "Device", "Architecture", "get_all_devices", "get_all_architectures",
+    "kib", "Mib", "Gib"
 ]
 
 logger = logging.getLogger(__name__)
+
+
+kib = 1024
+Mib = kib*1024
+Gib = Mib*1024
+
 
 class MemoryKind(Enum):
     """
@@ -90,13 +97,14 @@ class Device(metaclass=ABCMeta):
 
     As devices are logical, the runtime may choose to implement two devices using the same hardware.
     """
+    architecture: "Architecture"
     index: Optional[int]
 
     @lru_cache(maxsize=None)
     def __new__(cls, *args, **kwargs):
         return super(Device, cls).__new__(cls)
 
-    def __init__(self, architecture, index, *args, **kwds):
+    def __init__(self, architecture: "Architecture", index, *args, **kwds):
         """
         Construct a new Device with a specific architecture.
         """
@@ -110,8 +118,9 @@ class Device(metaclass=ABCMeta):
         yield
 
     @property
-    def amount_available(self):
-        return 1.
+    @abstractmethod
+    def resources(self) -> Dict[str, float]:
+        raise NotImplementedError()
 
     def memory(self, kind: MemoryKind = None):
         return Memory(self, kind)
