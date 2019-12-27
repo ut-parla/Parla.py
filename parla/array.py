@@ -98,17 +98,22 @@ def copy(destination, source):
     :param destination: The array to write into.
     :param source: The array to read from or the scalar value to put in destination.
     """
-    if is_array(source):
-        if can_assign_from(destination, source):
-            logger.debug("Direct assign from %r to %r", get_memory(source), get_memory(destination))
-            destination[:] = source
+    try:
+        if is_array(source):
+            if can_assign_from(destination, source):
+                logger.debug("Direct assign from %r to %r", get_memory(source), get_memory(destination))
+                destination[:] = source
+            else:
+                logger.debug("Copy then assign from %r to %r", get_memory(source), get_memory(destination))
+                destination[:] = get_memory(destination)(source)
         else:
-            logger.debug("Copy then assign from %r to %r", get_memory(source), get_memory(destination))
-            destination[:] = get_memory(destination)(source)
-    else:
-        # We assume all non-array types are by-value and hence already exist in the Python interpreter
-        # and don't need to be copied.
-        destination[:] = source
+            # We assume all non-array types are by-value and hence already exist in the Python interpreter
+            # and don't need to be copied.
+            destination[:] = source
+    except ValueError:
+        raise ValueError("Failed to copy from {} to {} ({} {} to {} {})".format(get_memory(source), get_memory(destination),
+                                                                          source, getattr(source, "shape", None),
+                                                                          destination, getattr(destination, "shape", None)))
 
 
 def clone_here(source, kind=None):
