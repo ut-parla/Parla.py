@@ -1,10 +1,13 @@
 from time import sleep
 
 import numpy as np
+import pytest
 from pytest import skip
 
+from parla import Parla
 from parla.cpucores import cpu
 from parla.tasks import *
+
 
 def repetitions():
     """Return an iterable of the repetitions to perform for probabilistic/racy tests."""
@@ -18,6 +21,17 @@ def sleep_until(predicate, timeout=2, period=0.05):
             break
         sleep(period)
     assert predicate(), "sleep_until timed out ({}s)".format(timeout)
+
+
+def test_parla_ctx():
+    with Parla():
+        task_results = []
+        @spawn()
+        def task():
+            task_results.append(1)
+
+        sleep_until(lambda: len(task_results) == 1)
+        assert task_results == [1]
 
 
 def test_spawn(runtime_sched):
@@ -188,7 +202,7 @@ def test_closure_detachment(runtime_sched):
     async def task():
         C = TaskSpace()
         for i in range(10):
-            @spawn(C[i], [C[i-1]] if i > 0 else [], )
+            @spawn(C[i], [C[i-1]] if i > 0 else [])
             def subtask():
                 sleep(0.05) # Required delay to allow out of order execution without dependencies
                 task_results.append(i)
@@ -203,7 +217,7 @@ def test_placement(runtime_sched):
     for rep in repetitions():
         task_results = []
         for (i, dev) in enumerate(devices):
-            @spawn(devices=[Req(dev)])
+            @spawn(placement=dev)
             def task():
                 task_results.append(get_current_device())
             sleep_until(lambda: len(task_results) == i+1)
@@ -217,7 +231,7 @@ def test_placement_await(runtime_sched):
     for rep in repetitions():
         task_results = []
         for (i, dev) in enumerate(devices):
-            @spawn(devices=[Req(dev)])
+            @spawn(placement=dev)
             async def task():
                 task_results.append(get_current_device())
                 await tasks() # Await nothing to force a new task.
@@ -225,3 +239,43 @@ def test_placement_await(runtime_sched):
             sleep_until(lambda: len(task_results) == (i+1)*2)
 
         assert task_results == [cpu(0), cpu(0), cpu(1), cpu(1), cpu(6), cpu(6)]
+
+
+def test_too_much_info(runtime_sched):
+    with pytest.raises(ValueError):
+        @spawn(cpu=1, devices=(Req(cpu, memory=1),))
+        def task():
+            pass
+
+def test_architecture(runtime_sched):
+    task_results = []
+    @spawn(cpu=1)
+    def task():
+        task_results.append(1)
+    @spawn(cpu=0.5)
+    def task():
+        task_results.append(1)
+    @spawn(cpu=0.5)
+    def task():
+        task_results.append(1)
+
+    sleep_until(lambda: len(task_results) == 3)
+    assert task_results == [1]*3
+
+
+def test_architecture_multiple(runtime_sched):
+    try:
+        task_results = set()
+        @spawn(cpu=1)
+        async def task():
+            task_results.add(get_current_device().architecture.id)
+        @spawn(gpu=1)
+        async def task():
+            task_results.add(get_current_device().architecture.id)
+
+        sleep_until(lambda: len(task_results) == 2)
+        assert task_results == {"cpu", "gpu"}
+    except ValueError as e:
+        skip(str(e))
+
+

@@ -15,6 +15,7 @@ from .detail import Detail
 
 __all__ = [
     "MemoryKind", "Memory", "Device", "Architecture", "get_all_devices", "get_all_architectures",
+    "get_architecture",
     "kib", "Mib", "Gib"
 ]
 
@@ -184,8 +185,11 @@ _architectures_list = []
 _architectures_list: List[Architecture]
 
 
-def _get_architecture(name):
-    return _architectures[name]
+def get_architecture(name):
+    try:
+        return _architectures[name]
+    except KeyError:
+        raise ValueError("Non-existent architecture: " + name)
 
 
 def _register_architecture(name, impl):

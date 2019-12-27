@@ -64,7 +64,8 @@ class _GPUDevice(Device):
         dev = cupy.cuda.Device(self.index)
         free, total = dev.mem_info
         attrs = dev.attributes
-        return dict(threads=attrs["MultiProcessorCount"] * attrs["MaxThreadsPerMultiProcessor"], memory=total)
+        return dict(threads=attrs["MultiProcessorCount"] * attrs["MaxThreadsPerMultiProcessor"], memory=total,
+                    devices=1)
 
     @contextmanager
     def context(self):

@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from numbers import Number
 from typing import Awaitable, Collection, Iterable, Optional, Dict, Any, Union, Callable
 
-from parla.device import Device, Architecture
+from parla.device import Device, Architecture, get_architecture
 from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceDescriptor, Req, Opt
 
 try:
@@ -272,13 +272,6 @@ def _task_callback(task, body) -> TaskState:
                 logger.debug("Executing function task: %s", task.taskid)
                 result = body()
                 return TaskCompleted(result)
-    except:
-        print("exiting because of unhandled exception.")
-        print("Traceback was:")
-        import traceback
-        print(traceback.format_exc())
-        import sys
-        sys.exit(63)
     finally:
         logger.debug("Finished: %s", task.taskid)
     assert False
@@ -299,8 +292,10 @@ def _make_cell(val):
 
 
 def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
-          devices: Collection[DeviceDescriptor] = (Req(),),
-          placement: Device = None):
+          placement: Device = None,
+          memory: int = None,
+          devices: Collection[DeviceDescriptor] = None,
+          **architectures):
     """
     Execute the body of the function as a new task. The task may start
     executing immediately, so it may execute in parallel with any
@@ -310,13 +305,17 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     ... def t():
     ...     code
 
-    >>> @spawn(T1, [T0], resources=[{cpu: 1}])
+    >>> @spawn(T1, [T0], cpu=1)
     ... def t():
     ...     code
 
     :param taskid: the ID of the task in a `TaskSpace` or None if the task does not have an ID.
     :param dependencies: any numer of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or iterables of Tasks or TaskIDs.
-    :param devices: A collection of `DeviceDescriptor` objects
+    :param placement: A specific device or architecture that this task should run on.
+    :param memory: The amount of memory this task uses. It is assumed to be evenly divided between the devices used.
+    :param **architectures: Specify how many devices from each architecture are required. For example, `cpu=1` or `gpu=4`.
+    :param devices: A collection of `DeviceDescriptor` objects. This parameter is only allowed if `placement`,
+        `memory`, and `architecture` are not provided. It is the advanced interface.
 
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
     This same value is stored into the task space used in `taskid`.
@@ -328,10 +327,28 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     def decorator(body):
         nonlocal taskid, devices
 
+        if devices is not None and (
+            placement is not None or memory is not None or architectures):
+            raise ValueError("If devices is specified, then placement, memory and architectures are not allowed.")
+
+
         if placement is not None:
-            if devices != (Req(),):
-                raise ValueError("Only specify one of placement or devices.")
-            devices = (Req(placement),)
+            assert devices is None
+            devices = [Req(placement)]
+        else:
+            devices = list(devices) if devices is not None else []
+
+        for name, total_amount in architectures.items():
+            while total_amount:
+                if total_amount > 1:
+                    amount = 1
+                else:
+                    amount = total_amount
+                devices.append(Req(get_architecture(name), devices=amount))
+                total_amount -= amount
+
+        if not devices:
+            devices.append(Req())
 
         if inspect.isgeneratorfunction(body):
             raise TypeError("Spawned tasks must be normal functions or coroutines; not generators.")

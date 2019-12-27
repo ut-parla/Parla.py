@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 __all__ = []
 
 
+_ASSIGNMENT_FAILURE_WARNING_LIMIT = 32
+
+
 # Note: tasks can be implemented as lock free, however,
 # atomics aren't really a thing in Python, so instead
 # make each task have its own lock to mimic atomic-like
@@ -432,7 +435,7 @@ class ResourcePool:
     _monitor: Condition
     _devices: Dict[Device, Dict[str, float]]
 
-    def __init__(self, multiplier=1.0):
+    def __init__(self, multiplier):
         self._multiplier = multiplier
         self._monitor = threading.Condition(threading.Lock())
         self._devices = self._initial_resources(multiplier)
@@ -472,6 +475,10 @@ class ResourcePool:
             else:
                 to_release.clear()
 
+            logger.info("Attempted to allocate %s * %r (blocking %s) => %s", multiplier, dd, block, success)
+            if to_release:
+                logger.info("Releasing resources due to failure: %r", to_release)
+
             for name, v in to_release:
                 ret = self._update_resource(dd.architecture_or_device, name, -v * multiplier, block)
                 assert ret
@@ -500,6 +507,9 @@ class ResourcePool:
         except KeyError:
             raise ValueError("Resource {}.{} does not exist".format(dev, res))
 
+    def __repr__(self):
+        return "ResourcePool(devices={})".format(self._devices)
+
 
 class AssignmentFailed(Exception):
     pass
@@ -514,8 +524,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         self.period = period
         self._monitor = threading.Condition(threading.Lock())
         self._allocation_queue = deque()
-        self._available_resources = ResourcePool()
-        self._unassigned_resources = ResourcePool(multiplier=max_worker_queue_depth)
+        self._available_resources = ResourcePool(multiplier=1.0)
+        self._unassigned_resources = ResourcePool(multiplier=max_worker_queue_depth*1.0)
         self._worker_threads = [WorkerThread(self, i) for i in range(n_threads)]
         self._should_run = True
         self.start()
@@ -623,9 +633,11 @@ class Scheduler(ControllableThread, SchedulerContext):
                             time.sleep(self.period)
                 except AssignmentFailed:
                     task._assignment_tries = getattr(task, "_assignment_tries", 0) + 1
-                    if task._assignment_tries > 10:
+                    if task._assignment_tries > _ASSIGNMENT_FAILURE_WARNING_LIMIT:
                         logger.warning("Task %r: Failed to assign devices. The required resources may not be "
-                                       "available on this machine at all.", task, exc_info=True)
+                                       "available on this machine at all.\n"
+                                       "Available resources: %r\nUnallocated resources: %r",
+                                       task, self._available_resources, self._unassigned_resources, exc_info=True)
                     # Free any resources we already assigned
                     for dd in assigned_resources:
                         self._unassigned_resources.deallocate_resources(dd)

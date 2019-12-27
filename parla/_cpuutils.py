@@ -41,7 +41,7 @@ class _CPUDevice(Device):
 
     @property
     def resources(self) -> Dict[str, float]:
-        return dict(threads=self.n_cores, memory=self.available_memory)
+        return dict(threads=self.n_cores, memory=self.available_memory, devices=1)
 
     def memory(self, kind: MemoryKind = None):
         return _CPUMemory(self, kind)
