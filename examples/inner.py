@@ -7,7 +7,7 @@ import logging
 
 import numpy as np
 
-from parla import task_runtime
+from parla import Parla
 from parla.array import copy, storage_size
 from parla.cuda import gpu
 from parla.cpucores import cpu
@@ -72,5 +72,5 @@ def main():
 
 
 if __name__ == '__main__':
-    with task_runtime.Scheduler(16):
+    with Parla():
         main()

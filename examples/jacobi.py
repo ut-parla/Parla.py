@@ -11,7 +11,7 @@ import numpy as np
 import numba.cuda
 import cupy
 
-from parla import task_runtime
+from parla import Parla
 from parla.array import copy
 from parla.cuda import gpu
 from parla.cpu import cpu
@@ -147,5 +147,5 @@ def main():
 
 
 if __name__ == '__main__':
-    with task_runtime.Scheduler(16):
+    with Parla():
         main()

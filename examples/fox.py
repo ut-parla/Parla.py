@@ -4,9 +4,10 @@ An implementation of multi-devices Fox's algorithm for matrix vector multiply.
 This implementation is split into multiple functions to allow repeated multiplies without collecting the result back
 to system memory.
 """
+
 import numpy as np
 
-from parla import task_runtime
+from parla import Parla
 from parla.array import copy
 from parla.cpu import cpu
 from parla.cuda import gpu
@@ -44,7 +45,7 @@ async def collect_fox(y, yp):
 
     # Collect from diagonal in parallel
     for i in range(0, partitions_y):  # rows
-        @spawn(C[i], placement=cpu(0))
+        @spawn(C[i])
         def c():
             copy(y[mapper.slice_x(i, y.shape[0])], yp[i][i])
 
@@ -97,7 +98,7 @@ async def matvec_fox_partitioned(yp, Ap, xp):
             # A task per partition to copy data from the diagonal to each partition on the same column
             @spawn(B[i, j], placement=mapper.device(i, j))
             def b():
-                copy(xp[i][j][:], xp[j][j])
+                copy(xp[i][j], xp[j][j])
 
     # block-wise multiplication
     for i in range(0, partitions_y):
@@ -124,9 +125,9 @@ async def matvec_fox_partitioned(yp, Ap, xp):
 
 
 def main():
-    @spawn(placement=cpu(0))
+    @spawn(cpu=1)
     async def test_fox():
-        size_factor = 1024
+        size_factor = 256
         A = np.random.rand(size_factor, size_factor)
         x = np.random.rand(size_factor)
 
@@ -171,7 +172,7 @@ def main():
 
 
 if __name__ == '__main__':
-    with task_runtime.Scheduler(16):
+    with Parla():
         main()
 
 __all__ = ["matvec_fox", "partition_fox", "collect_fox", "matvec_fox_partitioned",
