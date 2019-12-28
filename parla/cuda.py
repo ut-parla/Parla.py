@@ -117,7 +117,9 @@ device._register_architecture("gpu", gpu)
 
 class _CuPyArrayType(ArrayType):
     def can_assign_from(self, a, b):
-        return isinstance(b, (cupy.ndarray, numpy.ndarray))
+        # TODO: We should be able to do direct copies from numpy to cupy arrays, but it doesn't seem to be working.
+        # return isinstance(b, (cupy.ndarray, numpy.ndarray))
+        return isinstance(b, cupy.ndarray)
 
     def get_memory(self, a):
         return gpu(a.device.id).memory()
