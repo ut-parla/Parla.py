@@ -23,7 +23,6 @@ def test_jacobi():
 
 
 def test_blocked_cholesky():
-    skip("Test too slow.")
     call_example("blocked_cholesky")
 
 

@@ -3,28 +3,16 @@ A simple inner product implemented in Parla.
 
 This is probably the most basic example of Parla.
 """
-import logging
-
 import numpy as np
 
 from parla import Parla
 from parla.array import copy, storage_size
 from parla.cuda import gpu
-from parla.cpucores import cpu
+from parla.cpu import cpu
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import *
 import time
 import os
-
-# import parla
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
-# logger.setLevel(logging.DEBUG)
-# parla.tasks.logger.setLevel(logging.DEBUG)
-# parla.array.logger.setLevel(logging.DEBUG)
-# parla.cuda.logger.setLevel(logging.DEBUG)
-# parla._cpuutils.logger.setLevel(logging.DEBUG)
-
 
 def main():
     n = 3*1000

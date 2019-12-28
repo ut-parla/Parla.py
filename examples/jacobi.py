@@ -53,7 +53,7 @@ def main():
 
     # Set up an "n" x "n" grid of values and run
     # "steps" number of iterations of the 4 point stencil on it.
-    n = 12000
+    n = 300
     steps = 200
 
     # Set up two arrays containing the input data.

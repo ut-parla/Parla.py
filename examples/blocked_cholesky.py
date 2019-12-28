@@ -96,10 +96,10 @@ def cholesky_blocked_inplace(a):
     return T2[a.shape[0]-1]
 
 def main():
-    @spawn(placement=cpu(0))
+    @spawn(cpu=1)
     async def test_blocked_cholesky():
         # Configure environment
-        n = 6000
+        n = 125 * 12
         np.random.seed(0)
         num_runs = 1
         block_size = 125
