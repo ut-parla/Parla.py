@@ -5,6 +5,8 @@ from parla.cpu import cpu
 from parla.tasks import spawn, Req
 from numba import jit
 
+# Divide an array of values into two "bins"
+# and return the index separating them
 @jit
 def subdivide(array, split):
     low = 0
@@ -33,6 +35,8 @@ def insertion_sort(array):
             array[j-1], array[j] = array[j], array[j-1]
             j -= 1
 
+# This class is here primarily to work around a scoping issue with our tasks.
+# This is where the recursion happens though.
 class qsort_bin_step:
     def __init__(self, array, lower, upper, threshold):
         self.array = array
