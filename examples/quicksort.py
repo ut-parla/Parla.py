@@ -44,14 +44,14 @@ def quicksort(array, lower = 0., upper = 1., threshold = 100):
         split_idx = subdivide(array, split)
         lower_array = array[:split_idx]
         upper_array = array[split_idx:]
-        @spawn(placement = cpu)
+        @spawn(cpu=1)
         def lower_block_task():
             quicksort_recursion(lower_array, lower, split, threshold)
-        @spawn(placement = cpu)
+        @spawn(cpu=1)
         def upper_block_task():
             quicksort_recursion(upper_array, split, upper, threshold)
     with Parla():
-        @spawn(placement = cpu)
+        @spawn(cpu=1)
         def root_recursion():
             quicksort_recursion(array, lower, upper, threshold)
 
