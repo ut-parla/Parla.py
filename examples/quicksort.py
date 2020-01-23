@@ -35,37 +35,25 @@ def insertion_sort(array):
             array[j-1], array[j] = array[j], array[j-1]
             j -= 1
 
-# This class is here primarily to work around a scoping issue with our tasks.
-# This is where the recursion happens though.
-class qsort_bin_step:
-    def __init__(self, array, lower, upper, threshold):
-        self.array = array
-        self.lower = lower
-        self.upper = upper
-        self.threshold = threshold
-    def __call__(self):
-        if self.array.shape[0] < self.threshold:
-            insertion_sort(self.array)
-        else:
-            split = .5 * (self.lower + self.upper)
-            split_idx = subdivide(self.array, split)
-            lower_array = self.array[:split_idx]
-            upper_array = self.array[split_idx:]
-            lower_step = qsort_bin_step(lower_array, self.lower, split, self.threshold)
-            @spawn(placement = cpu)
-            def lower_step_task():
-                lower_step()
-            upper_step = qsort_bin_step(upper_array, split, self.upper, self.threshold)
-            @spawn(placement = cpu)
-            def upper_step_task():
-                upper_step()
-
 def quicksort(array, lower = 0., upper = 1., threshold = 100):
-    with Parla():
-        step = qsort_bin_step(array, lower, upper, threshold)
+    def quicksort_recursion(array, lower = 0., upper = 1., threshold = 100):
+        if array.shape[0] < threshold:
+            insertion_sort(array)
+            return
+        split = .5 * (lower + upper)
+        split_idx = subdivide(array, split)
+        lower_array = array[:split_idx]
+        upper_array = array[split_idx:]
         @spawn(placement = cpu)
-        def step_task():
-            step()
+        def lower_block_task():
+            quicksort_recursion(lower_array, lower, split, threshold)
+        @spawn(placement = cpu)
+        def upper_block_task():
+            quicksort_recursion(upper_array, split, upper, threshold)
+    with Parla():
+        @spawn(placement = cpu)
+        def root_recursion():
+            quicksort_recursion(array, lower, upper, threshold)
 
 a = np.random.rand(10000)
 a_sorted = np.sort(a)
