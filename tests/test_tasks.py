@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 from pytest import skip
 
-from parla import Parla
-from parla.cpucores import cpu
+from parla import Parla, array
+from parla.cpu import cpu
 from parla.tasks import *
 
 
@@ -49,7 +49,6 @@ def test_spawn_await(runtime_sched):
     @spawn()
     async def task():
         task_results.append(1)
-
         @spawn()
         def subtask():
             task_results.append(2)
@@ -130,7 +129,7 @@ def test_spawn_await_multi_id(runtime_sched):
         task_results.append(1)
         B = TaskSpace()
         for i in range(10):
-            @spawn(B[i], )
+            @spawn(B[i])
             def subtask():
                 task_results.append(2)
         await tasks(B[0:10])
@@ -213,13 +212,74 @@ def test_closure_detachment(runtime_sched):
 
 def test_placement(runtime_sched):
     devices = [cpu(0), cpu(1), cpu(6)]
-
     for rep in repetitions():
         task_results = []
         for (i, dev) in enumerate(devices):
             @spawn(placement=dev)
             def task():
-                task_results.append(get_current_device())
+                task_results.append(get_current_devices()[0])
+            sleep_until(lambda: len(task_results) == i+1)
+
+        assert task_results == devices
+
+
+def test_placement_data(runtime_sched):
+    from parla.cuda import gpu
+    devices = [cpu(0), gpu(0)]
+    for rep in repetitions():
+        task_results = []
+        for (i, dev) in enumerate(devices):
+            d = dev.memory()(np.array([1, 2, 3]))
+            @spawn(placement=d)
+            def task():
+                task_results.append(get_current_devices()[0])
+            sleep_until(lambda: len(task_results) == i+1)
+
+        assert task_results == devices
+
+
+def test_placement_options_vcus(runtime_sched):
+    # test multiple options in placement list with only one device used in the end
+    for rep in repetitions():
+        task_results = []
+        for i in range(4):
+            @spawn(placement=[cpu(0), cpu(1)], vcus=1)
+            def task():
+                sleep(0.1)
+                task_results.append(get_current_devices()[0])
+                print(i, get_current_devices())
+        sleep_until(lambda: len(task_results) == 4)
+        print(task_results)
+        assert set(task_results) == {cpu(0), cpu(1)}
+        assert task_results.count(cpu(0)) == 2
+        assert task_results.count(cpu(1)) == 2
+
+
+def test_placement_options_memory(runtime_sched):
+    # test multiple options in placement list with only one device used in the end
+    for rep in repetitions():
+        task_results = []
+        for i in range(4):
+            @spawn(placement=[cpu(0), cpu(3)], memory=cpu(0).available_memory)
+            def task():
+                sleep(0.1)
+                task_results.append(get_current_devices()[0])
+                print(i, get_current_devices())
+        sleep_until(lambda: len(task_results) == 4)
+        print(task_results)
+        assert set(task_results) == {cpu(0), cpu(3)}
+        assert task_results.count(cpu(0)) == 2
+        assert task_results.count(cpu(3)) == 2
+
+
+def test_placement_multi(runtime_sched):
+    devices = [frozenset((cpu(0), cpu(1))), frozenset((cpu(1), cpu(2))), frozenset((cpu(6), cpu(3)))]
+    for rep in repetitions():
+        task_results = []
+        for (i, dev) in enumerate(devices):
+            @spawn(placement=dev, ndevices=2)
+            def task():
+                task_results.append(frozenset(get_current_devices()))
             sleep_until(lambda: len(task_results) == i+1)
 
         assert task_results == devices
@@ -233,29 +293,36 @@ def test_placement_await(runtime_sched):
         for (i, dev) in enumerate(devices):
             @spawn(placement=dev)
             async def task():
-                task_results.append(get_current_device())
+                task_results.append(get_current_devices()[0])
                 await tasks() # Await nothing to force a new task.
-                task_results.append(get_current_device())
+                task_results.append(get_current_devices()[0])
             sleep_until(lambda: len(task_results) == (i+1)*2)
 
         assert task_results == [cpu(0), cpu(0), cpu(1), cpu(1), cpu(6), cpu(6)]
 
 
-def test_too_much_info(runtime_sched):
-    with pytest.raises(ValueError):
-        @spawn(cpu=1, devices=(Req(cpu, memory=1),))
-        def task():
-            pass
+def test_memory_aware_scheduling(runtime_sched):
+    # test memory restrictions
+    for rep in repetitions():
+        task_results = []
+        for i in range(4):
+            @spawn(placement=cpu, memory=cpu(0).available_memory)
+            def task():
+                task_results.append(get_current_devices()[0])
+                sleep_until(lambda: len(task_results) == 4)
+        sleep_until(lambda: len(task_results) == 4)
+        assert len(set(task_results)) == 4
+
 
 def test_architecture(runtime_sched):
     task_results = []
-    @spawn(cpu=1)
+    @spawn(placement=cpu)
     def task():
         task_results.append(1)
-    @spawn(cpu=0.5)
+    @spawn(placement=cpu)
     def task():
         task_results.append(1)
-    @spawn(cpu=0.5)
+    @spawn(placement=cpu)
     def task():
         task_results.append(1)
 
@@ -264,14 +331,15 @@ def test_architecture(runtime_sched):
 
 
 def test_architecture_multiple(runtime_sched):
+    from parla.cuda import gpu
     try:
         task_results = set()
-        @spawn(cpu=1)
+        @spawn(placement=cpu)
         async def task():
-            task_results.add(get_current_device().architecture.id)
-        @spawn(gpu=1)
+            task_results.add(get_current_devices()[0].architecture.id)
+        @spawn(placement=gpu)
         async def task():
-            task_results.add(get_current_device().architecture.id)
+            task_results.add(get_current_devices()[0].architecture.id)
 
         sleep_until(lambda: len(task_results) == 2)
         assert task_results == {"cpu", "gpu"}

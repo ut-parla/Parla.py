@@ -8,61 +8,20 @@ import threading
 import time
 from numbers import Number
 from threading import Thread, Condition
-from typing import Optional, Collection, Union, Dict, List
+from typing import Optional, Collection, Union, Dict, List, Any, Tuple
 
 from .device import get_all_devices, Device, Architecture
 
 logger = logging.getLogger(__name__)
 
-__all__ = []
+__all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements"]
 
 
 _ASSIGNMENT_FAILURE_WARNING_LIMIT = 32
 
 
-# Note: tasks can be implemented as lock free, however,
-# atomics aren't really a thing in Python, so instead
-# make each task have its own lock to mimic atomic-like
-# counters for dependency tracking.
-
-
-class DeviceDescriptor(object, metaclass=abc.ABCMeta):
-    __slots__ = ["architecture_or_device", "resources"]
-
-    architecture_or_device: Union[Architecture, Device, None]
-    resources: Dict[str, float]
-
-    def __init__(self, architecture_or_device: Union[Architecture, Device, None] = None, **resources: float):
-        self.architecture_or_device = architecture_or_device
-        self.resources = resources
-        if "memory" not in resources:
-            logger.info(
-                "memory resource not provided in device request for %r (add memory=x where x is the bytes used)",
-                architecture_or_device)
-
-    @property
-    @abstractmethod
-    def optional(self):
-        raise NotImplementedError()
-
-    def __repr__(self):
-        return "{}({}, **{})".format(type(self).__name__, self.architecture_or_device, self.resources)
-
-    def __eq__(self, o: object) -> bool:
-        return type(self) == type(o) and self.architecture_or_device == o.architecture_or_device \
-               and self.resources == o.resources
-
-
-class Req(DeviceDescriptor):
-    @property
-    def optional(self):
-        return False
-
-
-class Opt(DeviceDescriptor):
-    @property
-    def optional(self):
-        return True
+# Note: tasks can be implemented as lock free, however, atomics aren't really a thing in Python, so instead
+# make each task have its own lock to mimic atomic-like counters for dependency tracking.
 
 
 TaskAwaitTasks = namedtuple("AwaitTasks", ("dependencies", "value_task"))
@@ -127,21 +86,76 @@ class TaskException(TaskState):
         return "TaskException({})".format(self.exc)
 
 
+ResourceDict = Dict[str, Union[float, int]]
+
+class ResourceRequirements(object, metaclass=abc.ABCMeta):
+    __slots__ = ["resources", "ndevices"]
+
+    resources: ResourceDict
+    ndevices: int
+
+    def __init__(self, resources: ResourceDict, ndevices):
+        self.resources = resources
+        assert all(isinstance(v, str) for v in resources.keys())
+        assert all(isinstance(v, (float, int)) for v in resources.values())
+        self.ndevices = ndevices
+        # if "memory" not in resources:
+        #     logger.info(
+        #         "memory resource not provided in device request for %r (add memory=x where x is the bytes used)",
+        #         architecture_or_device)
+
+    @property
+    def exact(self):
+        return False
+
+
+class DeviceSetRequirements(ResourceRequirements):
+    __slots__ = ["devices"]
+    devices: List[Device]
+
+    def __init__(self, resources: ResourceDict, ndevices: int, devices: List[Device]):
+        super().__init__(resources, ndevices)
+        assert devices
+        assert all(isinstance(dd, Device) for dd in devices)
+        self.devices = list(devices)
+
+    @property
+    def exact(self):
+        assert len(self.devices) >= self.ndevices
+        return len(self.devices) == self.ndevices
+
+
+class OptionsRequirements(ResourceRequirements):
+    __slots__ = ["options"]
+    options: List[List[Device]]
+
+    def __init__(self, resources, ndevices, options):
+        super().__init__(resources, ndevices)
+        assert len(options) > 1
+        assert all(isinstance(a, Device) for a in options)
+        self.options = options
+
+    @property
+    def possibilities(self):
+        return (DeviceSetRequirements(self.resources, self.ndevices, ds) for ds in self.options)
+
+
 class Task:
-    devices: List[DeviceDescriptor]
+    assigned: bool
+    req: ResourceRequirements
+    _dependees: List["Task"]
     _state: TaskState
 
     def __init__(self, func, args, dependencies: Collection["Task"], taskid,
-                 devices: Collection[DeviceDescriptor]):
+                 req: ResourceRequirements):
         self._mutex = threading.Lock()
         with self._mutex:
             self.taskid = taskid
 
+            self.req = req
+            self.assigned = False
+
             self._state = TaskRunning(func, args, None)
-
-            self.devices = list(devices)
-            assert all(isinstance(dd, DeviceDescriptor) for dd in devices)
-
             self._dependees = []
 
             get_scheduler_context().incr_active_tasks()
@@ -179,7 +193,7 @@ class Task:
             logger.info("Task %r: Scheduling", self)
             get_scheduler_context().enqueue_task(self)
 
-    def _add_dependee(self, dependee):
+    def _add_dependee(self, dependee: "Task"):
         """Add the dependee if self is not completed, otherwise return False."""
         with self._mutex:
             if self._state.is_terminal:
@@ -189,14 +203,13 @@ class Task:
                 return True
 
     def run(self):
-        if not all(isinstance(dd.architecture_or_device, Device) for dd in self.devices):
-            raise ValueError("Task was not assigned before running. This requirement will be fixed in the future.")
         ctx = get_scheduler_context()
         task_state = TaskException(RuntimeError("Unknown fatal error"))
-        for dd in self.devices:
-            ctx.scheduler._available_resources.allocate_resources(dd, blocking=True)
+        assert isinstance(self.req, DeviceSetRequirements) and self.req.exact, "Task was not assigned before running."
+        for d in self.req.devices:
+            ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
         try:
-            with _scheduler_locals._device_scope(self.devices[0].architecture_or_device):
+            with _scheduler_locals._devices_scope(self.req.devices):
                 try:
                     assert isinstance(self._state, TaskRunning)
                     task_state = self._state.func(self, *self._state.args)
@@ -205,9 +218,10 @@ class Task:
                 except Exception as e:
                     task_state = TaskException(e)
                 finally:
-                    for dd in self.devices:
-                        ctx.scheduler._available_resources.deallocate_resources(dd)
-                        ctx.scheduler._unassigned_resources.deallocate_resources(dd)
+                    logger.info("Finally for task %r", self)
+                    for d in self.req.devices:
+                        ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
+                        ctx.scheduler._unassigned_resources.deallocate_resources(d, self.req.resources)
                     self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
@@ -247,8 +261,8 @@ class InvalidSchedulerAccessException(RuntimeError):
 
 
 class SchedulerContext(metaclass=ABCMeta):
-    def spawn_task(self, function, args, deps, taskid, devices: Collection[DeviceDescriptor]):
-        return Task(function, args, deps, taskid, devices)
+    def spawn_task(self, function, args, deps, taskid, req):
+        return Task(function, args, deps, taskid, req)
 
     @abstractmethod
     def enqueue_task(self, task):
@@ -281,20 +295,20 @@ class _SchedulerLocals(threading.local):
         self._scheduler_context_stack = []
 
     @property
-    def device(self):
-        if hasattr(self, "_device"):
-            return self._device
+    def devices(self):
+        if hasattr(self, "_devices"):
+            return self._devices
         else:
-            raise InvalidSchedulerAccessException("Device not set in this context")
+            raise InvalidSchedulerAccessException("Devices not set in this context")
 
     @contextmanager
-    def _device_scope(self, device):
-        assert isinstance(device, Device)
-        self._device = device
+    def _devices_scope(self, devices: List[Device]):
+        assert all(isinstance(d, Device) for d in devices)
+        self._devices = devices
         try:
             yield
         finally:
-            self._device = None
+            self._devices = None
 
     @property
     def scheduler_context(self) -> SchedulerContext:
@@ -311,8 +325,8 @@ def get_scheduler_context() -> SchedulerContext:
     return _scheduler_locals.scheduler_context
 
 
-def get_device() -> Device:
-    return _scheduler_locals.device
+def get_devices() -> List[Device]:
+    return _scheduler_locals.devices
 
 
 class ControllableThread(Thread, metaclass=ABCMeta):
@@ -444,30 +458,32 @@ class ResourcePool:
     def _initial_resources(multiplier):
         return {dev: {name: amt * multiplier for name, amt in dev.resources.items()} for dev in get_all_devices()}
 
-    def allocate_resources(self, dd: DeviceDescriptor, *, blocking: bool = False) -> bool:
+    def allocate_resources(self, d: Device, resources: ResourceDict, *, blocking: bool = False) -> bool:
         """Allocate the resources described by `dd`.
 
-        :param dd: The device descriptor of the resources to allocate.
+        :param d: The device on which resources exist.
+        :param resources: The resources to allocate.
         :param blocking: If True, this call will block until the resource is available and will always return True.
 
         :return: True iff the allocation was successful.
         """
-        return self._atomically_update_resources(dd, -1, blocking)
+        return self._atomically_update_resources(d, resources, -1, blocking)
 
-    def deallocate_resources(self, dd: DeviceDescriptor) -> None:
+    def deallocate_resources(self, d: Device, resources: ResourceDict) -> None:
         """Deallocate the resources described by `dd`.
 
-        :param dd: The device descriptor of the resources to deallocate.
+        :param d: The device on which resources exist.
+        :param resources: The resources to deallocate.
         """
-        ret = self._atomically_update_resources(dd, 1, False)
+        ret = self._atomically_update_resources(d, resources, 1, False)
         assert ret
 
-    def _atomically_update_resources(self, dd, multiplier, block: bool):
+    def _atomically_update_resources(self, d: Device, resources: ResourceDict, multiplier, block: bool):
         with self._monitor:
             to_release = []
             success = True
-            for name, v in dd.resources.items():
-                if not self._update_resource(dd.architecture_or_device, name, v * multiplier, block):
+            for name, v in resources.items():
+                if not self._update_resource(d, name, v * multiplier, block):
                     success = False
                     break
                 else:
@@ -475,12 +491,12 @@ class ResourcePool:
             else:
                 to_release.clear()
 
-            logger.info("Attempted to allocate %s * %r (blocking %s) => %s", multiplier, dd, block, success)
+            logger.info("Attempted to allocate %s * %r (blocking %s) => %s\n%r", multiplier, (d, resources), block, success, self)
             if to_release:
                 logger.info("Releasing resources due to failure: %r", to_release)
 
             for name, v in to_release:
-                ret = self._update_resource(dd.architecture_or_device, name, -v * multiplier, block)
+                ret = self._update_resource(d, name, -v * multiplier, block)
                 assert ret
 
             assert not success or len(to_release) == 0 # success implies to_release empty
@@ -587,40 +603,63 @@ class Scheduler(ControllableThread, SchedulerContext):
                         except IndexError:
                             return None
 
+    def _try_assignment(self, req: DeviceSetRequirements):
+        selected_devices: List[Device] = []
+        for d in req.devices:
+            assert len(selected_devices) < req.ndevices
+            assert isinstance(d, Device)
+            if self._unassigned_resources.allocate_resources(d, req.resources):
+                selected_devices.append(d)
+                # If we have all out devices then break.
+                if len(selected_devices) == req.ndevices:
+                    break
+        if len(selected_devices) == req.ndevices:
+            ret = DeviceSetRequirements(req.resources, req.ndevices, selected_devices)
+            assert ret.exact
+            return ret
+        else:
+            # Free any resources we already assigned
+            for d in selected_devices:
+                self._unassigned_resources.deallocate_resources(d, req.resources)
+            return None
+
     def run(self) -> None:
         try:
             while self._should_run:
-                task = self._dequeue_task()
+                task: Optional[Task] = self._dequeue_task()
                 if not task:
                     # Exit if the dequeue fails. This implies a failure or shutdown.
                     break
 
-                assigned_resources = []
-                try: # The exception AssignmentFailed is used for flow control
-                    # logger.info("Task %r: Assigning", task)
-                    for dd in task.devices:
-                        da = dd.architecture_or_device
-                        if da is None or isinstance(da, Architecture):
-                            devs = list(get_all_devices() if da is None else da.devices)
-                            random.shuffle(devs)
-                            for dev in devs:
-                                dd.architecture_or_device = dev
-                                if self._unassigned_resources.allocate_resources(dd):
-                                    assigned_resources.append(dd)
-                                    break
-                            else:
-                                # Allocation failed
-                                dd.architecture_or_device = da
-                                raise AssignmentFailed("Failed to find resource to assign {}".format(dd))
-                        else:
-                            # If da is not an architecture it must be a device
-                            assert isinstance(da, Device)
-                            if self._unassigned_resources.allocate_resources(dd):
-                                assigned_resources.append(dd)
-                                break
-                            else:
-                                raise AssignmentFailed("Failed to assign resource {}".format(dd))
+                logger.info("Task %r: Assigning", task)
+                if isinstance(task.req, OptionsRequirements):
+                    for opt in task.req.possibilities:
+                        a = self._try_assignment(opt)
+                        if a:
+                            task.assigned = True
+                            task.req = a
+                            break
+                elif isinstance(task.req, DeviceSetRequirements) and not task.assigned:
+                    a = self._try_assignment(task.req)
+                    if a:
+                        task.assigned = True
+                        task.req = a
 
+                if not task.req.exact:
+                    task._assignment_tries = getattr(task, "_assignment_tries", 0) + 1
+                    if task._assignment_tries > _ASSIGNMENT_FAILURE_WARNING_LIMIT:
+                        logger.warning("Task %r: Failed to assign devices. The required resources may not be "
+                                       "available on this machine at all.\n"
+                                       "Available resources: %r\n"
+                                       "Unallocated resources: %r",
+                                       task, self._available_resources, self._unassigned_resources)
+                        # Put task we cannot assign resources to at the back of the queue
+                    self.enqueue_task(task)
+                    # Avoid spinning when no tasks are schedulable.
+                    time.sleep(self.period)
+                    # TODO: There is almost certainly a better way to handle this. Add a dependency on
+                    #  a task holding the needed resources?
+                else:
                     # Place task in shortest worker queue if it's not too long
                     while True:  # contains break
                         worker = min(self._worker_threads, key=lambda w: w.estimated_queue_depth())
@@ -629,22 +668,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                             worker._enqueue_task_local(task)
                             break
                         else:
-                            # Delay a bit waiting for a workers queue to shorten
+                            # Delay a bit waiting for a workers queue to shorten; This is not an issue since
+                            # definitionally there is plenty of work in the queues.
                             time.sleep(self.period)
-                except AssignmentFailed:
-                    task._assignment_tries = getattr(task, "_assignment_tries", 0) + 1
-                    if task._assignment_tries > _ASSIGNMENT_FAILURE_WARNING_LIMIT:
-                        logger.warning("Task %r: Failed to assign devices. The required resources may not be "
-                                       "available on this machine at all.\n"
-                                       "Available resources: %r\nUnallocated resources: %r",
-                                       task, self._available_resources, self._unassigned_resources, exc_info=True)
-                    # Free any resources we already assigned
-                    for dd in assigned_resources:
-                        self._unassigned_resources.deallocate_resources(dd)
-                    # Put task we cannot assign resources to at the back of the queue
-                    self.enqueue_task(task)
-                    # Avoid spinning when no tasks are schedulable.
-                    time.sleep(self.period)
         except Exception:
             logger.exception("Unexpected exception in Scheduler")
             self.stop()

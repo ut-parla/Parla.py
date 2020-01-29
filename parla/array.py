@@ -4,7 +4,8 @@ from typing import Dict
 
 import numpy as np
 
-from parla.tasks import get_current_device
+from parla.device import Memory
+from parla.tasks import get_current_devices
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ def asnumpy(a):
         return np.asarray(a)
 
 
-def get_memory(a):
+def get_memory(a) -> Memory:
     """
     :param a: An array object.
     :return: A memory in which `a` is stored.
@@ -123,7 +124,8 @@ def clone_here(source, kind=None):
     :param source: The array to read from.
     """
     if is_array(source):
-        return get_current_device().memory(kind)(source)
+        # TODO: How to correctly handle multiple devices.
+        return get_current_devices()[0].memory(kind)(source)
     else:
         raise TypeError("Array required, given value of type {}".format(type(source)))
 

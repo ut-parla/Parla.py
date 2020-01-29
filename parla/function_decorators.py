@@ -36,8 +36,8 @@ class _ArchitectureSpecializer:
         return variant
 
     def __call__(self, *args, **kwds):
-        # TODO: Get current device and use it to select the varient
-        d = tasks.get_current_device()
+        # TODO: How to correctly handle multiple devices.
+        d = tasks.get_current_devices()[0]
         f = self.get_variant(d.architecture)
         return f(*args, **kwds)
         # return self._default(*args, **kwds)

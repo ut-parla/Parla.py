@@ -24,7 +24,3 @@ def test_jacobi():
 
 def test_blocked_cholesky():
     call_example("blocked_cholesky")
-
-
-def test_conjugate_gradient():
-    call_example("conjugate_gradient")

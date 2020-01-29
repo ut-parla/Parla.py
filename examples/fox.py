@@ -125,7 +125,7 @@ async def matvec_fox_partitioned(yp, Ap, xp):
 
 
 def main():
-    @spawn(cpu=1)
+    @spawn(placement=cpu)
     async def test_fox():
         size_factor = 256
         A = np.random.rand(size_factor, size_factor)

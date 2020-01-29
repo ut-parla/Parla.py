@@ -1,15 +1,16 @@
-from parla.cpucores import cpu
-from parla.task_runtime import Scheduler, Task, TaskCompleted, TaskRunning, Req
+from parla import get_all_devices
+from parla.cpu import cpu
+from parla.task_runtime import Scheduler, Task, TaskCompleted, TaskRunning, DeviceSetRequirements
 from parla.tasks import TaskID
 
 task_id_next = 0
 
 
-def simple_task(func, args=(), dependencies=(), taskid=None, devices=(Req(None),)):
+def simple_task(func, args=(), dependencies=(), taskid=None, devices=list(get_all_devices())):
     global task_id_next
     taskid = taskid or TaskID("Dummy {}".format(task_id_next), task_id_next)
     task_id_next += 1
-    return Task(func, args, dependencies, taskid, devices)
+    return Task(func, args, dependencies, taskid, req=DeviceSetRequirements(devices=devices, ndevices=1, resources={}))
 
 
 def test_flag_increment():

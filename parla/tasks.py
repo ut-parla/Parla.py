@@ -16,13 +16,14 @@ from abc import abstractmethod, ABCMeta
 from collections import namedtuple
 from contextlib import asynccontextmanager
 from numbers import Number
-from typing import Awaitable, Collection, Iterable, Optional, Dict, Any, Union, Callable
+from typing import Awaitable, Collection, Iterable, Optional, Dict, Any, Union, Callable, List
 
-from parla.device import Device, Architecture, get_architecture
-from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceDescriptor, Req, Opt
+from parla.device import Device, Architecture, get_architecture, get_all_devices
+from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, ResourceRequirements, \
+    DeviceSetRequirements, OptionsRequirements, Task
 
 try:
-    from parla import task_runtime
+    from parla import task_runtime, array
 except ImportError as e:
     # Ignore the exception if the stack includes the doc generator
     if all("sphinx" not in f.filename for f in inspect.getouterframes(inspect.currentframe())):
@@ -31,8 +32,7 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaskID", "TaskSpace", "spawn", "get_current_device", "tasks", "finish", "CompletedTaskSpace",
-    "DeviceDescriptor", "Req", "Opt"
+    "TaskID", "TaskSpace", "spawn", "get_current_devices", "tasks", "finish", "CompletedTaskSpace", "Task"
 ]
 
 
@@ -242,7 +242,8 @@ def _task_callback(task, body) -> TaskState:
     A function which forwards to a python function in the appropriate device context.
     """
     try:
-        with get_current_device().context():
+        # TODO: How to correctly handle multiple devices.
+        with get_current_devices()[0].context():
             body = body
             if inspect.iscoroutinefunction(body):
                 logger.debug("Constructing coroutine task: %s", task.taskid)
@@ -252,7 +253,8 @@ def _task_callback(task, body) -> TaskState:
                 try:
                     in_value_task = getattr(task, "value_task", None)
                     in_value = in_value_task and in_value_task.result
-                    logger.debug("Executing coroutine task: %s with input %s from %r", task.taskid, in_value_task, in_value)
+                    logger.debug("Executing coroutine task: %s with input %s from %r", task.taskid,
+                                 in_value_task, in_value)
                     new_task_info = body.send(in_value)
                     task.value_task = None
                     if not isinstance(new_task_info, TaskAwaitTasks):
@@ -291,12 +293,34 @@ def _make_cell(val):
     return closure.__closure__[0]
 
 
+def _get_placement_for(p: Union[Architecture, Device, Task, TaskID, Any]) -> List[Device]:
+    if isinstance(p, Device):
+        return [p]
+    elif isinstance(p, Architecture):
+        return list(p.devices)
+    elif isinstance(p, TaskID):
+        return _get_placement_for(p.task)
+    elif isinstance(p, task_runtime.Task):
+        if isinstance(p.req, DeviceSetRequirements):
+            return list(p.req.devices)
+        elif isinstance(p.req, OptionsRequirements):
+            return list(set(d for ds in p.req.options for d in ds))
+        else:
+            raise TypeError(type(p.req))
+    else:
+        return [array.get_memory(p).device]
+
+
 def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
-          placement: Device = None,
           memory: int = None,
-          devices: Collection[DeviceDescriptor] = None,
-          **architectures):
+          vcus: float = None,
+          placement: Collection[Union[Architecture, Device, Task, TaskID, Any]] = None,
+          ndevices: int = 1
+          # data: Collection[Any] = None,
+          ):
     """
+    spawn(taskid: Optional[TaskID] = None, dependencies = (), *, memory: int = None, placement: Collection[Any] = None, ndevices: int = 1)
+
     Execute the body of the function as a new task. The task may start
     executing immediately, so it may execute in parallel with any
     following code.
@@ -305,17 +329,18 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     ... def t():
     ...     code
 
-    >>> @spawn(T1, [T0], cpu=1)
+    >>> @spawn(T1, [T0], placement=cpu)
     ... def t():
     ...     code
 
     :param taskid: the ID of the task in a `TaskSpace` or None if the task does not have an ID.
-    :param dependencies: any numer of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or iterables of Tasks or TaskIDs.
-    :param placement: A specific device or architecture that this task should run on.
-    :param memory: The amount of memory this task uses. It is assumed to be evenly divided between the devices used.
-    :param **architectures: Specify how many devices from each architecture are required. For example, `cpu=1` or `gpu=4`.
-    :param devices: A collection of `DeviceDescriptor` objects. This parameter is only allowed if `placement`,
-        `memory`, and `architecture` are not provided. It is the advanced interface.
+    :param dependencies: any number of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or \
+       iterables of Tasks or TaskIDs.
+    :param memory: The amount of memory this task uses.
+    :param placement: A collection of values (`Architectures<Architecture>`, `Devices<Device>`, or array data) which \
+       specify devices at which the task can be placed.
+    :param ndevices: The number of devices the task will use. If `ndevices` is greater than 1, the `memory` is divided \
+       evenly between the devices. In the task: `len(get_current_devices()) == ndevices`.
 
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
     This same value is stored into the task space used in `taskid`.
@@ -323,32 +348,40 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     :see: :ref:`Fox's Algorithm` Example
 
     """
+    # :param vcus: The amount of compute power this task uses. It is specified in "Virtual Compute Units".
 
     def decorator(body):
-        nonlocal taskid, devices
+        nonlocal taskid
 
-        if devices is not None and (
-            placement is not None or memory is not None or architectures):
-            raise ValueError("If devices is specified, then placement, memory and architectures are not allowed.")
-
+        # if req is not None and architectures:
+        #     raise ValueError("If req is specified, then architectures are not allowed.")
 
         if placement is not None:
-            assert devices is None
-            devices = [Req(placement)]
+            from parla.array import is_array
+            devices = list(set(d
+                               for p in (placement if isinstance(placement, Iterable) and not is_array(placement) else [placement])
+                               for d in _get_placement_for(p)))
         else:
-            devices = list(devices) if devices is not None else []
+            devices = get_all_devices()
 
-        for name, total_amount in architectures.items():
-            while total_amount:
-                if total_amount > 1:
-                    amount = 1
-                else:
-                    amount = total_amount
-                devices.append(Req(get_architecture(name), devices=amount))
-                total_amount -= amount
+        resources = {}
+        if memory is not None:
+            resources["memory"] = memory
+        if vcus is not None:
+            resources["vcus"] = vcus
 
-        if not devices:
-            devices.append(Req())
+        req = DeviceSetRequirements(resources, ndevices, devices)
+
+        # if req is not None:
+        #     if not len(req):
+        #         raise ValueError("There must be at least one requirement set.")
+        #     detailed_reqs = ResourceOptions([_construct_resource_assignment(archs, memory) for archs in req])
+        # elif architectures:
+        #     if not len(architectures):
+        #         raise ValueError("There must be at least one architecture.")
+        #     detailed_reqs = ResourceOptions([_construct_resource_assignment(architectures, memory)])
+        # else:
+        #     detailed_reqs = ResourceAssignment([Req()])
 
         if inspect.isgeneratorfunction(body):
             raise TypeError("Spawned tasks must be normal functions or coroutines; not generators.")
@@ -389,7 +422,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
         # Spawn the task via the Parla runtime API
         task = task_runtime.get_scheduler_context().spawn_task(
-            _task_callback, (separated_body,), deps, taskid=taskid, devices=devices)
+            _task_callback, (separated_body,), deps, taskid=taskid, req=req)
 
         logger.debug("Created: %s %r", taskid, body)
 
@@ -402,8 +435,8 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     return decorator
 
 
-def get_current_device() -> Device:
-    return task_runtime.get_device()
+def get_current_devices() -> List[Device]:
+    return task_runtime.get_devices()
 
 
 @asynccontextmanager

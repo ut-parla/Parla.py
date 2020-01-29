@@ -42,7 +42,7 @@ def main():
         async with finish():
             # For each logical device, perform the local inner product using the numpy multiply operation, @.
             for i in range(divisions):
-                @spawn(devices=[Req(mapper.device(i), threads=1, memory=storage_size(a_part[i], b_part[i]))])
+                @spawn(placement=[a_part[i], b_part[i]], memory=storage_size(a_part[i], b_part[i]))
                 def inner_local():
                     copy(partial_sums[i:i+1], a_part[i] @ b_part[i])
         # Reduce the partial results (sequentially)
