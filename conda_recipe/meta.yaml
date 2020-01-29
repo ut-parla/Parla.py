@@ -8,7 +8,9 @@ build:
   noarch: python
   number: 6
   script: |
-    cd $RECIPE_DIR/..
+    cd $RECIPE_DIR || echo running in cmd
+    cd %RECIPE_DIR% || echo running in bash
+    cd ..
     "{{ PYTHON }}" -m pip install . --no-deps --ignore-installed
 
 requirements:
