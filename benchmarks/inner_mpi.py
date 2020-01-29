@@ -4,7 +4,7 @@ from mpi4py import MPI
 
 from parla.array import copy
 from parla.cuda import gpu
-from parla.cpucores import cpu
+from parla.cpu import cpu
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import *
 import time

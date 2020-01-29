@@ -5,7 +5,7 @@ import pytest
 
 from parla.task_runtime import Scheduler
 
-import parla.cpucores
+import parla.cpu
 
 try:
     import parla.cuda
