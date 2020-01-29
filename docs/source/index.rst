@@ -14,7 +14,6 @@ The Parla Language
    parla.function_decorators
    parla.detail
    parla.partitioning
-   prototype
    examples
 
 
