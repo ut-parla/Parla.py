@@ -1,3 +1,4 @@
+import logging
 from time import sleep
 
 import numpy as np
@@ -7,6 +8,8 @@ from pytest import skip
 from parla import Parla, array
 from parla.cpu import cpu
 from parla.tasks import *
+
+logger = logging.getLogger(__name__)
 
 
 def repetitions():
@@ -87,7 +90,6 @@ def test_await_value(runtime_sched):
             return 42
         v = (await subtask)
         task_results.append(v)
-        print(v)
 
     sleep_until(lambda: len(task_results) == 1)
     assert task_results == [42]
@@ -224,7 +226,11 @@ def test_placement(runtime_sched):
 
 
 def test_placement_data(runtime_sched):
-    from parla.cuda import gpu
+    try:
+        from parla.cuda import gpu
+    except:
+        skip("Test needs cuda.")
+        return
     devices = [cpu(0), gpu(0)]
     for rep in repetitions():
         task_results = []
@@ -241,18 +247,17 @@ def test_placement_data(runtime_sched):
 def test_placement_options_vcus(runtime_sched):
     # test multiple options in placement list with only one device used in the end
     for rep in repetitions():
+        N = 4
         task_results = []
-        for i in range(4):
+        for i in range(N):
             @spawn(placement=[cpu(0), cpu(1)], vcus=1)
             def task():
                 sleep(0.1)
                 task_results.append(get_current_devices()[0])
-                print(i, get_current_devices())
-        sleep_until(lambda: len(task_results) == 4)
-        print(task_results)
+        sleep_until(lambda: len(task_results) == N)
         assert set(task_results) == {cpu(0), cpu(1)}
-        assert task_results.count(cpu(0)) == 2
-        assert task_results.count(cpu(1)) == 2
+        assert task_results.count(cpu(0)) == N/2
+        assert task_results.count(cpu(1)) == N/2
 
 
 def test_placement_options_memory(runtime_sched):
@@ -264,9 +269,7 @@ def test_placement_options_memory(runtime_sched):
             def task():
                 sleep(0.1)
                 task_results.append(get_current_devices()[0])
-                print(i, get_current_devices())
         sleep_until(lambda: len(task_results) == 4)
-        print(task_results)
         assert set(task_results) == {cpu(0), cpu(3)}
         assert task_results.count(cpu(0)) == 2
         assert task_results.count(cpu(3)) == 2
@@ -305,13 +308,13 @@ def test_memory_aware_scheduling(runtime_sched):
     # test memory restrictions
     for rep in repetitions():
         task_results = []
-        for i in range(4):
+        for i in range(8):
             @spawn(placement=cpu, memory=cpu(0).available_memory)
             def task():
                 task_results.append(get_current_devices()[0])
-                sleep_until(lambda: len(task_results) == 4)
-        sleep_until(lambda: len(task_results) == 4)
-        assert len(set(task_results)) == 4
+                sleep(0.1)
+        sleep_until(lambda: len(task_results) == 8)
+        assert 8 >= len(set(task_results)) >= 4
 
 
 def test_architecture(runtime_sched):
@@ -331,7 +334,11 @@ def test_architecture(runtime_sched):
 
 
 def test_architecture_multiple(runtime_sched):
-    from parla.cuda import gpu
+    try:
+        from parla.cuda import gpu
+    except:
+        skip("Test needs cuda.")
+        return
     try:
         task_results = set()
         @spawn(placement=cpu)

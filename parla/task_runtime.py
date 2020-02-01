@@ -124,6 +124,9 @@ class DeviceSetRequirements(ResourceRequirements):
         assert len(self.devices) >= self.ndevices
         return len(self.devices) == self.ndevices
 
+    def __repr__(self):
+        return "DeviceSetRequirements({}, {}, {}, exact={})".format(self.resources, self.ndevices, self.devices, self.exact)
+
 
 class OptionsRequirements(ResourceRequirements):
     __slots__ = ["options"]
@@ -138,6 +141,9 @@ class OptionsRequirements(ResourceRequirements):
     @property
     def possibilities(self):
         return (DeviceSetRequirements(self.resources, self.ndevices, ds) for ds in self.options)
+
+    def __repr__(self):
+        return "OptionsRequirements({}, {}, {})".format(self.resources, self.ndevices, self.options)
 
 
 class Task:
@@ -236,7 +242,7 @@ class Task:
         return (yield TaskAwaitTasks([self], self))
 
     def __repr__(self):
-        return "<Task nrem_deps={_remaining_dependencies} state={_state}>".format(**self.__dict__)
+        return "<Task nrem_deps={_remaining_dependencies} state={_state} req={req} assigned={assigned}>".format(**self.__dict__)
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
@@ -357,6 +363,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
         # appendleft/popleft are used by the scheduler or other workers.
         self._queue = deque()
         self.start()
+        self._status = "Initializing"
 
     @property
     def scheduler(self):
@@ -385,10 +392,12 @@ class WorkerThread(ControllableThread, SchedulerContext):
             while True:
                 try:
                     if self._should_run:
+                        logger.debug("Getting a task: %r", self)
                         return self._queue.pop()
                     else:
                         return None
                 except IndexError:
+                    logger.debug("Blocking for a task: %r (%s)", self, self._monitor)
                     self._monitor.wait()
 
     def steal_task_nonblocking(self):
@@ -435,13 +444,21 @@ class WorkerThread(ControllableThread, SchedulerContext):
         try:
             with self:
                 while self._should_run:
+                    self._status = "Getting Task"
                     task: Task = self._pop_task()
                     if not task:
                         break
+                    self._status = "Running Task {}".format(task)
                     task.run()
         except Exception as e:
             logger.exception("Unexpected exception in Task handling")
             self.scheduler.stop()
+
+    def dump_status(self, lg=logger):
+        lg.info("%r:\n%r", self, self._queue)
+
+    def __repr__(self):
+        return "<{} {} {}>".format(type(self).__name__, self.index, self._status)
 
 
 class ResourcePool:
@@ -531,6 +548,12 @@ class AssignmentFailed(Exception):
     pass
 
 
+def shuffled(l):
+    l = list(l)
+    random.shuffle(l)
+    return l
+
+
 class Scheduler(ControllableThread, SchedulerContext):
     def __init__(self, n_threads, period=0.01, max_worker_queue_depth=2):
         super().__init__()
@@ -605,7 +628,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def _try_assignment(self, req: DeviceSetRequirements):
         selected_devices: List[Device] = []
-        for d in req.devices:
+        for d in shuffled(req.devices):
             assert len(selected_devices) < req.ndevices
             assert isinstance(d, Device)
             if self._unassigned_resources.allocate_resources(d, req.resources):
@@ -633,7 +656,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
                 logger.info("Task %r: Assigning", task)
                 if isinstance(task.req, OptionsRequirements):
-                    for opt in task.req.possibilities:
+                    for opt in shuffled(task.req.possibilities):
                         a = self._try_assignment(opt)
                         if a:
                             task.assigned = True
@@ -653,7 +676,8 @@ class Scheduler(ControllableThread, SchedulerContext):
                                        "Available resources: %r\n"
                                        "Unallocated resources: %r",
                                        task, self._available_resources, self._unassigned_resources)
-                        # Put task we cannot assign resources to at the back of the queue
+                    # Put task we cannot assign resources to at the back of the queue
+                    logger.debug("Task %r: Failed to assign", task)
                     self.enqueue_task(task)
                     # Avoid spinning when no tasks are schedulable.
                     time.sleep(self.period)
@@ -683,3 +707,10 @@ class Scheduler(ControllableThread, SchedulerContext):
     def report_exception(self, e: BaseException):
         with self._monitor:
             self._exceptions.append(e)
+
+    def dump_status(self, lg=logger):
+        lg.info("%r:\n%r\nunassigned: %r\navailable: %r", self,
+                self._allocation_queue, self._unassigned_resources, self._available_resources)
+        w: WorkerThread
+        for w in self._worker_threads:
+            w.dump_status(lg)
