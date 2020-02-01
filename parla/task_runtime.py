@@ -525,7 +525,7 @@ class ResourcePool:
                 dres = self._devices[dev]
                 if -amount <= dres[res]:
                     dres[res] += amount
-                    if amount < 0:
+                    if amount > 0:
                         self._monitor.notify_all()
                     assert dres[res] <= dev.resources[res] * self._multiplier, \
                         "{}.{} was over deallocated".format(dev, res)
