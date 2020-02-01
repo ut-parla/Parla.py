@@ -6,7 +6,7 @@ package:
 
 build:
   noarch: python
-  number: 6
+  number: 7
   script: |
     cd $RECIPE_DIR || echo running in cmd
     cd %RECIPE_DIR% || echo running in bash
