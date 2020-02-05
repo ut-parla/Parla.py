@@ -2,7 +2,7 @@ import numpy as np
 
 from parla import Parla
 from parla.cpu import cpu
-from parla.tasks import spawn, Req
+from parla.tasks import spawn
 from numba import jit
 
 # Divide an array of values into two "bins"
@@ -35,27 +35,23 @@ def insertion_sort(array):
             array[j-1], array[j] = array[j], array[j-1]
             j -= 1
 
-def quicksort(array, lower = 0., upper = 1., threshold = 100):
-    def quicksort_recursion(array, lower = 0., upper = 1., threshold = 100):
-        if array.shape[0] < threshold:
-            insertion_sort(array)
-            return
-        split = .5 * (lower + upper)
-        split_idx = subdivide(array, split)
-        lower_array = array[:split_idx]
-        upper_array = array[split_idx:]
-        @spawn(cpu=1)
-        def lower_block_task():
-            quicksort_recursion(lower_array, lower, split, threshold)
-        @spawn(cpu=1)
-        def upper_block_task():
-            quicksort_recursion(upper_array, split, upper, threshold)
-    with Parla():
-        @spawn(cpu=1)
-        def root_recursion():
-            quicksort_recursion(array, lower, upper, threshold)
+def quicksort(array, lower = 0, upper = 1., threshold = 100):
+    if array.shape[0] < threshold:
+        insertion_sort(array)
+        return
+    split = .5 * (lower + upper)
+    split_idx = subdivide(array, split)
+    lower_array = array[:split_idx]
+    upper_array = array[split_idx:]
+    @spawn(placement = cpu)
+    def lower_block_task():
+        quicksort(lower_array, lower, split, threshold)
+    @spawn(placement = cpu)
+    def upper_block_task():
+        quicksort(upper_array, split, upper, threshold)
 
 a = np.random.rand(10000)
 a_sorted = np.sort(a)
-quicksort(a)
+with Parla():
+    quicksort(a)
 assert (a == a_sorted).all()
