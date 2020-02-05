@@ -6,7 +6,7 @@ package:
 
 build:
   noarch: python
-  number: 7
+  number: 8
   script: |
     cd $RECIPE_DIR || echo running in cmd
     cd %RECIPE_DIR% || echo running in bash
@@ -23,6 +23,7 @@ requirements:
     - cupy
     - scipy
     - numba
+    - psutil
     #- mpi4py
 
 about:

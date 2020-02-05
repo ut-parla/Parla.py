@@ -3,6 +3,7 @@ from typing import Dict
 
 import numpy
 import os
+import psutil
 
 from . import array, device
 from .array import ArrayType
@@ -17,11 +18,11 @@ _MEMORY_FRACTION = 15/16 # The fraction of total memory Parla should assume it c
 
 
 def get_n_cores():
-    return len(os.sched_getaffinity(0))
+    return psutil.cpu_count(logical=False)
 
 
 def get_total_memory():
-    return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+    return psutil.virtual_memory().total
 
 
 class _CPUMemory(Memory):
@@ -97,7 +98,5 @@ device._register_architecture("cpu", cpu)
 array._register_array_type(numpy.ndarray, _NumPyArrayType())
 
 # Set OpenMP and MKL to use a single thread for calls
-import os
-
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_THREADING_LAYER"] = "SEQUENTIAL"
