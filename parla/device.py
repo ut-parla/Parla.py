@@ -94,7 +94,7 @@ class Device(metaclass=ABCMeta):
     """
     An instance of `Device` represents a compute device and its associated memory.
     Every device can directly access its own memory, but may be able to directly or indirectly access other devices memories.
-    Depending on the system configuration, potential devices include: One NUMA node of a larger system, all CPUs (in multiple NUMA nodes) combined, a whole GPU.
+    Depending on the system configuration, potential devices include one CPU core or a whole GPU.
 
     As devices are logical, the runtime may choose to implement two devices using the same hardware.
     """
@@ -162,6 +162,9 @@ class Architecture(metaclass=ABCMeta):
     @property
     @abstractmethod
     def devices(self):
+        """
+        :return: all `devices<Device>` with this architecture in the system.
+        """
         pass
 
     # def memory(self, kind: MemoryKind = None):

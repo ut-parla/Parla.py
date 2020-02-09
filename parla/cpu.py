@@ -89,7 +89,7 @@ class _CPUCoresArchitecture(Architecture):
 
 
 cpu = _CPUCoresArchitecture("CPU Cores", "cpu")
-cpu.__doc__ = """The `Architecture` for CPUs.
+cpu.__doc__ = """The `~parla.device.Architecture` for CPUs.
 
 >>> cpu()
 """

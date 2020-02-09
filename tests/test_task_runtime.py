@@ -96,3 +96,6 @@ def test_exception_handling_state_restoration():
     test_exception_handling()
     test_flag_increment()
 
+
+# TODO: Add tests for ResourcePool. Sadly they will need to be multithreaded tests since correct blocking
+#  is very important. :-/ PITA.

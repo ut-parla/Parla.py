@@ -11,9 +11,13 @@ Devices (parla.device)
 
 
 .. autoclass:: Architecture
+   :no-members:
+   :members: __call__, devices
 .. autoclass:: Device
-.. autoclass:: MemoryKind
+   :no-members:
 .. autoclass:: Memory
+   :no-members:
+   :members: __call__, np
 
 .. autodata:: parla.cpu.cpu
 .. autodata:: parla.cuda.gpu

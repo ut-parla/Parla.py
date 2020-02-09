@@ -108,7 +108,7 @@ class _GPUArchitecture(Architecture):
 
 
 gpu = _GPUArchitecture("GPU", "gpu")
-gpu.__doc__ = """The `Architecture` for CUDA GPUs.
+gpu.__doc__ = """The `~parla.device.Architecture` for CUDA GPUs.
 
 >>> gpu(0)
 """

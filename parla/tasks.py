@@ -53,7 +53,9 @@ class TaskID:
 
     @property
     def task(self):
-        """Get the task object associated with this ID.
+        """Get the `Task` associated with this ID.
+
+        :raises ValueError: if there is no such task.
         """
         if not self._task:
             raise ValueError("This task has not yet been spawned so it cannot be used.")
@@ -202,6 +204,8 @@ class TaskSpace(TaskSet):
 class CompletedTaskSpace(TaskSet):
     """
     A task space that returns completed tasks instead of unused tasks.
+
+    This is useful as the base case for more complex collections of tasks.
     """
 
     @property
@@ -337,10 +341,10 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     :param dependencies: any number of dependency arguments which may be `Tasks<Task>`, `TaskIDs<TaskID>`, or \
        iterables of Tasks or TaskIDs.
     :param memory: The amount of memory this task uses.
-    :param placement: A collection of values (`Architectures<Architecture>`, `Devices<Device>`, or array data) which \
+    :param placement: A collection of values (`~parla.device.Architecture`, `~parla.device.Device`, or array data) which \
        specify devices at which the task can be placed.
     :param ndevices: The number of devices the task will use. If `ndevices` is greater than 1, the `memory` is divided \
-       evenly between the devices. In the task: `len(get_current_devices()) == ndevices`.
+       evenly between the devices. In the task: `len(get_current_devices()) == ndevices<get_current_devices>`.
 
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
     This same value is stored into the task space used in `taskid`.
@@ -350,17 +354,17 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     """
     # :param vcus: The amount of compute power this task uses. It is specified in "Virtual Compute Units".
 
+    if not taskid:
+        taskid = TaskID("global_" + str(len(_task_locals.global_tasks)), len(_task_locals.global_tasks))
+        _task_locals.global_tasks += [taskid]
+
     def decorator(body):
-        nonlocal taskid
-
-        # if req is not None and architectures:
-        #     raise ValueError("If req is specified, then architectures are not allowed.")
-
         if placement is not None:
             from parla.array import is_array
             devices = list(set(d
                                for p in (placement if isinstance(placement, Iterable) and not is_array(placement) else [placement])
                                for d in _get_placement_for(p)))
+            assert all(isinstance(d, Device) for d in devices)
         else:
             devices = get_all_devices()
 
@@ -372,31 +376,11 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
         req = DeviceSetRequirements(resources, ndevices, devices)
 
-        # if req is not None:
-        #     if not len(req):
-        #         raise ValueError("There must be at least one requirement set.")
-        #     detailed_reqs = ResourceOptions([_construct_resource_assignment(archs, memory) for archs in req])
-        # elif architectures:
-        #     if not len(architectures):
-        #         raise ValueError("There must be at least one architecture.")
-        #     detailed_reqs = ResourceOptions([_construct_resource_assignment(architectures, memory)])
-        # else:
-        #     detailed_reqs = ResourceAssignment([Req()])
-
         if inspect.isgeneratorfunction(body):
             raise TypeError("Spawned tasks must be normal functions or coroutines; not generators.")
 
         # Compute the flat dependency set (including unwrapping TaskID objects)
-        deps = []
-        for ds in dependencies:
-            if not isinstance(ds, Iterable):
-                ds = (ds,)
-            for d in ds:
-                if hasattr(d, "task"):
-                    d = d.task
-                if not isinstance(d, task_runtime.Task):
-                    raise TypeError("Dependencies must be TaskIDs or Tasks: " + str(d))
-                deps.append(d)
+        deps = tasks(*dependencies)._flat_tasks
 
         if inspect.iscoroutine(body):
             # An already running coroutine does not need changes since we assume
@@ -415,9 +399,6 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
             separated_body.__kwdefaults__ = body.__kwdefaults__
             separated_body.__module__ = body.__module__
 
-        if not taskid:
-            taskid = TaskID("global_" + str(len(_task_locals.global_tasks)), len(_task_locals.global_tasks))
-            _task_locals.global_tasks += [taskid]
         taskid.dependencies = dependencies
 
         # Spawn the task via the Parla runtime API
@@ -436,6 +417,10 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
 
 def get_current_devices() -> List[Device]:
+    """
+    :return: A list of `devices<parla.device.Device>` assigned to the current task. This will have one element unless `ndevices` was \
+      provided when the task was `spawned<spawn>`.
+    """
     return task_runtime.get_devices()
 
 
@@ -446,7 +431,7 @@ async def finish():
     and in this task.
 
     `finish` does not wait for tasks which are created by the tasks it waits on. This is because tasks are allowed to
-    complete before tasks they create. This is a difference from Cilk.
+    complete before tasks they create. This is a difference from Cilk and OpenMP task semantics.
 
     >>> async with finish():
     ...     @spawn()
