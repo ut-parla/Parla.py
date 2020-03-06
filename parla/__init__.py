@@ -8,7 +8,7 @@ from typing import Optional
 from parla import task_runtime
 from parla.device import get_all_devices
 from parla.task_runtime import Scheduler
-
+from parla.multiload import multiload, multiload_context
 
 class Parla:
     n_devices: Optional[int]
