@@ -237,8 +237,6 @@ def multiload_in_progress(full_name, fromlist = None):
     last = in_progress.get().pop()
     assert last == full_name
 
-count = 0
-
 def is_forwarding_module(module):
     return getattr(module, "_parla_forwarding_module", False)
 
