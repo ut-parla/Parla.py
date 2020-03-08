@@ -1,0 +1,8 @@
+These libraries are used by the Parla runtime to control and isolate runtimes.
+
+The interfaces are accessed from Python using ctypes. The functions call this way
+are defined in supervisor_wrappers.h and virt_dlopen.h.
+
+The build system makes two libraries: libparla_supervisor.so and libparla_context.so.
+libparla_context.so is automatically preloaded by context_new(). libparla_supervisor.so
+should be preloaded into the supervisor.
