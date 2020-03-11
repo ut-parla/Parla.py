@@ -20,6 +20,9 @@ function generate() {
   i=0
   extract_symbols $SO | (while read line; do
       name="$(get_symbol_name "$line")"
+      if [ "$name" = "_init" ] || [ "$name" = "_fini" ]; then
+          continue
+      fi
       echo "$macro($name); /* $(echo "$line" | tr '\t' ' ') */" >> "$STUBC"
       printf "\rGenerating $macro... %d " $i
       i=$((i+1))
