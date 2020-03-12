@@ -398,7 +398,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                         if main_needs_multiload:
                             assert not hasattr(new_load, "_parla_load_context")
                             new_load._parla_load_context = inner_context
-                            multiloads.append(new_load)
+                            multiloads[inner_context] = new_load
                         for submodule_name, loads in submodule_multiloads.items():
                             new_submodule = getattr(new_load, submodule_name)
                             assert not hasattr(new_submodule, "_parla_load_context")
@@ -444,7 +444,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                 if inner_context == outer_context:
                     assert not hasattr(desired_module, "_parla_load_context")
                     desired_module._parla_load_context = inner_context
-                    multiloads.append(desired_module)
+                    multiloads[inner_context] = desired_module
                     continue
                 with inner_context:
                     new_load = builtin_import(name, glob, loc, fromlist, level)
@@ -456,7 +456,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                     assert found_parent is parent_module
                     assert not hasattr(new_desired_module, "_parla_load_context")
                     new_desired_module._parla_load_context = inner_context
-                    multiloads.append(new_desired_module)
+                    multiloads[inner_context] = new_desired_module
                     if parent_module:
                         delattr(parent_module, end_name)
                     del sys.modules[full_name]
