@@ -32,8 +32,8 @@ foreach(pylib ${Python_LIBRARIES})
         COMMENT "Generating stub library for ${pylib_full_name}."
         VERBATIM
     )
-    add_library("${pylib_name}" SHARED "${CMAKE_BINARY_DIR}/libstub_${pylib_name_with_ext}.c")
-    install(TARGETS "${pylib_name}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/parla_stubs")
-    add_dependencies(python_stubs "${pylib_name}")
+    add_library("${pylib_name}_parla_stub" SHARED "${CMAKE_BINARY_DIR}/libstub_${pylib_name_with_ext}.c")
+    install(TARGETS "${pylib_name}_parla_stub" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    add_dependencies(python_stubs "${pylib_name}_parla_stub")
 endforeach(pylib)
 
