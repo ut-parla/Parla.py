@@ -119,7 +119,7 @@ class MultiloadThreadLocals(threading.local):
     wrap_imports: bool
 
     def __init__(self):
-        self.__dict__.setdefault("current_context", None)
+        self.__dict__.setdefault("current_context", 0)
         self.__dict__.setdefault("wrap_imports", False)
 
     @property
@@ -136,7 +136,6 @@ def forward_getattribute(self, attr):
     return getattr(object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context], attr)
 
 def forward_setattr(self, name, value):
-    print("setting attribute {}".format(name))
     if name[:6] == "_parla":
         return object.__setattr__(self, name, value)
     return object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context].__setattr__(name, value)
@@ -310,7 +309,6 @@ def is_forwarding_module(module):
 def import_override(name, glob=None, loc=None, fromlist=None, level=0):
     if multiload_thread_locals.wrap_imports:
         full_name = get_full_name(name, glob, loc, fromlist, level)
-        #with multiload_in_progress(full_name):
         was_loaded = full_name in sys.modules
         if fromlist:
             fromlist_was_loaded = [".".join([full_name, item_name]) in sys.modules for item_name in fromlist]
