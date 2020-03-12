@@ -109,7 +109,7 @@ class MultiloadContext():
         virt_dlopen_swap_state(old_state.enabled, old_state.lm)
 
 # Create all the replicas/contexts we want
-multiload_contexts = [MultiloadContext() for i in range(NUMBER_OF_REPLICAS)]
+multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in range(NUMBER_OF_REPLICAS)]
 
 
 # Thread local storage wrappers
@@ -200,7 +200,7 @@ def forward_module(base_modules):
 # More work is needed to make submodules/dependencies work right.
 # TODO: 
 def multi_import(module_name):
-    base_modules = [None]*MAX_REPLICA_ID
+    base_modules = [None] * NUMBER_OF_REPLICAS
     for context in multiload_contexts:
         with context.force_dlopen_in_context():
             base_modules[context] = importlib.import_module(module_name)
@@ -344,7 +344,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             if submodules_all_forwarding_or_in_progress and not main_needs_multiload:
                 return returned_module
             if main_needs_multiload:
-                multiloads = [None]*MAX_REPLICA_ID
+                multiloads = [None] * NUMBER_OF_REPLICAS
         else:
             parts = full_name.split(".")
             parent_module = None
@@ -355,7 +355,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             if is_forwarding or main_in_progress:
                 return returned_module
             end_name = name.split(".")[-1]
-            multiloads = [None]*MAX_REPLICA_ID
+            multiloads = [None] * NUMBER_OF_REPLICAS
         outer_context = multiload_thread_locals.current_context
         if fromlist:
             submodule_multiloads = {submodule_name : [] for submodule_name in submodules_needing_multiload}
