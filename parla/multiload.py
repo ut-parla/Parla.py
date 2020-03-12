@@ -39,6 +39,9 @@ context_setenv.argtypes = [ctypes.c_long, ctypes.c_char_p]
 context_affinity_override_set_allowed_cpus_py = _parla_supervisor.context_affinity_override_set_allowed_cpus_py
 context_affinity_override_set_allowed_cpus_py.argtypes = [ctypes.c_long, ctypes.c_size_t, ctypes.POINTER(ctypes.c_int)]
 
+context_dlopen = _parla_supervisor.context_dlopen
+context_dlopen.argtypes = [ctypes.c_long, ctypes.c_char_p]
+
 
 class virt_dlopen_state(ctypes.Structure):
     _fields_ = [("enabled", ctypes.c_char),
@@ -56,11 +59,15 @@ class MultiloadContext():
     nsid: int
 
     def __init__(self, nsid=None):
-        if nsid is None:
-            nsid = context_new()
-        self.nsid = nsid
         self._thread_local = threading.local()
         self._thread_local.__dict__.setdefault("old_context", None)
+        if nsid is None:
+            nsid = context_new()
+            self.nsid = nsid
+            # TODO: This name needs to be computed based on the Python version and config, but I have no idea what the "m" is so I'm not going to do that yet.
+            self.dlopen("libpython3.7m_parla_stub.so")
+        else:
+            self.nsid = nsid
 
     def dispose(self):
         # TODO: Implement unloading of contexts
@@ -90,17 +97,20 @@ class MultiloadContext():
 
     # Context control API
 
-    def setenv(self, name, value):
-        context_setenv(self.nsid, name, str(value), 1)
+    def setenv(self, name: str, value):
+        context_setenv(self.nsid, name.encode("ascii"), str(value).encode("ascii"), 1)
 
-    def unsetenv(self, name):
-        context_unsetenv(self.nsid, name)
+    def unsetenv(self, name: str):
+        context_unsetenv(self.nsid, name.encode("ascii"))
 
     def set_allowed_cpus(self, cpus: Collection[int]):
         cpu_array = (ctypes.c_int * len(cpus))()
         for i, cpu in enumerate(cpus):
             cpu_array[i] = cpu
         context_affinity_override_set_allowed_cpus_py(self.nsid, len(cpus), ctypes.byref(cpu_array))
+
+    def dlopen(self, name: str):
+        context_dlopen(self.nsid, name.encode("ascii"))
 
     @contextmanager
     def force_dlopen_in_context(self):
