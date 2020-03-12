@@ -1,68 +1,145 @@
+"""
+
+.. testsetup::
+
+    import parla
+"""
+
 import os
-import gc
 import sys
 import threading
 import types
 import importlib
 import builtins
+import ctypes
 from heapq import merge
 from contextlib import contextmanager
+from typing import Collection, Optional
 
-__all__ = ["multiload_context", "multiload"]
+__all__ = ["multiload", "MultiloadContext"]
 
-num_copies = 10
+NUMBER_OF_REPLICAS = 10
+MAX_REPLICA_ID = 16
 
-class threadlocal_default:
 
-    def __init__(self, default):
-        self.default = default
-        self.val = threading.local()
+# Supervisor wrappers
 
-    def set(self, val):
-        self.val.val = val
+_parla_supervisor = ctypes.CDLL("libparla_supervisor.so")
 
-class threadlocal_default_int(threadlocal_default):
+context_new = _parla_supervisor.context_new
+context_new.argtypes = []
+context_new.restype = ctypes.c_long
 
-    def __init__(self, default = 0):
-        super().__init__(default)
+context_setenv = _parla_supervisor.context_setenv
+context_setenv.argtypes = [ctypes.c_long, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+
+context_unsetenv = _parla_supervisor.context_unsetenv
+context_setenv.argtypes = [ctypes.c_long, ctypes.c_char_p]
+
+context_affinity_override_set_allowed_cpus_py = _parla_supervisor.context_affinity_override_set_allowed_cpus_py
+context_affinity_override_set_allowed_cpus_py.argtypes = [ctypes.c_long, ctypes.c_size_t, ctypes.POINTER(ctypes.c_int)]
+
+
+class virt_dlopen_state(ctypes.Structure):
+    _fields_ = [("enabled", ctypes.c_char),
+                ("lm", ctypes.c_long)]
+
+virt_dlopen_swap_state = _parla_supervisor.virt_dlopen_swap_state
+virt_dlopen_swap_state.argtypes = [ctypes.c_char, ctypes.c_long]
+virt_dlopen_swap_state.restype = virt_dlopen_state
+
+
+# Context representation
+
+
+class MultiloadContext():
+    nsid: int
+
+    def __init__(self, nsid=None):
+        if nsid is None:
+            nsid = context_new()
+        self.nsid = nsid
+        self._thread_local = threading.local()
+        self._thread_local.__dict__.setdefault("old_context", None)
+
+    def dispose(self):
+        # TODO: Implement unloading of contexts
+        raise NotImplementedError()
 
     def __index__(self):
-        return getattr(self.val, "val", self.default)
+        return self.nsid
 
-    def __int__(self):
-        return self.__index__()
+    def __enter__(self):
+        """
+        Enter a context so that any references to multiloaded modules will use the version of the module loaded into that context.
+        :param context_id: The context ID to use.
 
-class threadlocal_default_bool(threadlocal_default):
+        >>> with parla.multiload.multiload():
+        >>>     import numpy
+        >>> with multiload_contexts[1]:
+        >>>     numpy.array # Will be the context specific array constructor.
 
-    def __init__(self, default = False):
-        super().__init__(default)
+        """
+        self._thread_local.old_context = multiload_thread_locals.current_context
+        multiload_thread_locals.current_context = self
+        return self
 
-    def __bool__(self):
-        return getattr(self.val, "val", self.default)
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        multiload_thread_locals.current_context = self._thread_local.old_context
+        self._thread_local.old_context = None
 
-class threadlocal_default_emptylist:
+    # Context control API
+
+    def setenv(self, name, value):
+        context_setenv(self.nsid, name, str(value), 1)
+
+    def unsetenv(self, name):
+        context_unsetenv(self.nsid, name)
+
+    def set_allowed_cpus(self, cpus: Collection[int]):
+        cpu_array = (ctypes.c_int * len(cpus))()
+        for i, cpu in enumerate(cpus):
+            cpu_array[i] = cpu
+        context_affinity_override_set_allowed_cpus_py(self.nsid, len(cpus), ctypes.byref(cpu_array))
+
+    @contextmanager
+    def force_dlopen_in_context(self):
+        old_state = virt_dlopen_swap_state(True, self.nsid)
+        yield
+        virt_dlopen_swap_state(old_state.enabled, old_state.lm)
+
+# Create all the replicas/contexts we want
+multiload_contexts = [MultiloadContext() for i in range(NUMBER_OF_REPLICAS)]
+
+
+# Thread local storage wrappers
+
+class MultiloadThreadLocals(threading.local):
+    current_context: Optional[MultiloadContext]
+    wrap_imports: bool
 
     def __init__(self):
-        self.local = threading.local()
+        self.__dict__.setdefault("current_context", None)
+        self.__dict__.setdefault("wrap_imports", False)
 
-    def get(self):
-        if hasattr(self.local, "val"):
-            return getattr(self.local, "val")
-        self.local.val = list()
-        return self.local.val
+    @property
+    def in_progress(self) -> list:
+        if not hasattr(self, "_in_progress"):
+            self._in_progress = []
+        return self._in_progress
 
-current_context = threadlocal_default_int()
+multiload_thread_locals = MultiloadThreadLocals()
 
 def forward_getattribute(self, attr):
     if attr[:6] == "_parla":
         return object.__getattribute__(self, attr)
-    return getattr(object.__getattribute__(self, "_parla_base_modules")[current_context], attr)
+    return getattr(object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context], attr)
 
 def forward_setattr(self, name, value):
     print("setting attribute {}".format(name))
     if name[:6] == "_parla":
         return object.__setattr__(self, name, value)
-    return object.__getattribute__(self, "_parla_base_modules")[current_context].__setattr__(name, value)
+    return object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context].__setattr__(name, value)
 
 builtin_module_setattr = types.ModuleType.__setattr__
 
@@ -81,7 +158,7 @@ def module_setattr(self, name, value):
 def get_forward_dir(module):
     def forward_dir():
         forwarding_dir = object.__dir__(module)
-        module_dir = object.__getattribute__(module, "_parla_base_modules")[current_context].__dir__()
+        module_dir = object.__getattribute__(module, "_parla_base_modules")[multiload_thread_locals.current_context].__dir__()
         return list(merge(forwarding_dir, module_dir))
     return forward_dir
 
@@ -96,7 +173,7 @@ def get_forward_dir(module):
 # Again see https://www.python.org/dev/peps/pep-0562/ for details.
 def get_forward_getattr(module):
     def forward_getattr(name: str):
-        return getattr(module._parla_base_modules[current_context], name)
+        return getattr(module._parla_base_modules[multiload_thread_locals.current_context], name)
     return forward_getattr
 
 def forward_module(base_modules):
@@ -123,18 +200,12 @@ def forward_module(base_modules):
 # More work is needed to make submodules/dependencies work right.
 # TODO: 
 def multi_import(module_name):
-    base_modules = []
-    for i in range(num_copies):
-        base_modules.append(importlib.import_module(module_name))
-        del sys.modules[module_name]
+    base_modules = [None]*MAX_REPLICA_ID
+    for context in multiload_contexts:
+        with context.force_dlopen_in_context():
+            base_modules[context] = importlib.import_module(module_name)
+            del sys.modules[module_name]
     sys.modules[module_name] = forward_module(base_modules)
-
-@contextmanager
-def multiload_context(context_id):
-    old_context = int(current_context)
-    current_context.set(context_id)
-    yield
-    current_context.set(old_context)
 
 # Technique to check if something is in the standard library.
 # Based loosely off of https://stackoverflow.com/a/22196023.
@@ -160,13 +231,11 @@ def is_exempt(name, module):
     external_cache.add(name)
     return False
 
-wrap_imports = threadlocal_default_bool()
-
 builtin_import = builtins.__import__
 
 def multiload_module(full_name, first_copy):
     submodules = []
-    context = int(current_context)
+    context = multiload_thread_locals.current_context
     name_parts = full_name.split(".")
     # TODO: is it ever possible for immediate parents to not be the
     # same module each time?
@@ -174,9 +243,10 @@ def multiload_module(full_name, first_copy):
     if len(name_parts) > 1:
         immediate_parents = []
         short_name = name_parts[-1]
-    for i in range(num_copies):
-        with multiload_context(i):
-            if i == context and first_module:
+    for other_context in multiload_contexts:
+        with other_context:
+            if other_context == context and first_module:
+                # TODO: WTF is going on here?
                 module = first_copy
             else:
                 # Note: locals() is an unused parameter to __import__.
@@ -193,13 +263,12 @@ def multiload_module(full_name, first_copy):
             del sys.modules[full_name]
             if parent_module is not None:
                 delattr(parent_module, short_name)
-            assert not hasattr(module, "_parla_load_id")
-            module._parla_load_id = i
+            assert not hasattr(module, "_parla_load_context")
+            module._parla_load_context = i
             base_modules.append(module)
             if immediate_parents is not None:
                 immediate_parents.append(parent_module)
         
-
 
 # TODO: Double check function and usage against
 # https://github.com/python/cpython/blob/ffd9753a944916ced659b2c77aebe66a6c9fbab5/Python/import.c#L1843
@@ -218,30 +287,28 @@ def get_full_name(name, globals=None, locals=None, fromlist=tuple(), level=0):
         return ".".join([root, name])
     return root
 
-in_progress = threadlocal_default_emptylist()
-
 @contextmanager
 def multiload_in_progress(full_name, fromlist = None):
-    in_progress.get().append(full_name)
+    multiload_thread_locals.in_progress.append(full_name)
     if fromlist:
         fromlist_full_names = []
         for item in fromlist:
             item_name = ".".join([full_name, item])
             fromlist_full_names.append(item_name)
-            in_progress.get().append(item_name)
+            multiload_thread_locals.in_progress.append(item_name)
     yield
     if fromlist:
         for item_name in reversed(fromlist_full_names):
-            last = in_progress.get().pop()
+            last = multiload_thread_locals.in_progress.pop()
             assert last == item_name
-    last = in_progress.get().pop()
+    last = multiload_thread_locals.in_progress.pop()
     assert last == full_name
 
 def is_forwarding_module(module):
     return getattr(module, "_parla_forwarding_module", False)
 
 def import_override(name, glob=None, loc=None, fromlist=None, level=0):
-    if wrap_imports:
+    if multiload_thread_locals.wrap_imports:
         full_name = get_full_name(name, glob, loc, fromlist, level)
         #with multiload_in_progress(full_name):
         was_loaded = full_name in sys.modules
@@ -251,7 +318,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             returned_module = builtin_import(name, glob, loc, fromlist, level)
         if is_exempt(full_name, returned_module):
             return returned_module
-        main_in_progress = full_name in in_progress.get()
+        main_in_progress = full_name in multiload_thread_locals.in_progress
         desired_module = returned_module
         if fromlist:
             fromlist_submodules = []
@@ -264,7 +331,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                     continue
                 submodule_is_forwarding = is_forwarding_module(submodule)
                 submodule_full_name = ".".join([full_name, item_name])
-                submodule_in_progress = submodule_full_name in in_progress.get()
+                submodule_in_progress = submodule_full_name in multiload_thread_locals.in_progress
                 submodules_all_forwarding_or_in_progress = submodules_all_forwarding_or_in_progress and (submodule_is_forwarding or submodule_in_progress)
                 if submodule_was_loaded and not submodule_is_forwarding and not submodule_in_progress:
                     raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
@@ -277,7 +344,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             if submodules_all_forwarding_or_in_progress and not main_needs_multiload:
                 return returned_module
             if main_needs_multiload:
-                multiloads = []
+                multiloads = [None]*MAX_REPLICA_ID
         else:
             parts = full_name.split(".")
             parent_module = None
@@ -288,8 +355,8 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             if is_forwarding or main_in_progress:
                 return returned_module
             end_name = name.split(".")[-1]
-            multiloads = []
-        outer_context_id = int(current_context)
+            multiloads = [None]*MAX_REPLICA_ID
+        outer_context = multiload_thread_locals.current_context
         if fromlist:
             submodule_multiloads = {submodule_name : [] for submodule_name in submodules_needing_multiload}
             submodule_full_names = [".".join([full_name, submodule_name]) for submodule_name in submodules_needing_multiload]
@@ -315,27 +382,27 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                 for submodule_full_name in submodule_full_names:
                     del sys.modules[submodule_full_name]
                 importlib.invalidate_caches()
-                for i in range(num_copies):
-                    if i == outer_context_id:
+                for inner_context in multiload_contexts:
+                    if inner_context == outer_context:
                         if main_needs_multiload:
-                            assert not hasattr(returned_module, "_parla_load_id")
-                            returned_module._parla_load_id = i
-                            multiloads.append(returned_module)
+                            assert not hasattr(returned_module, "_parla_load_context")
+                            returned_module._parla_load_context = inner_context
+                            multiloads[inner_context] = returned_module
                         for submodule_name, loaded_submodule in zip(submodules_needing_multiload, initial_submodules):
-                            assert not hasattr(loaded_submodule, "_parla_load_id")
-                            loaded_submodule._parla_load_id = i
+                            assert not hasattr(loaded_submodule, "_parla_load_context")
+                            loaded_submodule._parla_load_context = inner_context
                             submodule_multiloads[submodule_name].append(loaded_submodule)
                         continue
-                    with multiload_context(i):
+                    with inner_context:
                         new_load = builtin_import(name, glob, loc, fromlist, level)
                         if main_needs_multiload:
-                            assert not hasattr(new_load, "_parla_load_id")
-                            new_load._parla_load_id = i
+                            assert not hasattr(new_load, "_parla_load_context")
+                            new_load._parla_load_context = inner_context
                             multiloads.append(new_load)
                         for submodule_name, loads in submodule_multiloads.items():
                             new_submodule = getattr(new_load, submodule_name)
-                            assert not hasattr(new_submodule, "_parla_load_id")
-                            new_submodule._parla_load_id = i
+                            assert not hasattr(new_submodule, "_parla_load_context")
+                            new_submodule._parla_load_context = inner_context
                             loads.append(new_submodule)
                         if main_needs_multiload:
                             del sys.modules[full_name]
@@ -350,7 +417,8 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                 forward = forward_module(multiloads)
                 sys.modules[full_name] = forward
                 if needs_parent_update:
-                    for i in range(num_copies):
+                    # TODO: Is this loop actually needed? It doesn't use it's index.
+                    for context in multiload_contexts:
                         setattr(parent_module, end_name, forward)
             else:
                 forward = returned_module
@@ -359,8 +427,8 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                 submodule_forward = forward_module(loads)
                 sys.modules[".".join([full_name, submodule_name])] = submodule_forward
                 if main_needs_multiload or is_forwarding:
-                    for i in range(num_copies):
-                        with multiload_context(i):
+                    for context in multiload_contexts:
+                        with context:
                             setattr(forward, submodule_name, submodule_forward)
                 else:
                     setattr(forward, submodule_name, submodule_forward)
@@ -372,13 +440,13 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             previous = sys.modules[full_name]
             del sys.modules[full_name]
             importlib.invalidate_caches()
-            for i in range(num_copies):
-                if i == outer_context_id:
-                    assert not hasattr(desired_module, "_parla_load_id")
-                    desired_module._parla_load_id = i
+            for inner_context in multiload_contexts:
+                if inner_context == outer_context:
+                    assert not hasattr(desired_module, "_parla_load_context")
+                    desired_module._parla_load_context = inner_context
                     multiloads.append(desired_module)
                     continue
-                with multiload_context(i):
+                with inner_context:
                     new_load = builtin_import(name, glob, loc, fromlist, level)
                     found_parent = None
                     new_desired_module = new_load
@@ -386,8 +454,8 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                         found_parent = new_desired_module
                         new_desired_module = getattr(new_desired_module, submodule_name)
                     assert found_parent is parent_module
-                    assert not hasattr(new_desired_module, "_parla_load_id")
-                    new_desired_module._parla_load_id = i
+                    assert not hasattr(new_desired_module, "_parla_load_context")
+                    new_desired_module._parla_load_context = inner_context
                     multiloads.append(new_desired_module)
                     if parent_module:
                         delattr(parent_module, end_name)
@@ -409,7 +477,17 @@ builtins.__import__ = import_override
 
 @contextmanager
 def multiload():
-    wrap_imports.set(True)
-    yield
-    wrap_imports.set(False)
+    """
+    Define a block of imports that will be instanced for each context.
 
+    >>> with parla.multiload.multiload():
+    >>>     import numpy
+
+    """
+    assert not multiload_thread_locals.wrap_imports
+    multiload_thread_locals.wrap_imports = True
+    yield
+    multiload_thread_locals.wrap_imports = False
+
+def multiload_context(i):
+    return multiload_contexts[i]
