@@ -17,7 +17,7 @@ virt_dlopen_state virt_dlopen_get_state() {
     return current_state;
 }
 
-virt_dlopen_state virt_dlopen_swap_state(int enabled, Lmid_t lm) {
+virt_dlopen_state virt_dlopen_swap_state(char enabled, long int lm) {
     virt_dlopen_state old = current_state;
     current_state.enabled = (char)enabled;
     current_state.lm = lm;
