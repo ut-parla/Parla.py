@@ -30,17 +30,7 @@ foreach(pylib ${Python_LIBRARIES})
         COMMENT "Generating stub library for ${pylib_full_name}."
         VERBATIM
     )
-        
-    #add_custom_command(
-    #    "generate_${pylib_name}_stub"
-    #    COMMAND "bash ${CMAKE_SOURCE_DIR}/generate_stub_library.sh ${pylib}"
-    #    OUTPUT "${CMAKE_BINARY_DIR}/libstub_${pylib_name}.c"
-    #    WORKING_DIR "${CMAKE_BINARY_DIR}"
-    #    COMMENT "Generating stub library for ${pylib}"
-    #    VERBATIM
-    #)
     add_library("${pylib_name}" SHARED "${CMAKE_BINARY_DIR}/libstub_${pylib_name_with_ext}.c")
-    #add_dependencies("${pylib_name}_stub" "generate_${pylib_name}_stub")
     add_dependencies(python_stubs "${pylib_name}")
 endforeach(pylib)
 
