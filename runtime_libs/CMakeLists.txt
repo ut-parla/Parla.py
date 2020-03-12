@@ -7,9 +7,11 @@ set(CMAKE_C_STANDARD 11)
 
 add_library(parla_supervisor SHARED virt_dlopen.c supervisor_wrappers.c log.c)
 target_link_libraries(parla_supervisor dl)
+install(TARGETS parla_supervisor "${CMAKE_INSTALL_LIBDIR}")
 
 add_library(parla_context SHARED affinity_override.c log.c)
 target_link_libraries(parla_context dl)
+install(TARGETS parla_context "${CMAKE_INSTALL_LIBDIR}")
 
 add_custom_target(python_stubs)
 
@@ -31,6 +33,7 @@ foreach(pylib ${Python_LIBRARIES})
         VERBATIM
     )
     add_library("${pylib_name}" SHARED "${CMAKE_BINARY_DIR}/libstub_${pylib_name_with_ext}.c")
+    install(TARGETS "${pylib_name}" DESTINATION "${CMAKE_INSTALL_LIBDIR}/parla_stubs")
     add_dependencies(python_stubs "${pylib_name}")
 endforeach(pylib)
 
