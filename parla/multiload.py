@@ -107,7 +107,7 @@ class MultiloadContext():
         cpu_array = (ctypes.c_int * len(cpus))()
         for i, cpu in enumerate(cpus):
             cpu_array[i] = cpu
-        context_affinity_override_set_allowed_cpus_py(self.nsid, len(cpus), ctypes.byref(cpu_array))
+        context_affinity_override_set_allowed_cpus_py(self.nsid, len(cpus), cpu_array)
 
     def dlopen(self, name: str):
         context_dlopen(self.nsid, name.encode("ascii"))
