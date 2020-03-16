@@ -115,8 +115,10 @@ class MultiloadContext():
     @contextmanager
     def force_dlopen_in_context(self):
         old_state = virt_dlopen_swap_state(True, self.nsid)
-        yield
-        virt_dlopen_swap_state(old_state.enabled, old_state.lm)
+        try:
+            yield
+        finally:
+            virt_dlopen_swap_state(old_state.enabled, old_state.lm)
 
 # Create all the replicas/contexts we want
 multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in range(NUMBER_OF_REPLICAS)]
@@ -305,13 +307,15 @@ def multiload_in_progress(full_name, fromlist = None):
             item_name = ".".join([full_name, item])
             fromlist_full_names.append(item_name)
             multiload_thread_locals.in_progress.append(item_name)
-    yield
-    if fromlist:
-        for item_name in reversed(fromlist_full_names):
-            last = multiload_thread_locals.in_progress.pop()
-            assert last == item_name
-    last = multiload_thread_locals.in_progress.pop()
-    assert last == full_name
+    try:
+        yield
+    finally:
+        if fromlist:
+            for item_name in reversed(fromlist_full_names):
+                last = multiload_thread_locals.in_progress.pop()
+                assert last == item_name
+        last = multiload_thread_locals.in_progress.pop()
+        assert last == full_name
 
 def is_forwarding_module(module):
     return getattr(module, "_parla_forwarding_module", False)
@@ -494,8 +498,10 @@ def multiload():
     """
     assert not multiload_thread_locals.wrap_imports
     multiload_thread_locals.wrap_imports = True
-    yield
-    multiload_thread_locals.wrap_imports = False
+    try:
+        yield
+    finally:
+        multiload_thread_locals.wrap_imports = False
 
 def multiload_context(i):
     return multiload_contexts[i]
