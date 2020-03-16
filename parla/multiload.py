@@ -190,7 +190,7 @@ def get_forward_getattr(module):
 def forward_module(base_modules):
     for i in range(len(base_modules)):
         for j in range(i):
-            assert base_modules[i] is not base_modules[j]
+            assert base_modules[i] is not base_modules[j] or base_modules[i].__file__[-3:] == ".so"
     forwarding_module = types.ModuleType("")
     # Make absolutely sure every attribute access is forwarded
     # through our __getattr__ by getting rid of the things that
@@ -434,12 +434,12 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                     with inner_context:
                         new_load = builtin_import(name, glob, loc, fromlist, level)
                         if main_needs_multiload:
-                            assert not hasattr(new_load, "_parla_load_context")
+                            assert not hasattr(new_load, "_parla_load_context") or new_load.__file__[-3:] == ".so"
                             new_load._parla_load_context = inner_context
                             multiloads[inner_context] = new_load
                         for submodule_name, loads in submodule_multiloads.items():
                             new_submodule = getattr(new_load, submodule_name)
-                            assert not hasattr(new_submodule, "_parla_load_context")
+                            assert not hasattr(new_submodule, "_parla_load_context") or new_submodule.__file__[-3:] == ".so"
                             new_submodule._parla_load_context = inner_context
                             loads.append(new_submodule)
                         if main_needs_multiload:
@@ -480,7 +480,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             importlib.invalidate_caches()
             for inner_context in multiload_contexts:
                 if inner_context == outer_context:
-                    assert not hasattr(desired_module, "_parla_load_context")
+                    assert not hasattr(desired_module, "_parla_load_context") or desired_module.__file__[-3:] == ".so"
                     desired_module._parla_load_context = inner_context
                     multiloads[inner_context] = desired_module
                     continue
@@ -492,7 +492,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                         found_parent = new_desired_module
                         new_desired_module = getattr(new_desired_module, submodule_name)
                     assert found_parent is parent_module
-                    assert not hasattr(new_desired_module, "_parla_load_context")
+                    assert not hasattr(new_desired_module, "_parla_load_context") or new_desired_module.__file__[-3:] == ".so"
                     new_desired_module._parla_load_context = inner_context
                     multiloads[inner_context] = new_desired_module
                     if parent_module:
