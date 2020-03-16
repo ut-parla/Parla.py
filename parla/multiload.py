@@ -304,6 +304,8 @@ def multiload_in_progress(full_name, fromlist = None):
     if fromlist:
         fromlist_full_names = []
         for item in fromlist:
+            if item == "*":
+                continue
             item_name = ".".join([full_name, item])
             fromlist_full_names.append(item_name)
             multiload_thread_locals.in_progress.append(item_name)
@@ -320,12 +322,25 @@ def multiload_in_progress(full_name, fromlist = None):
 def is_forwarding_module(module):
     return getattr(module, "_parla_forwarding_module", False)
 
+def is_submodule(inner, outer):
+    return inner.__name__.startswith(outer.__name__)
+
 def import_override(name, glob=None, loc=None, fromlist=None, level=0):
     if multiload_thread_locals.wrap_imports:
         full_name = get_full_name(name, glob, loc, fromlist, level)
         was_loaded = full_name in sys.modules
         if fromlist:
-            fromlist_was_loaded = [".".join([full_name, item_name]) in sys.modules for item_name in fromlist]
+            star_present = "*" in fromlist
+            if star_present:
+                loaded_submodules = set()
+                # TODO: This could be more efficient.
+                # Currently this will make star imports significantly slower.
+                # Speeding it up will likely require some sort of caching scheme though.
+                for module_name in sys.modules:
+                    if len(module_name) > len(full_name) and module_name.startswith(full_name):
+                        loaded_submodules.append(module_name[len(full_name):])
+            else:
+                loaded_submodules = {item_name for item_name in fromlist if ".".join([full_name, item_name]) in sys.modules}
         with multiload_in_progress(full_name, fromlist):
             returned_module = builtin_import(name, glob, loc, fromlist, level)
         if is_exempt(full_name, returned_module):
@@ -337,15 +352,22 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             fromlist_submodule_names = []
             submodules_needing_multiload = []
             submodules_all_forwarding_or_in_progress = True
-            for item_name, submodule_was_loaded in zip(fromlist, fromlist_was_loaded):
-                submodule = getattr(returned_module, item_name)
+            if star_present:
+                accessed_items = [item for item in dir(desired_module) if item != "__builtins__"]
+                #accessed_items = desired_module.__all__
+            else:
+                accessed_items = fromlist
+            for item_name in accessed_items:
+                submodule = getattr(desired_module, item_name)
                 if not isinstance(submodule, types.ModuleType):
+                    continue
+                if not is_submodule(submodule, desired_module):
                     continue
                 submodule_is_forwarding = is_forwarding_module(submodule)
                 submodule_full_name = ".".join([full_name, item_name])
                 submodule_in_progress = submodule_full_name in multiload_thread_locals.in_progress
                 submodules_all_forwarding_or_in_progress = submodules_all_forwarding_or_in_progress and (submodule_is_forwarding or submodule_in_progress)
-                if submodule_was_loaded and not submodule_is_forwarding and not submodule_in_progress:
+                if item_name in loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
                     raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
                 fromlist_submodules.append(submodule)
                 fromlist_submodule_names.append(item_name)
@@ -355,6 +377,8 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             main_needs_multiload = not is_forwarding and not main_in_progress
             if submodules_all_forwarding_or_in_progress and not main_needs_multiload:
                 return returned_module
+            if was_loaded and not is_forwarding and not main_in_progress:
+                raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(full_name))
             if main_needs_multiload:
                 multiloads = [None] * NUMBER_OF_REPLICAS
         else:
@@ -364,6 +388,8 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                 parent_module = desired_module
                 desired_module = getattr(desired_module, submodule_name)
             is_forwarding = is_forwarding_module(desired_module)
+            if was_loaded and not is_forwarding and not main_in_progress:
+                raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(full_name))
             if is_forwarding or main_in_progress:
                 return returned_module
             end_name = name.split(".")[-1]
