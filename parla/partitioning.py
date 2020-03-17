@@ -20,6 +20,9 @@ from abc import abstractmethod, ABCMeta, abstractproperty
 from collections import namedtuple
 from typing import Sequence, Set
 
+# FIXME: This load of numpy will cause problems if it needs to be multiloaded
+# from parla import multiload
+# with multiload():
 import numpy as np
 import scipy.sparse
 
