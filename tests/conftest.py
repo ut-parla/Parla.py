@@ -5,13 +5,6 @@ import pytest
 
 from parla.task_runtime import Scheduler
 
-import parla.cpu
-
-try:
-    import parla.cuda
-except:
-    pass
-
 if os.getenv("LOG_LEVEL") is not None:
     level = os.getenv("LOG_LEVEL")
     logging.basicConfig(level=level)
