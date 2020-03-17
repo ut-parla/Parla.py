@@ -358,13 +358,30 @@ def import_override(name, glob=None, loc=None, fromlist=tuple(), level=0):
             else:
                 accessed_items = fromlist
             for item_name in accessed_items:
-                submodule = getattr(desired_module, item_name)
+                submodule_full_name = ".".join([full_name, item_name])
+                # If the requested submodule isn't present even though it's
+                # available in sys.modules, this is because it was loaded
+                # implicitly into the parent module's namespace when
+                # running an import of the form "from parent.child import thing"
+                # This try-catch guarantees that, if we're looking for a submodule
+                # it appears as if the implicit injection into the parent
+                # module already happened. This is important when registering
+                # a multiloaded submodule into the multiple loads of its
+                # containing module.
+                try:
+                    submodule = getattr(desired_module, item_name)
+                except AttributeError:
+                    submodule = sys.modules.get(submodule_full_name)
+                    if submodule is not None:
+                        setattr(returned_module, item_name, submodule)
+                    else:
+                        # This indicates a bug in user code, so re-raise the error.
+                        raise
                 if not isinstance(submodule, types.ModuleType):
                     continue
                 if not is_submodule(submodule, desired_module):
                     continue
                 submodule_is_forwarding = is_forwarding_module(submodule)
-                submodule_full_name = ".".join([full_name, item_name])
                 submodule_in_progress = submodule_full_name in multiload_thread_locals.in_progress
                 submodules_all_forwarding_or_in_progress = submodules_all_forwarding_or_in_progress and (submodule_is_forwarding or submodule_in_progress)
                 if item_name in loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
@@ -408,11 +425,12 @@ def import_override(name, glob=None, loc=None, fromlist=tuple(), level=0):
                     del sys.modules[full_name]
                     # This is needed because an "from parent.child import thing"
                     # automatically injects "child" into the "parent" module.
-                    # This *only* happens when the child submodule is first
-                    # imported though. If there's a corresponding entry in
+                    # This *only* happens when the submodule is first imported.
+                    # If there's an entry for the submodule in
                     # sys.modules already, this assignment doesn't happen.
-                    needs_parent_update = "." in full_name
-                    if needs_parent_update:
+                    needs_parent_update_set = "." in full_name
+                    needs_parent_update_remove = needs_parent_update_set and full_name not in sys.modules
+                    if needs_parent_update_remove:
                         parts = full_name.split(".")
                         end_name = parts[-1]
                         parent_module = sys.modules[".".join(parts[:-1])]
@@ -448,7 +466,7 @@ def import_override(name, glob=None, loc=None, fromlist=tuple(), level=0):
                             loads.append(new_submodule)
                         if main_needs_multiload:
                             del sys.modules[full_name]
-                            if needs_parent_update:
+                            if needs_parent_update_remove:
                                 assert not is_forwarding_module(getattr(parent_module, end_name))
                                 delattr(parent_module, end_name)
                         for submodule_name in submodules_needing_multiload:
@@ -460,7 +478,7 @@ def import_override(name, glob=None, loc=None, fromlist=tuple(), level=0):
             if main_needs_multiload:
                 forward = forward_module(multiloads)
                 sys.modules[full_name] = forward
-                if needs_parent_update:
+                if needs_parent_update_set:
                     if is_forwarding_module(parent_module):
                         for wrapped_parent in parent_module._parla_base_modules:
                             setattr(wrapped_parent, end_name, forward)
