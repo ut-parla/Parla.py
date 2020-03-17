@@ -1,7 +1,11 @@
 import logging
 from typing import Dict
 
+# FIXME: This load of numpy will cause problems if it needs to be multiloaded
+# from parla import multiload
+# with multiload():
 import numpy
+
 import os
 import psutil
 

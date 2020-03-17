@@ -4,8 +4,6 @@ import logging
 from functools import wraps, lru_cache
 from typing import Dict
 
-import numpy
-
 from parla import array
 from parla.array import ArrayType
 from . import device
