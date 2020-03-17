@@ -58,7 +58,7 @@ virt_dlopen_swap_state.restype = virt_dlopen_state
 class MultiloadContext():
     nsid: int
 
-    def __init__(self, nsid=None):
+    def __init__(self, nsid = None):
         self._thread_local = threading.local()
         self._thread_local.__dict__.setdefault("old_context", None)
         if nsid is None:
@@ -122,7 +122,8 @@ class MultiloadContext():
 
 # Create all the replicas/contexts we want
 multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in range(NUMBER_OF_REPLICAS)]
-
+for i in range(NUMBER_OF_REPLICAS):
+    assert multiload_contexts[i].nsid == i
 
 # Thread local storage wrappers
 
@@ -131,7 +132,7 @@ class MultiloadThreadLocals(threading.local):
     wrap_imports: bool
 
     def __init__(self):
-        self.__dict__.setdefault("current_context", 0)
+        self.__dict__.setdefault("current_context", MultiloadContext(0))
         self.__dict__.setdefault("wrap_imports", False)
 
     @property
@@ -325,7 +326,7 @@ def is_forwarding_module(module):
 def is_submodule(inner, outer):
     return inner.__name__.startswith(outer.__name__)
 
-def import_override(name, glob=None, loc=None, fromlist=None, level=0):
+def import_override(name, glob=None, loc=None, fromlist=tuple(), level=0):
     if multiload_thread_locals.wrap_imports:
         full_name = get_full_name(name, glob, loc, fromlist, level)
         was_loaded = full_name in sys.modules
@@ -354,7 +355,6 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
             submodules_all_forwarding_or_in_progress = True
             if star_present:
                 accessed_items = [item for item in dir(desired_module) if item != "__builtins__"]
-                #accessed_items = desired_module.__all__
             else:
                 accessed_items = fromlist
             for item_name in accessed_items:
@@ -406,16 +406,20 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                 # in this function.
                 if main_needs_multiload:
                     del sys.modules[full_name]
-                    # TODO: Why is this necessary?
-                    # We never return multiloaded modules but sometimes they are found
-                    # as attributes of their parent modules later anyway.
+                    # This is needed because an "from parent.child import thing"
+                    # automatically injects "child" into the "parent" module.
+                    # This *only* happens when the child submodule is first
+                    # imported though. If there's a corresponding entry in
+                    # sys.modules already, this assignment doesn't happen.
                     needs_parent_update = "." in full_name
                     if needs_parent_update:
                         parts = full_name.split(".")
                         end_name = parts[-1]
                         parent_module = sys.modules[".".join(parts[:-1])]
+                        assert not is_forwarding_module(getattr(parent_module, end_name))
                         delattr(parent_module, end_name)
                 for submodule_name in submodules_needing_multiload:
+                    assert not is_forwarding_module(getattr(returned_module, submodule_name))
                     delattr(returned_module, submodule_name)
                 for submodule_full_name in submodule_full_names:
                     del sys.modules[submodule_full_name]
@@ -445,8 +449,10 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                         if main_needs_multiload:
                             del sys.modules[full_name]
                             if needs_parent_update:
+                                assert not is_forwarding_module(getattr(parent_module, end_name))
                                 delattr(parent_module, end_name)
                         for submodule_name in submodules_needing_multiload:
+                            assert not is_forwarding_module(getattr(returned_module, submodule_name))
                             delattr(returned_module, submodule_name)
                         for submodule_full_name in submodule_full_names:
                             del sys.modules[submodule_full_name]
@@ -455,8 +461,10 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                 forward = forward_module(multiloads)
                 sys.modules[full_name] = forward
                 if needs_parent_update:
-                    # TODO: Is this loop actually needed? It doesn't use it's index.
-                    for context in multiload_contexts:
+                    if is_forwarding_module(parent_module):
+                        for wrapped_parent in parent_module._parla_base_modules:
+                            setattr(wrapped_parent, end_name, forward)
+                    else:
                         setattr(parent_module, end_name, forward)
             else:
                 forward = returned_module
@@ -465,15 +473,15 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                 submodule_forward = forward_module(loads)
                 sys.modules[".".join([full_name, submodule_name])] = submodule_forward
                 if main_needs_multiload or is_forwarding:
-                    for context in multiload_contexts:
-                        with context:
-                            setattr(forward, submodule_name, submodule_forward)
+                    for wrapped_forward in forward._parla_base_modules:
+                        setattr(wrapped_forward, submodule_name, submodule_forward)
                 else:
                     setattr(forward, submodule_name, submodule_forward)
             return forward
         else:
             # Needs to worry about updating parent module attribute.
             if parent_module:
+                assert not is_forwarding_module(getattr(parent_module, end_name))
                 delattr(parent_module, end_name)
             previous = sys.modules[full_name]
             del sys.modules[full_name]
@@ -496,6 +504,7 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
                     new_desired_module._parla_load_context = inner_context
                     multiloads[inner_context] = new_desired_module
                     if parent_module:
+                        assert not is_forwarding_module(getattr(parent_module, end_name))
                         delattr(parent_module, end_name)
                     del sys.modules[full_name]
                     importlib.invalidate_caches()
@@ -512,6 +521,13 @@ def import_override(name, glob=None, loc=None, fromlist=None, level=0):
     return builtin_import(name, glob, loc, fromlist, level)
 
 builtins.__import__ = import_override
+
+def import_override_dbg(name, glob=None, loc=None, fromlist=None, level=0):
+    full_name = get_full_name(name, glob, loc, fromlist, level)
+    ret = builtin_import(name, glob, loc, fromlist, level)
+    return ret
+
+#builtins.__import__ = import_override_dbg
 
 @contextmanager
 def multiload():
