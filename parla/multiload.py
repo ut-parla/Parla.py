@@ -342,6 +342,7 @@ def import_override(name, glob=None, loc=None, fromlist=tuple(), level=0):
                         loaded_submodules.append(module_name[len(full_name):])
             else:
                 loaded_submodules = {item_name for item_name in fromlist if ".".join([full_name, item_name]) in sys.modules}
+        print("starting:", name, full_name, fromlist, level)
         with multiload_in_progress(full_name, fromlist):
             returned_module = builtin_import(name, glob, loc, fromlist, level)
         if is_exempt(full_name, returned_module):
@@ -394,7 +395,7 @@ def import_override(name, glob=None, loc=None, fromlist=tuple(), level=0):
             main_needs_multiload = not is_forwarding and not main_in_progress
             if submodules_all_forwarding_or_in_progress and not main_needs_multiload:
                 return returned_module
-            if was_loaded and not is_forwarding and not main_in_progress:
+            if was_loaded and main_needs_multiload:
                 raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(full_name))
             if main_needs_multiload:
                 multiloads = [None] * NUMBER_OF_REPLICAS
@@ -504,28 +505,29 @@ def import_override(name, glob=None, loc=None, fromlist=tuple(), level=0):
             previous = sys.modules[full_name]
             del sys.modules[full_name]
             importlib.invalidate_caches()
-            for inner_context in multiload_contexts:
-                if inner_context == outer_context:
-                    assert not hasattr(desired_module, "_parla_load_context") or desired_module.__file__[-3:] == ".so"
-                    desired_module._parla_load_context = inner_context
-                    multiloads[inner_context] = desired_module
-                    continue
-                with inner_context:
-                    new_load = builtin_import(name, glob, loc, fromlist, level)
-                    found_parent = None
-                    new_desired_module = new_load
-                    for submodule_name in parts[1:]:
-                        found_parent = new_desired_module
-                        new_desired_module = getattr(new_desired_module, submodule_name)
-                    assert found_parent is parent_module
-                    assert not hasattr(new_desired_module, "_parla_load_context") or new_desired_module.__file__[-3:] == ".so"
-                    new_desired_module._parla_load_context = inner_context
-                    multiloads[inner_context] = new_desired_module
-                    if parent_module:
-                        assert not is_forwarding_module(getattr(parent_module, end_name))
-                        delattr(parent_module, end_name)
-                    del sys.modules[full_name]
-                    importlib.invalidate_caches()
+            with multiload_in_progress(full_name, fromlist):
+                for inner_context in multiload_contexts:
+                    if inner_context == outer_context:
+                        assert not hasattr(desired_module, "_parla_load_context") or desired_module.__file__[-3:] == ".so"
+                        desired_module._parla_load_context = inner_context
+                        multiloads[inner_context] = desired_module
+                        continue
+                    with inner_context:
+                        new_load = builtin_import(name, glob, loc, fromlist, level)
+                        found_parent = None
+                        new_desired_module = new_load
+                        for submodule_name in parts[1:]:
+                            found_parent = new_desired_module
+                            new_desired_module = getattr(new_desired_module, submodule_name)
+                        assert found_parent is parent_module
+                        assert not hasattr(new_desired_module, "_parla_load_context") or new_desired_module.__file__[-3:] == ".so"
+                        new_desired_module._parla_load_context = inner_context
+                        multiloads[inner_context] = new_desired_module
+                        if parent_module:
+                            assert not is_forwarding_module(getattr(parent_module, end_name))
+                            delattr(parent_module, end_name)
+                        del sys.modules[full_name]
+                        importlib.invalidate_caches()
             # Now build and register the forwarding module.
             forward = forward_module(multiloads)
             sys.modules[full_name] = forward
