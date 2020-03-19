@@ -15,27 +15,12 @@ import time
 import os
 
 def main():
-    n = 3*1000
-    a = np.random.rand(n)
-    b = np.random.rand(n)
-
     divisions = 10
+    mapper = LDeviceSequenceBlocked(divisions)
 
-    start = time.perf_counter()
-    # Map the divisions onto actual hardware locations
-    devs = list(gpu.devices) + list(cpu.devices)
-    # devs = cpu.devices
-    if "N_DEVICES" in os.environ:
-        devs = devs[:int(os.environ.get("N_DEVICES"))]
-    mapper = LDeviceSequenceBlocked(divisions, devices=devs)
-
-    a_part = mapper.partition_tensor(a)
-    b_part = mapper.partition_tensor(b)
-
-    inner_result = np.empty(1)
-
-    @spawn()
-    async def inner_part():
+    async def inner(a, b):
+        a_part = mapper.partition_tensor(a)
+        b_part = mapper.partition_tensor(b)
         # Create array to store partial sums from each logical device
         partial_sums = np.empty(divisions)
         # Start a block of tasks that much all complete before leaving the block.
@@ -49,14 +34,17 @@ def main():
         res = 0.
         for i in range(divisions):
             res += partial_sums[i]
-        inner_result[0] = res
+        return res
 
-    @spawn(None, [inner_part])
-    def check():
-        end = time.perf_counter()
-        print(end - start)
-
-        assert np.allclose(np.inner(a, b), inner_result[0])
+    @spawn()
+    async def main_task():
+        n = 3*1000
+        a = np.random.rand(n)
+        b = np.random.rand(n)
+        print("Starting.", a.shape, b.shape)
+        res = await inner(a, b)
+        assert np.allclose(np.inner(a, b), res)
+        print("Success.", res)
 
 
 if __name__ == '__main__':
