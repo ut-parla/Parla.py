@@ -15,6 +15,7 @@ import ctypes
 from heapq import merge
 from contextlib import contextmanager
 from typing import Collection, Optional
+from itertools import islice
 
 __all__ = ["multiload", "MultiloadContext"]
 
@@ -188,6 +189,7 @@ def get_forward_getattr(module):
         return getattr(module._parla_base_modules[multiload_thread_locals.current_context], name)
     return forward_getattr
 
+# TODO: Switch this to operating on dictionaries with integer keys instead of lists.
 def forward_module(base_modules):
     for i in range(len(base_modules)):
         for j in range(i):
@@ -207,6 +209,9 @@ def forward_module(base_modules):
     # If overriding __getattribute__ ever starts working, this may not be needed.
     forwarding_module.__getattr__ = get_forward_getattr(forwarding_module)
     return forwarding_module
+
+def is_forwarding(module):
+    return getattr(module, "_parla_forwarding_module", False)
 
 # Good enough for simple modules.
 # More work is needed to make submodules/dependencies work right.
@@ -234,6 +239,7 @@ def is_exempt(name, module):
         exempt_cache.add(name)
         return True
     fname = module.__file__
+    # TODO: can we use something less brittle here?
     if "site-packages" in fname:
         external_cache.add(fname)
         return False
@@ -244,43 +250,6 @@ def is_exempt(name, module):
     return False
 
 builtin_import = builtins.__import__
-
-def multiload_module(full_name, first_copy):
-    submodules = []
-    context = multiload_thread_locals.current_context
-    name_parts = full_name.split(".")
-    # TODO: is it ever possible for immediate parents to not be the
-    # same module each time?
-    immediate_parents = None
-    if len(name_parts) > 1:
-        immediate_parents = []
-        short_name = name_parts[-1]
-    for other_context in multiload_contexts:
-        with other_context:
-            if other_context == context and first_module:
-                # TODO: WTF is going on here?
-                module = first_copy
-            else:
-                # Note: locals() is an unused parameter to __import__.
-                # So don't actually pass it for performance reasons.
-                # This import call is equivalent to absolute importing
-                # the desired module.
-                module = builtin_import(full_name, globals(), dict(), None, 0)
-            parent_module = None
-            desired_submodule = module
-            for submodule_name in name_parts[1:]:
-                parent_module = desired_submodule
-                desired_submodule = getattr(desired_submodule, submodule_name)
-            assert sys.modules[full_name] is desired_submodule
-            del sys.modules[full_name]
-            if parent_module is not None:
-                delattr(parent_module, short_name)
-            assert not hasattr(module, "_parla_load_context")
-            module._parla_load_context = i
-            base_modules.append(module)
-            if immediate_parents is not None:
-                immediate_parents.append(parent_module)
-        
 
 # TODO: Double check function and usage against
 # https://github.com/python/cpython/blob/ffd9753a944916ced659b2c77aebe66a6c9fbab5/Python/import.c#L1843
@@ -299,255 +268,231 @@ def get_full_name(name, globals=None, locals=None, fromlist=tuple(), level=0):
         return ".".join([root, name])
     return root
 
-@contextmanager
-def multiload_in_progress(full_name, fromlist = None):
-    multiload_thread_locals.in_progress.append(full_name)
-    if fromlist:
-        fromlist_full_names = []
-        for item in fromlist:
-            if item == "*":
-                continue
-            item_name = ".".join([full_name, item])
-            fromlist_full_names.append(item_name)
-            multiload_thread_locals.in_progress.append(item_name)
-    try:
-        yield
-    finally:
-        if fromlist:
-            for item_name in reversed(fromlist_full_names):
-                last = multiload_thread_locals.in_progress.pop()
-                assert last == item_name
-        last = multiload_thread_locals.in_progress.pop()
-        assert last == full_name
-
-def is_forwarding_module(module):
-    return getattr(module, "_parla_forwarding_module", False)
-
 def is_submodule(inner, outer):
     return inner.__name__.startswith(outer.__name__)
 
-def import_override(name, glob=None, loc=None, fromlist=tuple(), level=0):
+def deep_delattr_if_present(module, attr):
+    try:
+        modules_to_modify = module._parla_base_modules
+    except AttributeError:
+        modules_to_modify = [module]
+    for module in modules_to_modify:
+        try:
+            delattr(module, attr)
+        except AttributeError:
+            pass
+
+def deep_setattr(module, attr, val):
+    try:
+        modules_to_modify = module._parla_base_modules
+    except AttributeError:
+        modules_to_modify = [module]
+    for module in modules_to_modify:
+        setattr(module, attr, val)
+
+class ModuleImport:
+
+    def __init__(self, full_name, short_name):
+        self.submodules = []
+        self.full_name = full_name
+        self.short_name = short_name
+        self.captured_attrs = []
+        self.fromlist = None
+        self.fromlist_is_registered = False
+        self.loaded_submodules = None
+        self.needs_update = None
+
+    def set_fromlist(self, fromlist):
+        self.fromlist = fromlist
+
+    def add_submodule(self, submodule):
+        self.submodules.append(submodule)
+
+    def __enter__(self):
+        for submodule in self.submodules:
+            submodule.__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        for submodule in self.submodules:
+            submodule.__exit__(exc_type, exc_val, exc_tb)
+
+    @property
+    def in_progress(self):
+        try:
+            return self.in_progress_cache
+        except AttributeError:
+            pass
+        if self.full_name in multiload_thread_locals.in_progress:
+            return True
+
+    def register_fromlist(self, fromlist):
+        self.fromlist = fromlist
+        # Multiloading of submodules picked up via * imports is deferred until those
+        # submodules are imported within the parent module.
+        if len(fromlist) == 1 and fromlist[0] == "*":
+            self.loaded_submodules = []
+        else:
+            self.loaded_submodules = [item_name for item_name in fromlist if ".".join([full_name, item_name]) in sys.modules]
+
+    def register_fromlist(self):
+        if self.fromlist_is_registered:
+            return
+        module = sys.modules[self.full_name]
+        for submodule_name in self.fromlist:
+            submodule_full_name = ".".join([self.full_name, submodule_name])
+            try:
+                submodule = getattr(module, submodule_name)
+            except AttributeError as a:
+                submodule = sys.modules.get(submodule_full_name)
+                deep_setattr(module, submodule_name, submodule)
+                if submodule is None:
+                    raise ImportError("Module {} has no submodule or attribute {}.".format(self.full_name, submodule_name)) from a
+            if not isinstance(submodule, types.ModuleType):
+                continue
+            if not is_submodule(submodule, module):
+                continue
+            submodule_is_forwarding = is_forwarding(submodule)
+            submodule_in_progress = in_progress(submodule_full_name)
+            submodules_all_forwarding_or_in_progress = submodules_all_forwarding_or_in_progress and (submodule_is_forwarding or submodule_in_progress)
+            if submodule_name in self.loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
+                    raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
+            if not submodule_is_forwarding and not submodule_in_progress:
+                submodules.append(ModuleMultiload(submodule_full_name, submodule_name))
+        self.fromlist_is_registered = True
+
+    def clear_submodule_attrs(self):
+        for submodule in submodules:
+            if submodule.is_multiload:
+                deep_delattr_if_present(sys.modules[self.full_name], submodule.short_name)
+
+    def capture(self):
+        if self.fromlist and not self.fromlist_is_registered:
+            self.register_fromlist()
+        if "." not in self.full_name and self.is_exempt:
+            return False
+        if not self.in_progress:
+            raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(self.full_name))
+        did_work = False
+        for submodule in self.submodules:
+            if submodule.is_multiload:
+                deep_delattr_if_present(sys.modules[self.full_name], submodule.short_name)
+                did_work = True
+            did_work = did_work or submodule.capture()
+        return did_work
+
+    def register(self):
+        for submodule in self.submodules:
+            if submodule.is_multiload:
+                loaded_submodule = sys.modules[submodule.full_name]
+                if not is_forwarding(loaded_submodule):
+                    assert False
+                assert is_forwarding(loaded_submodule)
+                deep_setattr(sys.modules[self.full_name], loaded_submodule)
+
+    @property
+    def is_multiload(self):
+        return False
+
+    @property
+    def is_exempt(self):
+        return is_exempt(self, sys.modules[self.full_name])
+
+class ModuleMultiload(ModuleImport):
+
+    def __init__(self, full_name, short_name):
+        super().__init__(full_name, short_name)
+        self.captured_modules = dict()
+
+    def __enter__(self):
+        multiload_thread_locals.in_progress.append(self.full_name)
+        if self.fromlist:
+            for item_name in self.fromlist:
+                multiload_thread_locals.in_progress.append(".".join([self.full_name, item_name]))
+        super().__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        super().__exit__(exc_type, exc_val, exc_tb)
+        if self.fromlist:
+            for item_name in reversed(self.fromlist):
+                found_entry = multiload_thread_locals.in_progress.pop()
+                assert found_entry == ".".join([self.full_name, item_name])
+        found_entry = multiload_thread_locals.in_progress.pop()
+        assert found_entry == self.full_name
+
+    def capture(self):
+        if self.fromlist and not self.fromlist_is_registered:
+            self.register_fromlist()
+        if "." not in self.full_name and self.is_exempt:
+            return False
+        captured_module = sys.modules.pop(self.full_name)
+        assert not hasattr(captured_module, "_parla_context")
+        captured_module._parla_context = multiload_thread_locals.current_context.nsid
+        self.captured_modules[multiload_thread_locals.current_context.nsid] = captured_module
+        for submodule in submodules:
+            delattr(captured_module, submodule.short_name)
+        return True
+
+    def register(self):
+        forward = forwarding_module(self.captured_modules)
+        sys.modules[self.full_name] = forward
+        for submodule in submodules:
+            # All submodules listed in this import tree
+            # should be forwarding if this submodule is a forwarding module.
+            assert submodule.is_multiload
+            loaded_submodule = sys.modules[submodule.full_name]
+            assert is_forwarding(loaded_submodule)
+            deep_setattr(forward, submodule.short_name, loaded_submodule)
+
+    @property
+    def is_multiload(self):
+        return True
+
+def may_need_multiload(full_name):
+    return full_name not in sys.modules
+
+def build_import_tree(full_name, fromlist):
+    short_names = full_name.split(".")
+    full_names = [".".join(short_names[:i+1]) for i in range(len(short_names))]
+    started_multiloading = False
+    if may_need_multiload(full_names[0]):
+        root = ModuleMultiload(full_names[0], short_names[0])
+        started_multiloading = True
+    else:
+        root = ModuleImport(full_names[0], short_names[0])
+    previous = root
+    for full_name, short_name in zip(islice(full_names, 1,None), islice(short_names, 1, None)):
+        if may_need_multiload(full_name):
+            started_multiloading = True
+            submodule = ModuleMultiload(full_name, short_name)
+        else:
+            assert not started_multiloading
+            submodule = ModuleImport(full_name, sort_name)
+        previous.add_submodule(submodule)
+        previous = submodule
+    if fromlist:
+        previous.set_fromlist(fromlist)
+    return root
+
+def import_override(name, glob = None, loc = None, fromlist = tuple(), level = 0):
     if multiload_thread_locals.wrap_imports:
         full_name = get_full_name(name, glob, loc, fromlist, level)
-        was_loaded = full_name in sys.modules
+        import_tree = build_import_tree(full_name, fromlist)
+        with import_tree:
+            for i in range(NUMBER_OF_REPLICAS):
+                ret = builtin_import(name, glob, loc, fromlist, level)
+                did_work = import_tree.capture()
+                if not i and not did_work:
+                    return ret
+                assert did_work
+            import_tree.register()
         if fromlist:
-            star_present = "*" in fromlist
-            if star_present:
-                loaded_submodules = set()
-                # TODO: This could be more efficient.
-                # Currently this will make star imports significantly slower.
-                # Speeding it up will likely require some sort of caching scheme though.
-                for module_name in sys.modules:
-                    if len(module_name) > len(full_name) and module_name.startswith(full_name):
-                        loaded_submodules.append(module_name[len(full_name):])
-            else:
-                loaded_submodules = {item_name for item_name in fromlist if ".".join([full_name, item_name]) in sys.modules}
-        print("starting:", name, full_name, fromlist, level)
-        with multiload_in_progress(full_name, fromlist):
-            returned_module = builtin_import(name, glob, loc, fromlist, level)
-        if is_exempt(full_name, returned_module):
-            return returned_module
-        main_in_progress = full_name in multiload_thread_locals.in_progress
-        desired_module = returned_module
-        if fromlist:
-            fromlist_submodules = []
-            fromlist_submodule_names = []
-            submodules_needing_multiload = []
-            submodules_all_forwarding_or_in_progress = True
-            if star_present:
-                accessed_items = [item for item in dir(desired_module) if item != "__builtins__"]
-            else:
-                accessed_items = fromlist
-            for item_name in accessed_items:
-                submodule_full_name = ".".join([full_name, item_name])
-                # If the requested submodule isn't present even though it's
-                # available in sys.modules, this is because it was loaded
-                # implicitly into the parent module's namespace when
-                # running an import of the form "from parent.child import thing"
-                # This try-catch guarantees that, if we're looking for a submodule
-                # it appears as if the implicit injection into the parent
-                # module already happened. This is important when registering
-                # a multiloaded submodule into the multiple loads of its
-                # containing module.
-                try:
-                    submodule = getattr(desired_module, item_name)
-                except AttributeError:
-                    submodule = sys.modules.get(submodule_full_name)
-                    if submodule is not None:
-                        setattr(returned_module, item_name, submodule)
-                    else:
-                        # This indicates a bug in user code, so re-raise the error.
-                        raise
-                if not isinstance(submodule, types.ModuleType):
-                    continue
-                if not is_submodule(submodule, desired_module):
-                    continue
-                submodule_is_forwarding = is_forwarding_module(submodule)
-                submodule_in_progress = submodule_full_name in multiload_thread_locals.in_progress
-                submodules_all_forwarding_or_in_progress = submodules_all_forwarding_or_in_progress and (submodule_is_forwarding or submodule_in_progress)
-                if item_name in loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
-                    raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
-                fromlist_submodules.append(submodule)
-                fromlist_submodule_names.append(item_name)
-                if not submodule_is_forwarding and not submodule_in_progress:
-                    submodules_needing_multiload.append(item_name)
-            is_forwarding = is_forwarding_module(desired_module)
-            main_needs_multiload = not is_forwarding and not main_in_progress
-            if submodules_all_forwarding_or_in_progress and not main_needs_multiload:
-                return returned_module
-            if was_loaded and main_needs_multiload:
-                raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(full_name))
-            if main_needs_multiload:
-                multiloads = [None] * NUMBER_OF_REPLICAS
-        else:
-            parts = full_name.split(".")
-            parent_module = None
-            for submodule_name in parts[1:]:
-                parent_module = desired_module
-                desired_module = getattr(desired_module, submodule_name)
-            is_forwarding = is_forwarding_module(desired_module)
-            if was_loaded and not is_forwarding and not main_in_progress:
-                raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(full_name))
-            if is_forwarding or main_in_progress:
-                return returned_module
-            end_name = name.split(".")[-1]
-            multiloads = [None] * NUMBER_OF_REPLICAS
-        outer_context = multiload_thread_locals.current_context
-        if fromlist:
-            submodule_multiloads = {submodule_name : [] for submodule_name in submodules_needing_multiload}
-            submodule_full_names = [".".join([full_name, submodule_name]) for submodule_name in submodules_needing_multiload]
-            initial_submodules = [getattr(returned_module, submodule_name) for submodule_name in submodules_needing_multiload]
-            # Needs to worry about simultaneously multiloading multiple things.
-            with multiload_in_progress(full_name, fromlist):
-                # First delete the sys.modules references to any modules we're multiloading.
-                # These references may be there from when the module was loaded earlier
-                # in this function.
-                if main_needs_multiload:
-                    del sys.modules[full_name]
-                    # This is needed because an "from parent.child import thing"
-                    # automatically injects "child" into the "parent" module.
-                    # This *only* happens when the submodule is first imported.
-                    # If there's an entry for the submodule in
-                    # sys.modules already, this assignment doesn't happen.
-                    needs_parent_update_set = "." in full_name
-                    needs_parent_update_remove = needs_parent_update_set and full_name not in sys.modules
-                    if needs_parent_update_remove:
-                        parts = full_name.split(".")
-                        end_name = parts[-1]
-                        parent_module = sys.modules[".".join(parts[:-1])]
-                        assert not is_forwarding_module(getattr(parent_module, end_name))
-                        delattr(parent_module, end_name)
-                for submodule_name in submodules_needing_multiload:
-                    assert not is_forwarding_module(getattr(returned_module, submodule_name))
-                    delattr(returned_module, submodule_name)
-                for submodule_full_name in submodule_full_names:
-                    del sys.modules[submodule_full_name]
-                importlib.invalidate_caches()
-                for inner_context in multiload_contexts:
-                    if inner_context == outer_context:
-                        if main_needs_multiload:
-                            assert not hasattr(returned_module, "_parla_load_context")
-                            returned_module._parla_load_context = inner_context
-                            multiloads[inner_context] = returned_module
-                        for submodule_name, loaded_submodule in zip(submodules_needing_multiload, initial_submodules):
-                            assert not hasattr(loaded_submodule, "_parla_load_context")
-                            loaded_submodule._parla_load_context = inner_context
-                            submodule_multiloads[submodule_name].append(loaded_submodule)
-                        continue
-                    with inner_context:
-                        new_load = builtin_import(name, glob, loc, fromlist, level)
-                        if main_needs_multiload:
-                            assert not hasattr(new_load, "_parla_load_context") or new_load.__file__[-3:] == ".so"
-                            new_load._parla_load_context = inner_context
-                            multiloads[inner_context] = new_load
-                        for submodule_name, loads in submodule_multiloads.items():
-                            new_submodule = getattr(new_load, submodule_name)
-                            assert not hasattr(new_submodule, "_parla_load_context") or new_submodule.__file__[-3:] == ".so"
-                            new_submodule._parla_load_context = inner_context
-                            loads.append(new_submodule)
-                        if main_needs_multiload:
-                            del sys.modules[full_name]
-                            if needs_parent_update_remove:
-                                assert not is_forwarding_module(getattr(parent_module, end_name))
-                                delattr(parent_module, end_name)
-                        for submodule_name in submodules_needing_multiload:
-                            assert not is_forwarding_module(getattr(returned_module, submodule_name))
-                            delattr(returned_module, submodule_name)
-                        for submodule_full_name in submodule_full_names:
-                            del sys.modules[submodule_full_name]
-                        importlib.invalidate_caches()
-            if main_needs_multiload:
-                forward = forward_module(multiloads)
-                sys.modules[full_name] = forward
-                if needs_parent_update_set:
-                    if is_forwarding_module(parent_module):
-                        for wrapped_parent in parent_module._parla_base_modules:
-                            setattr(wrapped_parent, end_name, forward)
-                    else:
-                        setattr(parent_module, end_name, forward)
-            else:
-                forward = returned_module
-                assert sys.modules[full_name] is forward
-            for submodule_name, loads in submodule_multiloads.items():
-                submodule_forward = forward_module(loads)
-                sys.modules[".".join([full_name, submodule_name])] = submodule_forward
-                if main_needs_multiload or is_forwarding:
-                    for wrapped_forward in forward._parla_base_modules:
-                        setattr(wrapped_forward, submodule_name, submodule_forward)
-                else:
-                    setattr(forward, submodule_name, submodule_forward)
-            return forward
-        else:
-            # Needs to worry about updating parent module attribute.
-            if parent_module:
-                assert not is_forwarding_module(getattr(parent_module, end_name))
-                delattr(parent_module, end_name)
-            previous = sys.modules[full_name]
-            del sys.modules[full_name]
-            importlib.invalidate_caches()
-            with multiload_in_progress(full_name, fromlist):
-                for inner_context in multiload_contexts:
-                    if inner_context == outer_context:
-                        assert not hasattr(desired_module, "_parla_load_context") or desired_module.__file__[-3:] == ".so"
-                        desired_module._parla_load_context = inner_context
-                        multiloads[inner_context] = desired_module
-                        continue
-                    with inner_context:
-                        new_load = builtin_import(name, glob, loc, fromlist, level)
-                        found_parent = None
-                        new_desired_module = new_load
-                        for submodule_name in parts[1:]:
-                            found_parent = new_desired_module
-                            new_desired_module = getattr(new_desired_module, submodule_name)
-                        assert found_parent is parent_module
-                        assert not hasattr(new_desired_module, "_parla_load_context") or new_desired_module.__file__[-3:] == ".so"
-                        new_desired_module._parla_load_context = inner_context
-                        multiloads[inner_context] = new_desired_module
-                        if parent_module:
-                            assert not is_forwarding_module(getattr(parent_module, end_name))
-                            delattr(parent_module, end_name)
-                        del sys.modules[full_name]
-                        importlib.invalidate_caches()
-            # Now build and register the forwarding module.
-            forward = forward_module(multiloads)
-            sys.modules[full_name] = forward
-            if parent_module:
-                setattr(parent_module, end_name, forward)
-                return returned_module
-            return forward
-        # TODO: Switch iterating over a dict to just a list of lists to preserve orderings.
-        # This will allow simultaneous iteration in some places
-        # (like when registering the forwarding modules).
-    return builtin_import(name, glob, loc, fromlist, level)
+            return sys.modules[full_name]
+        return sys.modules[full_name.split(".", 1)[0]]
+    else:
+        return builtin_import(name, glob, loc, fromlist, level)
+    assert(False)
 
 builtins.__import__ = import_override
-
-def import_override_dbg(name, glob=None, loc=None, fromlist=None, level=0):
-    full_name = get_full_name(name, glob, loc, fromlist, level)
-    ret = builtin_import(name, glob, loc, fromlist, level)
-    return ret
-
-#builtins.__import__ = import_override_dbg
 
 @contextmanager
 def multiload():
