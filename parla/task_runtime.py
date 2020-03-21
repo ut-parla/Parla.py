@@ -242,7 +242,7 @@ class Task:
         return (yield TaskAwaitTasks([self], self))
 
     def __repr__(self):
-        return "<Task nrem_deps={_remaining_dependencies} state={_state} req={req} assigned={assigned}>".format(**self.__dict__)
+        return "<Task nrem_deps={} state={} req={req} assigned={assigned}>".format(self._remaining_dependencies, type(self._state).__name__, **self.__dict__)
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state

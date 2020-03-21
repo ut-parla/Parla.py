@@ -44,8 +44,10 @@ class TaskID:
     task object in most places.
 
     """
+    _task: Optional[Task]
+    _id: Iterable[int]
 
-    def __init__(self, name, id):
+    def __init__(self, name, id: Iterable[int]):
         """"""
         self._name = name
         self._id = id
@@ -78,8 +80,17 @@ class TaskID:
         """
         return self._name
 
+    @property
+    def full_name(self):
+        """Get the space name.
+        """
+        return "_".join(str(i) for i in (self._name, *self._id))
+
+    def __repr__(self):
+        return "TaskID({}, task={})".format(self.full_name, self._task)
+
     def __str__(self):
-        return "TaskID({}, {}, task={})".format(self.name, self.id, self._task)
+        return "<TaskID {}>".format(self.full_name)
 
     def __await__(self):
         return (yield TaskAwaitTasks([self.task], self.task))
@@ -122,6 +133,9 @@ class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
     def __contains__(self, x) -> bool:
         return x in self._tasks
 
+    def __repr__(self):
+        return "tasks({})".format(self._tasks)
+
 
 class tasks(TaskSet):
     """
@@ -162,16 +176,17 @@ class TaskSpace(TaskSet):
 
     :note: `TaskSpace` does not support assignment to indicies.
     """
+    _data: Dict[int, TaskID]
 
     @property
     def _tasks(self):
         return self._data.values()
 
-    def __init__(self, name=""):
+    def __init__(self, name="", members=None):
         """Create an empty TaskSpace.
         """
         self._name = name
-        self._data = {}
+        self._data = members or {}
 
     def __getitem__(self, index):
         """Get the `TaskID` associated with the provided indicies.
@@ -199,6 +214,9 @@ class TaskSpace(TaskSet):
         if len(ret) == 1:
             return ret[0]
         return ret
+
+    def __repr__(self):
+        return "TaskSpace({_name}, {_data})".format(**self.__dict__)
 
 
 class CompletedTaskSpace(TaskSet):
@@ -319,8 +337,8 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
           memory: int = None,
           vcus: float = None,
           placement: Collection[Union[Architecture, Device, Task, TaskID, Any]] = None,
-          ndevices: int = 1
-          # data: Collection[Any] = None,
+          ndevices: int = 1,
+          data: Collection[Any] = None
           ):
     """
     spawn(taskid: Optional[TaskID] = None, dependencies = (), *, memory: int = None, placement: Collection[Any] = None, ndevices: int = 1)
@@ -359,10 +377,16 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         _task_locals.global_tasks += [taskid]
 
     def decorator(body):
+        nonlocal placement, memory
+        if data is not None:
+            if placement is not None or memory is not None:
+                raise ValueError("The data parameter cannot be combined with placement or memory paramters.")
+            placement = data
+            memory = array.storage_size(*data)
+
         if placement is not None:
-            from parla.array import is_array
             devices = list(set(d
-                               for p in (placement if isinstance(placement, Iterable) and not is_array(placement) else [placement])
+                               for p in (placement if isinstance(placement, Iterable) and not array.is_array(placement) else [placement])
                                for d in _get_placement_for(p)))
             assert all(isinstance(d, Device) for d in devices)
         else:
