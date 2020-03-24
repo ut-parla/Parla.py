@@ -299,7 +299,7 @@ class ModuleImport:
         if fromlist and fromlist[0] == "*":
             self.loaded_submodules = []
         else:
-            self.loaded_submodules = [item_name for item_name in fromlist if ".".join([full_name, item_name]) in sys.modules]
+            self.loaded_submodules = [item_name for item_name in fromlist if ".".join([self.full_name, item_name]) in sys.modules]
 
     def add_submodule(self, submodule):
         self.submodules.append(submodule)
