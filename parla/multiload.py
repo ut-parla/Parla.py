@@ -147,12 +147,12 @@ multiload_thread_locals = MultiloadThreadLocals()
 def forward_getattribute(self, attr):
     if attr[:6] == "_parla":
         return object.__getattribute__(self, attr)
-    return getattr(object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context], attr)
+    return getattr(object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()], attr)
 
 def forward_setattr(self, name, value):
     if name[:6] == "_parla":
         return object.__setattr__(self, name, value)
-    return object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context].__setattr__(name, value)
+    return object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()].__setattr__(name, value)
 
 builtin_module_setattr = types.ModuleType.__setattr__
 
@@ -171,7 +171,7 @@ def module_setattr(self, name, value):
 def get_forward_dir(module):
     def forward_dir():
         forwarding_dir = object.__dir__(module)
-        module_dir = object.__getattribute__(module, "_parla_base_modules")[multiload_thread_locals.current_context].__dir__()
+        module_dir = object.__getattribute__(module, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()].__dir__()
         return list(merge(forwarding_dir, module_dir))
     return forward_dir
 
@@ -191,6 +191,7 @@ def get_forward_getattr(module):
 
 # TODO: Switch this to operating on dictionaries with integer keys instead of lists.
 def forward_module(base_modules):
+    assert isinstance(base_modules, dict)
     for i in base_modules:
         for j in base_modules:
             if i < j:
@@ -265,7 +266,7 @@ def deep_delattr_if_present(module, attr):
     try:
         modules_to_modify = module._parla_base_modules
     except AttributeError:
-        modules_to_modify = [module]
+        modules_to_modify = {0 : module}
     for module in modules_to_modify.values():
         try:
             delattr(module, attr)
@@ -276,7 +277,7 @@ def deep_setattr(module, attr, val):
     try:
         modules_to_modify = module._parla_base_modules
     except AttributeError:
-        modules_to_modify = [module]
+        modules_to_modify = {0 : module}
     for module in modules_to_modify.values():
         setattr(module, attr, val)
 
