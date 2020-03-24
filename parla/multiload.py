@@ -186,14 +186,15 @@ def get_forward_dir(module):
 # Again see https://www.python.org/dev/peps/pep-0562/ for details.
 def get_forward_getattr(module):
     def forward_getattr(name: str):
-        return getattr(module._parla_base_modules[multiload_thread_locals.current_context], name)
+        return getattr(module._parla_base_modules[multiload_thread_locals.current_context.__index__()], name)
     return forward_getattr
 
 # TODO: Switch this to operating on dictionaries with integer keys instead of lists.
 def forward_module(base_modules):
-    for i in range(len(base_modules)):
-        for j in range(i):
-            assert base_modules[i] is not base_modules[j] or base_modules[i].__file__[-3:] == ".so"
+    for i in base_modules:
+        for j in base_modules:
+            if i < j:
+                assert base_modules[i] is not base_modules[j]
     forwarding_module = types.ModuleType("")
     # Make absolutely sure every attribute access is forwarded
     # through our __getattr__ by getting rid of the things that
@@ -212,17 +213,6 @@ def forward_module(base_modules):
 
 def is_forwarding(module):
     return getattr(module, "_parla_forwarding_module", False)
-
-# Good enough for simple modules.
-# More work is needed to make submodules/dependencies work right.
-# TODO: 
-def multi_import(module_name):
-    base_modules = [None] * NUMBER_OF_REPLICAS
-    for context in multiload_contexts:
-        with context.force_dlopen_in_context():
-            base_modules[context] = importlib.import_module(module_name)
-            del sys.modules[module_name]
-    sys.modules[module_name] = forward_module(base_modules)
 
 # Technique to check if something is in the standard library.
 # Based loosely off of https://stackoverflow.com/a/22196023.
@@ -382,12 +372,13 @@ class ModuleImport:
 
     def register(self):
         for submodule in self.submodules:
+            submodule.register()
             if submodule.is_multiload:
                 loaded_submodule = sys.modules[submodule.full_name]
                 if not is_forwarding(loaded_submodule):
                     assert False
                 assert is_forwarding(loaded_submodule)
-                deep_setattr(sys.modules[self.full_name], loaded_submodule)
+                deep_setattr(sys.modules[self.full_name], submodule.short_name, loaded_submodule)
 
     @property
     def is_multiload(self):
@@ -426,16 +417,16 @@ class ModuleMultiload(ModuleImport):
             return False
         captured_module = sys.modules.pop(self.full_name)
         assert not hasattr(captured_module, "_parla_context")
-        captured_module._parla_context = multiload_thread_locals.current_context.nsid
-        self.captured_modules[multiload_thread_locals.current_context.nsid] = captured_module
+        captured_module._parla_context = multiload_thread_locals.current_context
+        self.captured_modules[multiload_thread_locals.current_context.__index__()] = captured_module
         for submodule in submodules:
             delattr(captured_module, submodule.short_name)
         return True
 
     def register(self):
-        forward = forwarding_module(self.captured_modules)
+        forward = forward_module(self.captured_modules)
         sys.modules[self.full_name] = forward
-        for submodule in submodules:
+        for submodule in self.submodules:
             # All submodules listed in this import tree
             # should be forwarding if this submodule is a forwarding module.
             assert submodule.is_multiload
