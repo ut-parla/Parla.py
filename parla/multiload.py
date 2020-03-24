@@ -266,7 +266,7 @@ def deep_delattr_if_present(module, attr):
         modules_to_modify = module._parla_base_modules
     except AttributeError:
         modules_to_modify = [module]
-    for module in modules_to_modify:
+    for module in modules_to_modify.values():
         try:
             delattr(module, attr)
         except AttributeError:
@@ -277,7 +277,7 @@ def deep_setattr(module, attr, val):
         modules_to_modify = module._parla_base_modules
     except AttributeError:
         modules_to_modify = [module]
-    for module in modules_to_modify:
+    for module in modules_to_modify.values():
         setattr(module, attr, val)
 
 class ModuleImport:
