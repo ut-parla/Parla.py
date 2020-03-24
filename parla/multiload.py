@@ -294,6 +294,12 @@ class ModuleImport:
 
     def set_fromlist(self, fromlist):
         self.fromlist = fromlist
+        # Multiloading of submodules picked up via * imports is deferred until those
+        # submodules are imported within the parent module.
+        if fromlist and fromlist[0] == "*":
+            self.loaded_submodules = []
+        else:
+            self.loaded_submodules = [item_name for item_name in fromlist if ".".join([full_name, item_name]) in sys.modules]
 
     def add_submodule(self, submodule):
         self.submodules.append(submodule)
@@ -314,15 +320,6 @@ class ModuleImport:
             pass
         if self.full_name in multiload_thread_locals.in_progress:
             return True
-
-    def register_fromlist(self, fromlist):
-        self.fromlist = fromlist
-        # Multiloading of submodules picked up via * imports is deferred until those
-        # submodules are imported within the parent module.
-        if len(fromlist) == 1 and fromlist[0] == "*":
-            self.loaded_submodules = []
-        else:
-            self.loaded_submodules = [item_name for item_name in fromlist if ".".join([full_name, item_name]) in sys.modules]
 
     def register_fromlist(self):
         if self.fromlist_is_registered:
@@ -345,7 +342,7 @@ class ModuleImport:
             submodule_in_progress = in_progress(submodule_full_name)
             submodules_all_forwarding_or_in_progress = submodules_all_forwarding_or_in_progress and (submodule_is_forwarding or submodule_in_progress)
             if submodule_name in self.loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
-                    raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
+                raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
             if not submodule_is_forwarding and not submodule_in_progress:
                 submodules.append(ModuleMultiload(submodule_full_name, submodule_name))
         self.fromlist_is_registered = True
