@@ -88,6 +88,7 @@ class TaskException(TaskState):
 
 ResourceDict = Dict[str, Union[float, int]]
 
+
 class ResourceRequirements(object, metaclass=abc.ABCMeta):
     __slots__ = ["resources", "ndevices"]
 
@@ -108,6 +109,10 @@ class ResourceRequirements(object, metaclass=abc.ABCMeta):
     def exact(self):
         return False
 
+    @abstractmethod
+    def __parla_placement__(self):
+        raise NotImplementedError()
+
 
 class DeviceSetRequirements(ResourceRequirements):
     __slots__ = ["devices"]
@@ -123,6 +128,9 @@ class DeviceSetRequirements(ResourceRequirements):
     def exact(self):
         assert len(self.devices) >= self.ndevices
         return len(self.devices) == self.ndevices
+
+    def __parla_placement__(self):
+        return self.devices
 
     def __repr__(self):
         return "DeviceSetRequirements({}, {}, {}, exact={})".format(self.resources, self.ndevices, self.devices, self.exact)
@@ -141,6 +149,9 @@ class OptionsRequirements(ResourceRequirements):
     @property
     def possibilities(self):
         return (DeviceSetRequirements(self.resources, self.ndevices, ds) for ds in self.options)
+
+    def __parla_placement__(self):
+        return list(set(d for ds in self.options for d in ds))
 
     def __repr__(self):
         return "OptionsRequirements({}, {}, {})".format(self.resources, self.ndevices, self.options)

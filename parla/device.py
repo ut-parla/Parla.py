@@ -167,6 +167,9 @@ class Architecture(metaclass=ABCMeta):
         """
         pass
 
+    def __parla_placement__(self):
+        return self.devices
+
     # def memory(self, kind: MemoryKind = None):
     #     return Memory(self, kind)
 
