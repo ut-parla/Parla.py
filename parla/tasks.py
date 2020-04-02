@@ -245,9 +245,23 @@ def _task_callback(task, body) -> TaskState:
     """
     A function which forwards to a python function in the appropriate device context.
     """
+    from parla.contexts import find_context, noop_context
     try:
-        # TODO: How to correctly handle multiple devices.
-        with get_current_devices()[0].context():
+        # search for a context that matches get_current_devices()
+        context = find_context(get_current_devices())
+        if context is None:
+            logger.warning("Could not find context for placement: %r", get_current_devices())
+            context = noop_context
+
+        # TODO: In the future we will need to create and change contexts based on the needs of the tasks. This may
+        #  need to be more tightly integrated (as a hint?) into the scheduler to avoid constantly creating and changing
+        #  contexts biasing selection towards existing runtimes makes sense. A kind of "if immediately available"
+        #  hinting might also be useful to the programmer.
+        # TODO: How to correctly handle multiple devices. Always with contexts? Probably.
+
+        # activate that context
+        with context, get_current_devices()[0].context():
+            # TODO: The device specific context probably needs to go away.
             body = body
             if inspect.iscoroutinefunction(body):
                 logger.debug("Constructing coroutine task: %s", task.taskid)
