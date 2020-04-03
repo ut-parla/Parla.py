@@ -63,11 +63,9 @@ class MultiloadContext():
         self._thread_local = threading.local()
         if nsid is None:
             nsid = context_new()
-            self.nsid = nsid
-            # TODO: This name needs to be computed based on the Python version and config, but I have no idea what the "m" is so I'm not going to do that yet.
-            self.dlopen("libpython3.7m_parla_stub.so")
-        else:
-            self.nsid = nsid
+        self.nsid = nsid
+        # TODO: This name needs to be computed based on the Python version and config, but I have no idea what the "m" is so I'm not going to do that yet.
+        self.dlopen("libpython3.7m_parla_stub.so")
 
     def dispose(self):
         # TODO: Implement unloading of contexts
