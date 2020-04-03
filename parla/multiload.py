@@ -347,8 +347,6 @@ class ModuleImport:
             self.register_fromlist()
         if "." not in self.full_name and self.is_exempt:
             return False
-        if not self.in_progress:
-            raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(self.full_name))
         did_work = False
         for submodule in self.submodules:
             if submodule.is_multiload:
@@ -403,6 +401,8 @@ class ModuleMultiload(ModuleImport):
             self.register_fromlist()
         if "." not in self.full_name and self.is_exempt:
             return False
+        if not self.in_progress:
+            raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(self.full_name))
         captured_module = sys.modules.pop(self.full_name)
         assert not hasattr(captured_module, "_parla_context")
         captured_module._parla_context = multiload_thread_locals.current_context
