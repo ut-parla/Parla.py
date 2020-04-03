@@ -61,7 +61,6 @@ class MultiloadContext():
 
     def __init__(self, nsid = None):
         self._thread_local = threading.local()
-        self._thread_local.__dict__.setdefault("old_context", None)
         if nsid is None:
             nsid = context_new()
             self.nsid = nsid
@@ -76,25 +75,6 @@ class MultiloadContext():
 
     def __index__(self):
         return self.nsid
-
-    def __enter__(self):
-        """
-        Enter a context so that any references to multiloaded modules will use the version of the module loaded into that context.
-        :param context_id: The context ID to use.
-
-        >>> with parla.multiload.multiload():
-        >>>     import numpy
-        >>> with multiload_contexts[1]:
-        >>>     numpy.array # Will be the context specific array constructor.
-
-        """
-        self._thread_local.old_context = multiload_thread_locals.current_context
-        multiload_thread_locals.current_context = self
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        multiload_thread_locals.current_context = self._thread_local.old_context
-        self._thread_local.old_context = None
 
     # Context control API
 
@@ -113,13 +93,17 @@ class MultiloadContext():
     def dlopen(self, name: str):
         context_dlopen(self.nsid, name.encode("ascii"))
 
-    @contextmanager
     def force_dlopen_in_context(self):
-        old_state = virt_dlopen_swap_state(True, self.nsid)
-        try:
-            yield
-        finally:
-            virt_dlopen_swap_state(old_state.enabled, old_state.lm)
+        virt_dlopen_swap_state(True, self.nsid)
+
+@contextmanager
+def run_in_context(context):
+    old_context = multiload_thread_locals.current_context
+    multiload_thread_locals.current_context = context
+    context.force_dlopen_in_context()
+    yield
+    old_context.force_dlopen_in_context()
+    multiload_thread_locals.current_context = old_context
 
 # Create all the replicas/contexts we want
 multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in range(NUMBER_OF_REPLICAS)]
@@ -129,10 +113,13 @@ for i in range(NUMBER_OF_REPLICAS):
 # Thread local storage wrappers
 
 class MultiloadThreadLocals(threading.local):
-    current_context: Optional[MultiloadContext]
+    current_context: MultiloadContext
     wrap_imports: bool
 
     def __init__(self):
+        # TODO: This doesn't work like it appears to.
+        # "setdefault" doesn't set a default value for thread local storage in all threads.
+        # All this does is set the value in the current thread.
         self.__dict__.setdefault("current_context", MultiloadContext(0))
         self.__dict__.setdefault("wrap_imports", False)
 
@@ -192,6 +179,8 @@ def get_forward_getattr(module):
 # TODO: Switch this to operating on dictionaries with integer keys instead of lists.
 def forward_module(base_modules):
     assert isinstance(base_modules, dict)
+    for i in range(NUMBER_OF_REPLICAS):
+        assert i in base_modules
     for i in base_modules:
         for j in base_modules:
             if i < j:
@@ -365,7 +354,8 @@ class ModuleImport:
             if submodule.is_multiload:
                 deep_delattr_if_present(sys.modules[self.full_name], submodule.short_name)
                 did_work = True
-            did_work = did_work or submodule.capture()
+            submodule_did_work = submodule.capture()
+            did_work = did_work or submodule_did_work
         return did_work
 
     def register(self):
@@ -417,8 +407,10 @@ class ModuleMultiload(ModuleImport):
         assert not hasattr(captured_module, "_parla_context")
         captured_module._parla_context = multiload_thread_locals.current_context
         self.captured_modules[multiload_thread_locals.current_context.__index__()] = captured_module
-        for submodule in submodules:
+        for submodule in self.submodules:
             delattr(captured_module, submodule.short_name)
+        for submodule in self.submodules:
+            submodule.capture()
         return True
 
     def register(self):
@@ -455,7 +447,7 @@ def build_import_tree(full_name, fromlist):
             submodule = ModuleMultiload(full_name, short_name)
         else:
             assert not started_multiloading
-            submodule = ModuleImport(full_name, sort_name)
+            submodule = ModuleImport(full_name, short_name)
         previous.add_submodule(submodule)
         previous = submodule
     if fromlist:
@@ -467,11 +459,12 @@ def import_override(name, glob = None, loc = None, fromlist = tuple(), level = 0
         full_name = get_full_name(name, glob, loc, fromlist, level)
         import_tree = build_import_tree(full_name, fromlist)
         with import_tree:
-            for i in range(NUMBER_OF_REPLICAS):
-                ret = builtin_import(name, glob, loc, fromlist, level)
-                did_work = import_tree.capture()
-                if not i and not did_work:
-                    return ret
+            for context in multiload_contexts:
+                with run_in_context(context):
+                    ret = builtin_import(name, glob, loc, fromlist, level)
+                    did_work = import_tree.capture()
+                    if not did_work:
+                        return ret
                 assert did_work
             import_tree.register()
         if fromlist:
