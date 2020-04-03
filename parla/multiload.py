@@ -315,6 +315,7 @@ class ModuleImport:
         if self.fromlist_is_registered:
             return
         module = sys.modules[self.full_name]
+        submodules_all_forwarding_or_in_progress = True
         for submodule_name in self.fromlist:
             submodule_full_name = ".".join([self.full_name, submodule_name])
             try:
@@ -334,7 +335,7 @@ class ModuleImport:
             if submodule_name in self.loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
                 raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
             if not submodule_is_forwarding and not submodule_in_progress:
-                submodules.append(ModuleMultiload(submodule_full_name, submodule_name))
+                self.submodules.append(ModuleMultiload(submodule_full_name, submodule_name))
         self.fromlist_is_registered = True
 
     def clear_submodule_attrs(self):
