@@ -295,12 +295,22 @@ class ModuleImport:
         self.submodules.append(submodule)
 
     def __enter__(self):
-        for submodule in self.submodules:
-            submodule.__enter__()
+        if self.fromlist:
+            for item_name in self.fromlist:
+                item_full_name = ".".join([self.full_name, item_name])
+                multiload_thread_locals.in_progress.append(item_full_name)
+        else:
+            for submodule in self.submodules:
+                submodule.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        for submodule in self.submodules:
-            submodule.__exit__(exc_type, exc_val, exc_tb)
+        if self.fromlist:
+            for item_name in reversed(self.fromlist):
+                found_entry = multiload_thread_locals.in_progress.pop()
+                assert found_entry == ".".join([self.full_name, item_name])
+        else:
+            for submodule in self.submodules:
+                submodule.__exit__(exc_type, exc_val, exc_tb)
 
     @property
     def in_progress(self):
@@ -383,17 +393,10 @@ class ModuleMultiload(ModuleImport):
 
     def __enter__(self):
         multiload_thread_locals.in_progress.append(self.full_name)
-        if self.fromlist:
-            for item_name in self.fromlist:
-                multiload_thread_locals.in_progress.append(".".join([self.full_name, item_name]))
         super().__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         super().__exit__(exc_type, exc_val, exc_tb)
-        if self.fromlist:
-            for item_name in reversed(self.fromlist):
-                found_entry = multiload_thread_locals.in_progress.pop()
-                assert found_entry == ".".join([self.full_name, item_name])
         found_entry = multiload_thread_locals.in_progress.pop()
         assert found_entry == self.full_name
 
