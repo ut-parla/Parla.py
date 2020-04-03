@@ -329,7 +329,7 @@ class ModuleImport:
             if not is_submodule(submodule, module):
                 continue
             submodule_is_forwarding = is_forwarding(submodule)
-            submodule_in_progress = in_progress(submodule_full_name)
+            submodule_in_progress = submodule_full_name in multiload_thread_locals.in_progress
             submodules_all_forwarding_or_in_progress = submodules_all_forwarding_or_in_progress and (submodule_is_forwarding or submodule_in_progress)
             if submodule_name in self.loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
                 raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
