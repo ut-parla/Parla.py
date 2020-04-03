@@ -3,9 +3,12 @@ A simple inner product implemented in Parla.
 
 This is probably the most basic example of Parla.
 """
-import numpy as np
 
-from parla import Parla
+from parla import Parla, multiload
+
+with multiload():
+    import numpy as np
+
 from parla.array import copy, storage_size
 from parla.cuda import gpu
 from parla.cpu import cpu

@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from typing import Collection, Optional
 from itertools import islice
 
-__all__ = ["multiload", "MultiloadContext"]
+__all__ = ["multiload", "multiload_context", "MultiloadContext"]
 
 NUMBER_OF_REPLICAS = 10
 MAX_REPLICA_ID = 16
