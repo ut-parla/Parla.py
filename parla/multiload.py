@@ -327,6 +327,12 @@ class ModuleImport:
         module = sys.modules[self.full_name]
         submodules_all_forwarding_or_in_progress = True
         for submodule_name in self.fromlist:
+            if submodule_name == "*":
+                # Modules picked up by * imports have their multiload deferred till
+                # their own corresponding import calls happen. If a * is present,
+                # it's the only entry in the fomlist.
+                assert len(self.fromlist) == 1
+                break
             submodule_full_name = ".".join([self.full_name, submodule_name])
             try:
                 submodule = getattr(module, submodule_name)
