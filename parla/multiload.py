@@ -106,11 +106,6 @@ def run_in_context(context):
     old_context.force_dlopen_in_context()
     multiload_thread_locals.current_context = old_context
 
-# Create all the replicas/contexts we want
-multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in range(NUMBER_OF_REPLICAS)]
-for i in range(NUMBER_OF_REPLICAS):
-    assert multiload_contexts[i].nsid == i
-
 # Thread local storage wrappers
 
 class MultiloadThreadLocals(threading.local):
@@ -131,6 +126,11 @@ class MultiloadThreadLocals(threading.local):
         return self._in_progress
 
 multiload_thread_locals = MultiloadThreadLocals()
+
+# Create all the replicas/contexts we want
+multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in range(NUMBER_OF_REPLICAS)]
+for i in range(NUMBER_OF_REPLICAS):
+    assert multiload_contexts[i].nsid == i
 
 def forward_getattribute(self, attr):
     if attr[:6] == "_parla":
