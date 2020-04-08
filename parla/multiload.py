@@ -67,7 +67,8 @@ class MultiloadContext():
         if nsid:
             # This isn't needed for namespace 0 since the normal libpython is already loaded there.
             # TODO: This name needs to be computed based on the Python version and config, but I have no idea what the "m" is so I'm not going to do that yet.
-            self.dlopen("libpython3.7m_parla_stub.so")
+            with run_in_context(self):
+                self.dlopen("h1/ian/Parla.py/runtime_libs/build/libpython3.7m_parla_stub.so")
 
     def dispose(self):
         # TODO: Implement unloading of contexts
