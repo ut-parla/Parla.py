@@ -68,7 +68,10 @@ class MultiloadContext():
             # This isn't needed for namespace 0 since the normal libpython is already loaded there.
             # TODO: This name needs to be computed based on the Python version and config, but I have no idea what the "m" is so I'm not going to do that yet.
             with run_in_context(self):
-                self.dlopen("h1/ian/Parla.py/runtime_libs/build/libpython3.7m_parla_stub.so")
+                self.saved_rtld = sys.getdlopenflags()
+                sys.setdlopenflags(self.saved_rtld | ctypes.RTLD_GLOBAL)
+                self.dlopen("libpython3.7m_parla_stub.so")
+                sys.setdlopenflags(self.saved_rtld)
 
     def dispose(self):
         # TODO: Implement unloading of contexts
@@ -320,13 +323,15 @@ class ModuleImport:
         except AttributeError:
             pass
         if self.full_name in multiload_thread_locals.in_progress:
+            self.in_progress_cache = True
             return True
+        self.in_progress_cache = False
+        return False
 
     def register_fromlist(self):
         if self.fromlist_is_registered:
             return
         module = sys.modules[self.full_name]
-        submodules_all_forwarding_or_in_progress = True
         for submodule_name in self.fromlist:
             if submodule_name == "*":
                 # Modules picked up by * imports have their multiload deferred till
@@ -348,7 +353,6 @@ class ModuleImport:
                 continue
             submodule_is_forwarding = is_forwarding(submodule)
             submodule_in_progress = submodule_full_name in multiload_thread_locals.in_progress
-            submodules_all_forwarding_or_in_progress = submodules_all_forwarding_or_in_progress and (submodule_is_forwarding or submodule_in_progress)
             if submodule_name in self.loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
                 raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
             if not submodule_is_forwarding and not submodule_in_progress:
@@ -379,8 +383,6 @@ class ModuleImport:
             submodule.register()
             if submodule.is_multiload:
                 loaded_submodule = sys.modules[submodule.full_name]
-                if not is_forwarding(loaded_submodule):
-                    assert False
                 assert is_forwarding(loaded_submodule)
                 deep_setattr(sys.modules[self.full_name], submodule.short_name, loaded_submodule)
 
@@ -428,6 +430,7 @@ class ModuleMultiload(ModuleImport):
         forward = forward_module(self.captured_modules)
         sys.modules[self.full_name] = forward
         for submodule in self.submodules:
+            submodule.register()
             # All submodules listed in this import tree
             # should be forwarding if this submodule is a forwarding module.
             assert submodule.is_multiload
@@ -440,7 +443,7 @@ class ModuleMultiload(ModuleImport):
         return True
 
 def may_need_multiload(full_name):
-    return full_name not in sys.modules
+    return full_name not in sys.modules and full_name not in multiload_thread_locals.in_progress 
 
 def build_import_tree(full_name, fromlist):
     short_names = full_name.split(".")
