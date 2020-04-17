@@ -1,12 +1,12 @@
-from parla.multiload import multiload, multiload_context
+from parla.multiload import multiload, run_in_context, multiload_context
 
 def test_multiload():
     with multiload():
         import multiload_test_module as mod
     mod.unused_id = None
-    assert not mod._parla_load_context.nsid
-    with multiload_context(1):
-        assert multiload_context(1) == mod._parla_load_context
+    assert not mod._parla_context.nsid
+    with run_in_context(multiload_context(1)):
+        assert multiload_context(1) == mod._parla_context
         assert getattr(mod, "_parla_forwarding_module", False)
         # Need forbiddenfruit to make this last one work.
         #assert not hasattr(mod, "unused_id")
@@ -26,3 +26,4 @@ def test_multiple_contexts():
     with multiload_context(2):
         ctx_2 = timed_thing()
     # assert ctx_2 > ctx_1*1.5
+
