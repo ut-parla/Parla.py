@@ -11,6 +11,16 @@ def test_multiload():
         # Need forbiddenfruit to make this last one work.
         #assert not hasattr(mod, "unused_id")
 
+def test_mutual_recursion():
+    with multiload():
+        import multiload_test_module as mod
+    print(dir(mod.mutual_1))
+    print(dir(mod.mutual_2))
+    assert hasattr(mod.mutual_1, "_parla_forwarding_module")
+    assert hasattr(mod.mutual_2, "_parla_forwarding_module")
+    mod.mutual_2.check()
+    mod.mutual_1.check()
+
 def test_multiple_contexts():
     import timeit
     multiload_context(1).set_allowed_cpus([0])
@@ -27,3 +37,5 @@ def test_multiple_contexts():
         ctx_2 = timed_thing()
     # assert ctx_2 > ctx_1*1.5
 
+if __name__ == "__main__":
+    test_mutual_recursion()
