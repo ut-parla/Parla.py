@@ -17,7 +17,9 @@ from contextlib import contextmanager
 from typing import Collection, Optional
 from itertools import islice
 
-__all__ = ["multiload", "multiload_context", "MultiloadContext"]
+#from forbiddenfruit import curse
+
+__all__ = ["multiload", "multiload_context", "run_in_context"]
 
 NUMBER_OF_REPLICAS = 10
 MAX_REPLICA_ID = 16
@@ -153,6 +155,7 @@ def module_setattr(self, name, value):
     return builtin_module_setattr(self, name, value)
 
 # Need forbiddenfruit module to do this.
+#curse(types.ModuleType, "__setattr__", module_setattr)
 #types.ModuleType.__setattr__ = module_setattr
 
 # __dir__ for modules doesn't actually accept a "self" parameter,
@@ -180,7 +183,31 @@ def get_forward_getattr(module):
         return getattr(module._parla_base_modules[multiload_thread_locals.current_context.__index__()], name)
     return forward_getattr
 
-# TODO: Switch this to operating on dictionaries with integer keys instead of lists.
+# TODO: This doesn't work quite right yet.
+# Modules that are picked up because they are in progress elsewhere should
+# return a cached in-progress multiload for their import instead of
+# returning the in-progress module returned from the default import.
+# Here's an outline of how this should work:
+# Every non-in-progress multiload registers an empty forwarding module *before* running the first import.
+# Imports that would return an in-progress module now must return the cached in-progress forwarding module.
+# The first time an in-progress module is being returned, the import wrapper should register the module object it
+# got from the default import into the cached in-progress multiload and insert the in-progress multiload into sys.modules.
+# The in-progress module caches should be pulled from a dictionary stored here with behavior similar to sys.modules.
+
+def empty_forwarding_module():
+    forwarding_module = types.ModuleType("")
+    for name in dir(forwarding_module):
+        delattr(forwarding_module, name)
+    forwarding_module._parla_forwarding_module = True
+    forwarding_module._parla_base_modules = dict()
+    # Overriding __getattribute__ at a module level
+    # doesn't actually work right now.
+    #forwarding_module.__getattribute__ = forward_getattribute
+    forwarding_module.__dir__ = get_forward_dir(forwarding_module)
+    # If overriding __getattribute__ ever starts working, this may not be needed.
+    forwarding_module.__getattr__ = get_forward_getattr(forwarding_module)
+    return forwarding_module
+
 def forward_module(base_modules):
     assert isinstance(base_modules, dict)
     for i in range(NUMBER_OF_REPLICAS):
