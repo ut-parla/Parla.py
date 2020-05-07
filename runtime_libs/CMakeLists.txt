@@ -34,6 +34,8 @@ foreach(pylib ${Python_LIBRARIES})
     )
     add_library("${pylib_name}_parla_stub" SHARED "${CMAKE_BINARY_DIR}/libstub_${pylib_name_with_ext}.c")
     install(TARGETS "${pylib_name}_parla_stub" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    target_link_libraries("${pylib_name}_parla_stub" dl)
+    target_include_directories("${pylib_name}_parla_stub" PRIVATE ${CMAKE_SOURCE_DIR})
     add_dependencies(python_stubs "${pylib_name}_parla_stub")
 endforeach(pylib)
 
