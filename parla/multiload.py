@@ -21,7 +21,7 @@ from itertools import islice
 
 __all__ = ["multiload", "multiload_context", "run_in_context"]
 
-NUMBER_OF_REPLICAS = 10
+NUMBER_OF_REPLICAS = 12
 MAX_REPLICA_ID = 16
 
 
@@ -97,10 +97,24 @@ class MultiloadContext():
         context_affinity_override_set_allowed_cpus_py(self.nsid, len(cpus), cpu_array)
 
     def dlopen(self, name: str):
-        context_dlopen(self.nsid, name.encode("ascii"))
+        r = context_dlopen(self.nsid, name.encode("ascii"))
+        if not r:
+            raise RuntimeError("Failed to load " + name)
 
     def force_dlopen_in_context(self):
         virt_dlopen_swap_state(True, self.nsid)
+
+    def __enter__(self):
+        assert not hasattr(self._thread_local, "old_context")
+        self._thread_local.old_context = multiload_thread_locals.current_context
+        multiload_thread_locals.current_context = self
+        self.force_dlopen_in_context()
+        return self
+
+    def __exit__(self, *args):
+        self._thread_local.old_context.force_dlopen_in_context()
+        multiload_thread_locals.current_context = self._thread_local.old_context
+        del self._thread_local.old_context
 
 @contextmanager
 def run_in_context(context):

@@ -1,8 +1,7 @@
 from typing import Collection, Union, Any, List
 
 from .device import Architecture, Device
-from .multiload import *
-from .multiload import MultiloadContext
+from .multiload import MultiloadContext, multiload_context
 from .tasks import TaskID, Task, get_placement_for_set
 
 __all__ = ["Context", "find_context"]
