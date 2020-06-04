@@ -19,7 +19,9 @@ from itertools import islice
 
 #from forbiddenfruit import curse
 
-__all__ = ["multiload", "multiload_context", "run_in_context"]
+__all__ = ["multiload"]
+
+#, "MultiloadContext", "MultiloadComponent", "CPUAffinity"]
 
 NUMBER_OF_REPLICAS = 12
 MAX_REPLICA_ID = 16
@@ -116,15 +118,6 @@ class MultiloadContext():
         multiload_thread_locals.current_context = self._thread_local.old_context
         del self._thread_local.old_context
 
-@contextmanager
-def run_in_context(context):
-    old_context = multiload_thread_locals.current_context
-    multiload_thread_locals.current_context = context
-    context.force_dlopen_in_context()
-    yield
-    old_context.force_dlopen_in_context()
-    multiload_thread_locals.current_context = old_context
-
 # Thread local storage wrappers
 
 class MultiloadThreadLocals(threading.local):
@@ -150,6 +143,10 @@ multiload_thread_locals = MultiloadThreadLocals()
 multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in range(NUMBER_OF_REPLICAS)]
 for i in range(NUMBER_OF_REPLICAS):
     assert multiload_contexts[i].nsid == i
+free_multiload_contexts = list(multiload_contexts)
+
+def allocate_multiload_context() -> MultiloadContext:
+    return free_multiload_contexts.pop()
 
 def forward_getattribute(self, attr):
     if attr[:6] == "_parla":
