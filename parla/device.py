@@ -6,8 +6,8 @@ The model is used to describe the placement restrictions for computations and st
 from contextlib import contextmanager
 from enum import Enum
 from functools import lru_cache
-from typing import Optional, List, Mapping, Dict
-from abc import ABCMeta, abstractmethod, abstractproperty
+from typing import Optional, List, Mapping, Dict, Iterable
+from abc import ABCMeta, abstractmethod
 
 import logging
 
@@ -114,10 +114,6 @@ class Device(metaclass=ABCMeta):
         self.args = args
         self.kwds = kwds
 
-    @contextmanager
-    def context(self):
-        yield
-
     @property
     @abstractmethod
     def resources(self) -> Dict[str, float]:
@@ -158,6 +154,12 @@ class Architecture(metaclass=ABCMeta):
         >>> gpu(0)
         """
         return Device(self, *args, **kwds)
+
+    def __getitem__(self, ind):
+        if isinstance(ind, Iterable):
+            return [self(i) for i in ind]
+        else:
+            return self(ind)
 
     @property
     @abstractmethod

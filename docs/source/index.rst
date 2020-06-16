@@ -8,6 +8,7 @@ The Parla Language
 
 .. toctree::
 
+   parla
    parla.tasks
    parla.device
    parla.ldevice

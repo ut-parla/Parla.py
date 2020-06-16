@@ -14,14 +14,14 @@ import builtins
 import ctypes
 from heapq import merge
 from contextlib import contextmanager
-from typing import Collection, Optional
+from typing import Collection, Optional, Callable, List, Any
 from itertools import islice
+
+from .environments import EnvironmentComponentDescriptor, EnvironmentComponentInstance, TaskEnvironment
 
 #from forbiddenfruit import curse
 
-__all__ = ["multiload"]
-
-#, "MultiloadContext", "MultiloadComponent", "CPUAffinity"]
+__all__ = ["multiload", "MultiloadContext", "MultiloadComponent", "CPUAffinity"]
 
 NUMBER_OF_REPLICAS = 12
 MAX_REPLICA_ID = 16
@@ -59,19 +59,18 @@ virt_dlopen_swap_state.restype = virt_dlopen_state
 
 # Context representation
 
-
 class MultiloadContext():
     nsid: int
 
     def __init__(self, nsid = None):
-        self._thread_local = threading.local()
         if nsid is None:
             nsid = context_new()
+            assert nsid >= 0
         self.nsid = nsid
         if nsid:
             # This isn't needed for namespace 0 since the normal libpython is already loaded there.
             # TODO: This name needs to be computed based on the Python version and config, but I have no idea what the "m" is so I'm not going to do that yet.
-            with run_in_context(self):
+            with self:
                 self.saved_rtld = sys.getdlopenflags()
                 sys.setdlopenflags(self.saved_rtld | ctypes.RTLD_GLOBAL)
                 self.dlopen("libpython3.7m_parla_stub.so")
@@ -107,29 +106,28 @@ class MultiloadContext():
         virt_dlopen_swap_state(True, self.nsid)
 
     def __enter__(self):
-        assert not hasattr(self._thread_local, "old_context")
-        self._thread_local.old_context = multiload_thread_locals.current_context
-        multiload_thread_locals.current_context = self
+        multiload_thread_locals.context_stack.append(self)
         self.force_dlopen_in_context()
         return self
 
     def __exit__(self, *args):
-        self._thread_local.old_context.force_dlopen_in_context()
-        multiload_thread_locals.current_context = self._thread_local.old_context
-        del self._thread_local.old_context
+        removed = multiload_thread_locals.context_stack.pop()
+        assert removed is self
+        multiload_thread_locals.context_stack[-1].force_dlopen_in_context()
 
 # Thread local storage wrappers
 
 class MultiloadThreadLocals(threading.local):
-    current_context: MultiloadContext
+    context_stack: List[MultiloadContext]
     wrap_imports: bool
 
     def __init__(self):
-        # TODO: This doesn't work like it appears to.
-        # "setdefault" doesn't set a default value for thread local storage in all threads.
-        # All this does is set the value in the current thread.
-        self.__dict__.setdefault("current_context", MultiloadContext(0))
-        self.__dict__.setdefault("wrap_imports", False)
+        self.wrap_imports = False
+        self.context_stack = [MultiloadContext(0)]
+
+    @property
+    def current_context(self):
+        return self.context_stack[-1]
 
     @property
     def in_progress(self) -> list:
@@ -512,7 +510,7 @@ def import_override(name, glob = None, loc = None, fromlist = tuple(), level = 0
         import_tree = build_import_tree(full_name, fromlist)
         with import_tree:
             for context in multiload_contexts:
-                with run_in_context(context):
+                with context:
                     ret = builtin_import(name, glob, loc, fromlist, level)
                     did_work = import_tree.capture()
                     if not did_work:
@@ -544,5 +542,41 @@ def multiload():
     finally:
         multiload_thread_locals.wrap_imports = False
 
-def multiload_context(i):
-    return multiload_contexts[i]
+# Integration with parla.environments
+
+class MultiloadComponentInstance(EnvironmentComponentInstance):
+    multiload_context: MultiloadContext
+
+    def __init__(self, descriptor: "MultiloadComponent", env: TaskEnvironment):
+        super().__init__(descriptor)
+        self.multiload_context = allocate_multiload_context()
+        # TODO: Implement loading of specific libraries and appropriate handling of tags. Should tags be used to
+        #  trigger library load? Should library loads set tags?
+        for setup in descriptor.setup_functions:
+            setup(self, env)
+
+    def __enter__(self):
+        return self.multiload_context.__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self.multiload_context.__exit__(exc_type, exc_val, exc_tb)
+
+class MultiloadComponent(EnvironmentComponentDescriptor):
+    def __init__(self, setup_functions: Collection[Callable[[MultiloadComponentInstance, TaskEnvironment], None]] = ()):
+        self.setup_functions = setup_functions
+
+    def combine(self, other):
+        assert isinstance(other, MultiloadComponent)
+        return MultiloadComponent(tuple(self.setup_functions) + tuple(other.setup_functions))
+
+    def __call__(self, env: TaskEnvironment) -> MultiloadComponentInstance:
+        return MultiloadComponentInstance(self, env)
+
+def CPUAffinity(multi: MultiloadComponentInstance, env: TaskEnvironment):
+    # Collect CPU numbers and set the affinity
+    import parla.cpu
+    cpus = []
+    for d in env.placement:
+        if d.architecture is parla.cpu.cpu:
+            cpus.append(d.index)
+    multi.multiload_context.set_allowed_cpus(cpus)
