@@ -1,16 +1,16 @@
 import logging
+from itertools import combinations
 from time import sleep
 
 import numpy as np
 import pytest
 from pytest import skip
 
-from parla import Parla, array
+from parla import Parla, array, TaskEnvironment
 from parla.cpu import cpu
 from parla.tasks import *
 
 logger = logging.getLogger(__name__)
-
 
 def repetitions():
     """Return an iterable of the repetitions to perform for probabilistic/racy tests."""
@@ -27,7 +27,9 @@ def sleep_until(predicate, timeout=2, period=0.05):
 
 
 def test_parla_ctx():
-    with Parla():
+    # Dummy environments with no components for testing.
+    environments = [TaskEnvironment(placement=[d], components=[]) for d in cpu.devices]
+    with Parla(environments):
         task_results = []
         @spawn()
         def task():
@@ -275,17 +277,20 @@ def test_placement_options_memory(runtime_sched):
         assert task_results.count(cpu(3)) == 2
 
 
-def test_placement_multi(runtime_sched):
-    devices = [frozenset((cpu(0), cpu(1))), frozenset((cpu(1), cpu(2))), frozenset((cpu(6), cpu(3)))]
-    for rep in repetitions():
-        task_results = []
-        for (i, dev) in enumerate(devices):
-            @spawn(placement=dev, ndevices=2)
-            def task():
-                task_results.append(frozenset(get_current_devices()))
-            sleep_until(lambda: len(task_results) == i+1)
+def test_placement_multi():
+    # Dummy environments with no components for testing.
+    environments = [TaskEnvironment(placement=d, components=[]) for d in combinations(cpu.devices, 2)]
+    with Parla(environments):
+        devices = [frozenset((cpu(0), cpu(1))), frozenset((cpu(1), cpu(2))), frozenset((cpu(6), cpu(3)))]
+        for rep in repetitions():
+            task_results = []
+            for (i, dev) in enumerate(devices):
+                @spawn(placement=dev, ndevices=2)
+                def task():
+                    task_results.append(frozenset(get_current_devices()))
+                sleep_until(lambda: len(task_results) == i+1)
 
-        assert task_results == devices
+            assert task_results == devices
 
 
 def test_placement_await(runtime_sched):

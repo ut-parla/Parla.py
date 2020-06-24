@@ -12,17 +12,22 @@
 #include "log.h"
 
 long int context_new() {
-    void* dlh_environ = dlmopen_debuggable(LM_ID_NEWLM, "libparla_context.so", RTLD_NOW);
+    void* dlh_environ = dlmopen_debuggable(LM_ID_NEWLM, "libparla_context.so", RTLD_NOW|RTLD_GLOBAL);
     if(!dlh_environ) return -1;
     Lmid_t lmid;
     int r = dlinfo(dlh_environ, RTLD_DI_LMID, &lmid);
+    DEBUG("Loaded libparla_context.so into %ld (r=%d)", lmid, r);
     if (r != 0) return -1;
     return lmid;
 }
 
 
 void * context_dlopen(long int context, const char *file) {
-    return dlmopen_debuggable(context, file, RTLD_LAZY);
+    int flags = RTLD_LAZY|RTLD_GLOBAL;
+    DEBUG("Loading %s (%x) into %ld", file, flags, context);
+    void* p = dlmopen_debuggable(context, file, flags);
+//    DEBUG("Loaded %p", p);
+    return p;
 }
 
 // Some magic preprocessor tricks

@@ -1,16 +1,18 @@
-from parla import get_all_devices
+from parla import get_all_devices, TaskEnvironment
 from parla.cpu import cpu
 from parla.task_runtime import Scheduler, Task, TaskCompleted, TaskRunning, DeviceSetRequirements
 from parla.tasks import TaskID
 
 task_id_next = 0
 
+# Dummy environments with no components for testing.
+environments = [TaskEnvironment(placement=[d], components=[]) for d in cpu.devices]
 
-def simple_task(func, args=(), dependencies=(), taskid=None, devices=list(get_all_devices())):
+def simple_task(func, args=(), dependencies=(), taskid=None, devices=tuple(get_all_devices())):
     global task_id_next
     taskid = taskid or TaskID("Dummy {}".format(task_id_next), task_id_next)
     task_id_next += 1
-    return Task(func, args, dependencies, taskid, req=DeviceSetRequirements(devices=devices, ndevices=1, resources={}))
+    return Task(func, args, dependencies, taskid, req=DeviceSetRequirements(devices=devices, ndevices=1, resources={}, tags=()))
 
 
 def test_flag_increment():
@@ -18,14 +20,14 @@ def test_flag_increment():
     def increment_flag(task):
         nonlocal external_flag
         external_flag += 1
-    with Scheduler(4):
+    with Scheduler(environments, 4):
         simple_task(increment_flag, tuple(), [])
     assert external_flag
 
 
 def test_deps():
     external_flag = 0
-    with Scheduler(4):
+    with Scheduler(environments, 4):
         def tasks_with_deps(task):
             counter = 0
             def increment(task):
@@ -54,12 +56,12 @@ def test_recursion_without_continuation():
                 simple_task(recurse, (val-1,), [])
                 simple_task(recurse, (val-1,), [])
         simple_task(recurse, [2], [])
-    with Scheduler(4):
+    with Scheduler(environments, 4):
         simple_task(recursion_without_continuation, tuple(), [])
 
 def test_recursion_with_finalization():
     counter = 0
-    with Scheduler(4):
+    with Scheduler(environments, 4):
         def recursion_with_manual_continuation(task, val):
             if val == 0:
                 nonlocal counter
@@ -82,7 +84,7 @@ def test_exception_handling():
     def raise_exc(task):
         raise CustomException("error")
     try:
-        with Scheduler(4):
+        with Scheduler(environments, 4):
             simple_task(raise_exc, tuple(), [])
     except:
         success = True

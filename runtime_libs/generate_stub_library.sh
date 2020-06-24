@@ -44,38 +44,7 @@ cat >> "$STUBC" <<EOF
 EOF
 
 cat>> "$STUBC" <<"EOF"
-#define _GNU_SOURCE
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <dlfcn.h>
-
-// Some magic preprocessor tricks
-#define _$__string(n) #n
-#define _$_string(n) _$__string(n)
-#define _$__concat(a, b) a##b
-#define _$_concat(a,b) _$__concat(a,b)
-
-// Macros to generate names that are highly unlikely to conflict.
-#define _$_mangle_stub(n) _$_concat(__stub$$,n)
-#define _$_mangle_resolver(n) _$_concat(__resolver$$,n)
-
-/// Declare a stub for a symbol, n.
-#define STUB(n) static void* _$_mangle_stub(n) = NULL; \
-    static void* _$_mangle_resolver(n)() { __stub$init_all_stubs(); \
-        return _$_mangle_stub(n); } \
-    int n() __attribute__((ifunc (_$_string(_$_mangle_resolver(n)))))
-
-/// Begin the init function for this stub library.
-#define START_INIT(so) static void __stub$init_all_stubs() { \
-    static volatile int __stub$inited = 0; \
-    if (__glibc_likely(__stub$inited)) return; \
-    void *lib = dlmopen(LM_ID_BASE, so, RTLD_LAZY|RTLD_GLOBAL); \
-    if(lib == NULL) { perror("dlmopen failed"); abort(); }
-/// Load a stub inside the init function
-#define LOAD_STUB(n) _$_mangle_stub(n) = dlsym(lib, #n)
-/// End the init function for this stub library.
-#define END_INIT() __stub$inited = 1; }
+#include "stub_library.h"
 
 // Declare the init function for calling from the stubs.
 static void __stub$init_all_stubs();
@@ -83,12 +52,9 @@ static void __stub$init_all_stubs();
 EOF
 
 echo "// Declare the ifunc stubs along with their resolvers" >> "$STUBC"
-generate STUB
+generate _\$_STUB
 
 echo "// Create the init function" >> "$STUBC"
-echo "START_INIT(NULL)" >> "$STUBC"
-generate LOAD_STUB
-echo "END_INIT()" >> "$STUBC"
-
-echo "Build with:"
-echo "gcc -shared $STUBC -o $STUBSO -ldl"
+echo "_\$_START_INIT(NULL)" >> "$STUBC"
+generate _\$_LOAD_STUB
+echo "_\$_END_INIT()" >> "$STUBC"
