@@ -127,7 +127,7 @@ class MultiloadThreadLocals(threading.local):
     @property
     def in_progress(self) -> list:
         if not hasattr(self, "_in_progress"):
-            self._in_progress = []
+            self._in_progress = dict()
         return self._in_progress
 
 multiload_thread_locals = MultiloadThreadLocals()
@@ -194,6 +194,52 @@ def get_forward_getattr(module):
 # got from the default import into the cached in-progress multiload and insert the in-progress multiload into sys.modules.
 # The in-progress module caches should be pulled from a dictionary stored here with behavior similar to sys.modules.
 
+# Correct handling of an in-progress module:
+# A multiload object can never be in progress!
+# - A multiload on __enter__ creates an entry in the cache of in-progress multiloads.
+# - On exit it pops that value out of the in-progress cache and inserts it into sys.modules
+#   if the wrapper module object hasn't already been patched in.
+# Notes about lazy fromlist loading:
+# - Fromlist entries have to be pre-emptively marked as
+#   in-progress before we know which ones are modules since
+#   this is knowledge we only get after the first import in
+#   the multiload runs.
+# - When sorting through which fromlist entries actually need
+#   submodule objects, we also should delete erroneous in-progress
+#   entries for things that aren't actually modules.
+# An in-progress parent ModuleImport object on capture should:
+# - check if the loaded module is a multiload, if it is not:
+# - swap in the corresponding dummy multiload from the in progress cache
+# - register the loaded module in whatever the current context is
+# - Note: if there is a case where there isn't a corresponding
+#   multiload in progress in the cache, this corresponds to
+#   the case where a previously loaded module is being reloaded
+#   as a multiload. This is where that error gets raised.
+
+# Note: The case where someone wants to multiload a submodule of
+#   a module that has already been loaded arguably should be allowed,
+#   however it's not obvious how to make that case work since
+#   each import command actually can pull in any number of modules
+#   and the only way we know which ones are intended to be multiloaded
+#   by the given import is by comparing with what hasn't already been
+#   imported. Forcing multiloading to start at a module's root is
+#   a way to avoid subtle errors where things that are implicitly imported
+#   before multiloading end up being unintentionally not multiloaded.
+
+# Note: We have to tell users to multiload things first and then
+#   import other stuff they need afterward. Otherwise, things they
+#   intend to multiload can be picked up as dependencies before the
+#   actual multiload happens.
+
+# Note: Overriding imports after the fact, isn't a route we should
+#   take because references to the object produced by the first load
+#   can be picked up and stored in other places where they may not
+#   be find-able later. Getting the referrers to such a module
+#   will likely be insufficient since the C API only requires
+#   that references not be leaked.
+
+# Note: "register" can just be rolled into the "__exit__".
+
 def empty_forwarding_module():
     forwarding_module = types.ModuleType("")
     for name in dir(forwarding_module):
@@ -207,6 +253,10 @@ def empty_forwarding_module():
     # If overriding __getattribute__ ever starts working, this may not be needed.
     forwarding_module.__getattr__ = get_forward_getattr(forwarding_module)
     return forwarding_module
+
+def insert_into_forwarding_if_present(forwarding_module, index, wrapped_module):
+    assert not index in forwarding_module._parla_base_modules
+    forwaring_module._parla_base_modules[index] = wrapped_module
 
 def forward_module(base_modules):
     assert isinstance(base_modules, dict)
@@ -327,18 +377,17 @@ class ModuleImport:
 
     def __enter__(self):
         if self.fromlist:
-            for item_name in self.fromlist:
+            for item_name in set(self.fromlist):
                 item_full_name = ".".join([self.full_name, item_name])
-                multiload_thread_locals.in_progress.append(item_full_name)
         else:
             for submodule in self.submodules:
                 submodule.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.fromlist:
-            for item_name in reversed(self.fromlist):
-                found_entry = multiload_thread_locals.in_progress.pop()
-                assert found_entry == ".".join([self.full_name, item_name])
+            for item_name in set(self.fromlist):
+                item_full_name = ".".join([self.full_name, item_name])
+                found_entry = multiload_thread_locals.in_progress.pop(item_full_name)
         else:
             for submodule in self.submodules:
                 submodule.__exit__(exc_type, exc_val, exc_tb)
@@ -396,6 +445,9 @@ class ModuleImport:
             self.register_fromlist()
         if "." not in self.full_name and self.is_exempt:
             return False
+        loaded_module = sys.modules[self.full_name]
+        if not is_forwarding(loaded_module):
+            forwarding_module = ;;;
         did_work = False
         for submodule in self.submodules:
             if submodule.is_multiload:
@@ -428,21 +480,19 @@ class ModuleMultiload(ModuleImport):
         self.captured_modules = dict()
 
     def __enter__(self):
-        multiload_thread_locals.in_progress.append(self.full_name)
+        assert self.full_name not in multiload_thread_locals.in_progress
+        multiload_thread_locals.in_progress[self.full_name] = empty_forwarding_module()
         super().__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         super().__exit__(exc_type, exc_val, exc_tb)
-        found_entry = multiload_thread_locals.in_progress.pop()
-        assert found_entry == self.full_name
+        multiload_thread_locals.in_progress.pop(self.full_name)
 
     def capture(self):
         if self.fromlist and not self.fromlist_is_registered:
             self.register_fromlist()
         if "." not in self.full_name and self.is_exempt:
             return False
-        if not self.in_progress:
-            raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(self.full_name))
         captured_module = sys.modules.pop(self.full_name)
         assert not hasattr(captured_module, "_parla_context")
         captured_module._parla_context = multiload_thread_locals.current_context
