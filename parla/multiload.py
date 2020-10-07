@@ -137,6 +137,23 @@ class MultiloadThreadLocals(threading.local):
 
 multiload_thread_locals = MultiloadThreadLocals()
 
+# Some convenience functions to ease managing in-progress multiloads
+
+# Mark a multiload as in-progress.
+def mark_in_progress(full_name):
+    assert full_name not in multiload_thread_locals.in_progress
+    multiload_thread_locals.in_progress[full_name] = empty_forwarding_module()
+
+# Check if a multiload for a given name is in-progress.
+def check_in_progress(full_name):
+    return full_name in multiload_thread_locals.in_progress
+
+def get_in_progress(full_name):
+    return multiload_thread_locals.in_progress.get(full_name)
+
+def pop_in_progress(full_name):
+    return multiload_thread_locals.in_progress.pop(full_name)
+
 # Create all the replicas/contexts we want
 multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in range(NUMBER_OF_REPLICAS)]
 for i in range(NUMBER_OF_REPLICAS):
@@ -213,6 +230,13 @@ def get_forward_getattr(module):
 #   in-progress before we know which ones are modules since
 #   this is knowledge we only get after the first import in
 #   the multiload runs.
+# - In the case of a * import, the * is the only entry in the
+#   fromlist. Currently submodules are only included in the *
+#   import if they are added as an attribute of their parent
+#   module by an import that happens when initializing that module
+#   this means that we can just ignore * imports in the fromlist
+#   and let the import statement at the parent module level
+#   handle the multiload.
 # - When sorting through which fromlist entries actually need
 #   submodule objects, we also should delete erroneous in-progress
 #   entries for things that aren't actually modules.
@@ -263,9 +287,32 @@ def empty_forwarding_module():
     forwarding_module.__getattr__ = get_forward_getattr(forwarding_module)
     return forwarding_module
 
-def insert_into_forwarding_if_present(forwarding_module, index, wrapped_module):
-    assert not index in forwarding_module._parla_base_modules
-    forwaring_module._parla_base_modules[index] = wrapped_module
+# Substitute an in-progress multiload into
+# sys.modules over the top of a new entry created there.
+# This operation has to be done aggressively to ensure
+# that, even though a module's import was started without
+# it being present in sys.modules, any subsequent access
+# into sys.modules will pick up the forwarding module
+# instead of the original one.
+# This has to be done out-of-line from the "capture"
+# operation because a module object first becomes visible
+# in sys.modules before its builtin __import__ actually
+# returns, but references to an in-progress module can already
+# be stored before __import__ returns, as is the case
+# with mutually recursive imports.
+def update_sysmodules_from_in_progress(full_name):
+    sys_cached = sys.modules.get(full_name)
+    if sys_cached is None:
+        return
+    incomplete_forward = get_in_progress(full_name)
+    assert incomplete_forward is not None
+    if is_forwarding(sys_cached):
+        assert sys_cached is incomplete_forward
+        return
+    current_context_id = multiload_thread_locals.current_context.__index__()
+    assert current_context_id not in incomplete_forward._parla_base_modules
+    incomplete_forward._parla_base_modules[current_context_id] = sys_cached
+    sys.modules[full_name] = incomplete_forward
 
 def forward_module(base_modules):
     assert isinstance(base_modules, dict)
@@ -360,46 +407,62 @@ def deep_setattr(module, attr, val):
     for module in modules_to_modify.values():
         setattr(module, attr, val)
 
+def setattr_on_all(module, attr, val):
+    for wrapped in module._parla_base_modules:
+        setattr(wrapped, attr, val)
+
+def delattr_if_present_on_current(module, attr):
+    assert is_forwarding(module)
+    current = module._parla_base_modules[multiload_thread_locals.current_context.__index__()]
+    if hasattr(current, attr):
+        delattr(current, attr)
+
+# When a call to __import__ is made, our override builds a tree of
+# objects to track the difference between what was in sys.modules before
+# the builtin __import__ is called and what is there afterward.
+# This class is a node in that tree. It is responsible for tracking
+# what happens with a specific module. The base class ModuleImport covers
+# the case of a module that we know a priori does not need to be
+# multiloaded by the current import. The subclass ModuleMultiload
+# covers the case of a module that does need to be multiloaded.
+# We still have to track non-multiloading modules in each given import
+# because:
+# - The in-progress cache may need to be updated if this is the first time
+#   a newly created entry in sys.modules corresponding to the current module
+#   has been created.
+# - An error needs to be raised in the case of a user requesting a
+#   multiload of a module that has already been imported. This case
+#   shows up as something that fails may_need_multiload, so we check here.
+# - Attribute updates to the corresponding (already loaded) module may still
+#   be needed if a multiload is occuring for one of its submodules.
+
 class ModuleImport:
 
     def __init__(self, full_name, short_name):
         self.submodules = []
         self.full_name = full_name
         self.short_name = short_name
-        self.captured_attrs = []
-        self.fromlist = None
-        self.fromlist_is_registered = False
-        self.loaded_submodules = None
-        self.needs_update = None
-
-    def set_fromlist(self, fromlist):
-        self.fromlist = fromlist
-        # Multiloading of submodules picked up via * imports is deferred until those
-        # submodules are imported within the parent module.
-        if fromlist and fromlist[0] == "*":
-            self.loaded_submodules = []
-        else:
-            self.loaded_submodules = [item_name for item_name in fromlist if ".".join([self.full_name, item_name]) in sys.modules]
+        self.is_pruned = True
 
     def add_submodule(self, submodule):
         self.submodules.append(submodule)
 
+    def enter_submodules(self):
+        for submodule in self.submodules:
+            submodule.__enter__()
+
     def __enter__(self):
-        if self.fromlist:
-            for item_name in set(self.fromlist):
-                item_full_name = ".".join([self.full_name, item_name])
-        else:
-            for submodule in self.submodules:
-                submodule.__enter__()
+        # This check has to be run here since, in the case of
+        # a bad multiload, may_need_multiload is actually false.
+        check_for_bad_multiload(self.full_name)
+        # Update sysmodules if this is the first time we're
+        # seeing the module being built by the builtin __import__. 
+        update_sysmodules_from_in_progress(self.full_name)
+        self.enter_submodules()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.fromlist:
-            for item_name in set(self.fromlist):
-                item_full_name = ".".join([self.full_name, item_name])
-                found_entry = multiload_thread_locals.in_progress.pop(item_full_name)
-        else:
-            for submodule in self.submodules:
-                submodule.__exit__(exc_type, exc_val, exc_tb)
+        for submodule in self.submodules:
+            submodule.__exit__(exc_type, exc_val, exc_tb)
 
     @property
     def in_progress(self):
@@ -407,72 +470,132 @@ class ModuleImport:
             return self.in_progress_cache
         except AttributeError:
             pass
-        if self.full_name in multiload_thread_locals.in_progress:
+        if check_in_progress(self.full_name):
             self.in_progress_cache = True
             return True
         self.in_progress_cache = False
         return False
 
-    def register_fromlist(self):
-        if self.fromlist_is_registered:
+    #def register_fromlist(self):
+    #    if self.fromlist_is_registered:
+    #        return
+    #    module = sys.modules[self.full_name]
+    #    for submodule_name in self.fromlist:
+    #        if submodule_name == "*":
+    #            # Modules picked up by * imports have their multiload deferred till
+    #            # their own corresponding import calls happen. If a * is present,
+    #            # it's the only entry in the fomlist.
+    #            assert len(self.fromlist) == 1
+    #            break
+    #        submodule_full_name = ".".join([self.full_name, submodule_name])
+    #        try:
+    #            submodule = getattr(module, submodule_name)
+    #        except AttributeError as a:
+    #            submodule = sys.modules.get(submodule_full_name)
+    #            deep_setattr(module, submodule_name, submodule)
+    #            if submodule is None:
+    #                raise ImportError("Module {} has no submodule or attribute {}.".format(self.full_name, submodule_name)) from a
+    #        if not isinstance(submodule, types.ModuleType):
+    #            continue
+    #        if not is_submodule(submodule, module):
+    #            continue
+    #        submodule_is_forwarding = is_forwarding(submodule)
+    #        submodule_in_progress = check_in_progress(submodule_full_name)
+    #        if submodule_name in self.loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
+    #            raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
+    #        if not submodule_is_forwarding and not submodule_in_progress:
+    #            self.submodules.append(ModuleMultiload(submodule_full_name, submodule_name))
+    #    self.fromlist_is_registered = True
+
+    def tag_for_pruning(self):
+        self.is_pruned = False
+
+    def prune_non_module_names(self, loaded_module):
+        if self.is_pruned:
             return
-        module = sys.modules[self.full_name]
-        for submodule_name in self.fromlist:
-            if submodule_name == "*":
-                # Modules picked up by * imports have their multiload deferred till
-                # their own corresponding import calls happen. If a * is present,
-                # it's the only entry in the fomlist.
-                assert len(self.fromlist) == 1
-                break
-            submodule_full_name = ".".join([self.full_name, submodule_name])
-            try:
-                submodule = getattr(module, submodule_name)
-            except AttributeError as a:
-                submodule = sys.modules.get(submodule_full_name)
-                deep_setattr(module, submodule_name, submodule)
-                if submodule is None:
-                    raise ImportError("Module {} has no submodule or attribute {}.".format(self.full_name, submodule_name)) from a
-            if not isinstance(submodule, types.ModuleType):
-                continue
-            if not is_submodule(submodule, module):
-                continue
-            submodule_is_forwarding = is_forwarding(submodule)
-            submodule_in_progress = submodule_full_name in multiload_thread_locals.in_progress
-            if submodule_name in self.loaded_submodules and not submodule_is_forwarding and not submodule_in_progress:
-                raise ImportError("Attempting to multiload module {} which was previously imported without multiloading.".format(".".join([full_name, item_name])))
-            if not submodule_is_forwarding and not submodule_in_progress:
-                self.submodules.append(ModuleMultiload(submodule_full_name, submodule_name))
-        self.fromlist_is_registered = True
+        # Get rid of any nodes in self.submodules
+        # that actually correspond to things other
+        # than modules. This has to be done after
+        # an import runs, since which names are bound
+        # to modules vs objects in a from-style import
+        # isn't known until after the import runs.
+        new_submodules = []
+        for submodule in self.submodules:
+            loaded_submodule = sys.modules.get(submodule.full_name)
+            # If the requested name doesn't bind to a submodule,
+            # it's not going to be present in sys.modules.
+            # This can be the case if it's not a module at all or
+            # if it's an actual module, just not a submodule
+            # of the given parent (fromlists import objects by name
+            # and names can be bound to other modules).
+            # If it's already in-progress from an ongoing import
+            # there will still be some kind of entry in sys.modules.
+            if loaded_submodule is None:
+                # Clar out the unneded entry from the in-progress cache.
+                # for most things this is done in the __exit__
+                # method, but we're removing this submodule now
+                # so __exit__ won't be called later.
+                pop_in_progress(submodule.full_name)
+            else:
+                assert type(loaded_submodule) is types.ModuleType
+                assert is_submodule(loaded_submodule, loaded_module)
+                # We could prune away in-progress modules here too,
+                # but their presence still carries meaningful info
+                # about what's happening in the current import,
+                # so leave them in for the time being.
+                new_submodules.append(submodule)
+        self.submodules = new_submodules
+        self.is_pruned = True
 
-    def clear_submodule_attrs(self):
-        for submodule in submodules:
-            if submodule.is_multiload:
-                deep_delattr_if_present(sys.modules[self.full_name], submodule.short_name)
-
-    def capture(self):
-        if self.fromlist and not self.fromlist_is_registered:
-            self.register_fromlist()
-        if "." not in self.full_name and self.is_exempt:
-            return False
-        loaded_module = sys.modules[self.full_name]
-        if not is_forwarding(loaded_module):
-            forwarding_module = ;;;
+    def capture_submodules(self, loaded_module):
         did_work = False
         for submodule in self.submodules:
             if submodule.is_multiload:
-                deep_delattr_if_present(sys.modules[self.full_name], submodule.short_name)
+                delattr_if_present_on_current(loaded_module, submodule.short_name)
                 did_work = True
             submodule_did_work = submodule.capture()
             did_work = did_work or submodule_did_work
         return did_work
 
+    # See what changed after the import ran,
+    # and restore the state to how it was before
+    # so that the import can be safely rerun.
+    # Two types of changes have to be managed:
+    # - changes in sys.modules
+    # - changes in module attribute updates based off of from-style imports
+    # The first time this is run for a given import
+    # it also checks the imported submodules to see if
+    # they are actually modules or not since, in general,
+    # we can't have this knowledge until the import has actually run.
+    # This is because a from-style import can be used for submodules
+    # or for objects within a module.
+    def capture(self):
+        # We don't know a priori if a module is exempt or not,
+        # so this is the earliest we can stop.
+        if "." not in self.full_name and self.is_exempt:
+            return False
+        loaded_module = sys.modules[self.full_name]
+        # Multiloading a submodule of a non-multiloaded parent
+        # module isn't currently supported, though it may be
+        # possible in general, that case isn't debugged yet.
+        # We've already returned here in the case of an exempt
+        # module, so this has to be true.
+        assert is_forwarding(loaded_module)
+        # TODO: refactor this out into a separate routine that can be
+        # reused in the multiload and non-multiload cases.
+        # This is the earliest we can tell if names listed in
+        # a fromlist in a from-style import are actually associated
+        # with submodules that we need to manage, so prune away
+        # other stuff now.
+        self.prune_non_module_names(loaded_module)
+        return self.capture_submodules(loaded_module)
+
     def register(self):
         for submodule in self.submodules:
             submodule.register()
             if submodule.is_multiload:
-                loaded_submodule = sys.modules[submodule.full_name]
-                assert is_forwarding(loaded_submodule)
-                deep_setattr(sys.modules[self.full_name], submodule.short_name, loaded_submodule)
+                loaded_submodule = get_in_progress(submodule.full_name)
+                setattr_on_all(loaded_submodule, submodule.short_name, loaded_submodule)
 
     @property
     def is_multiload(self):
@@ -480,57 +603,78 @@ class ModuleImport:
 
     @property
     def is_exempt(self):
-        return is_exempt(self, sys.modules[self.full_name])
+        return is_exempt(self.full_name, sys.modules[self.full_name])
 
 class ModuleMultiload(ModuleImport):
 
     def __init__(self, full_name, short_name):
         super().__init__(full_name, short_name)
-        self.captured_modules = dict()
 
     def __enter__(self):
-        assert self.full_name not in multiload_thread_locals.in_progress
-        multiload_thread_locals.in_progress[self.full_name] = empty_forwarding_module()
-        super().__enter__()
+        assert not check_in_progress(self.full_name)
+        mark_in_progress(self.full_name)
+        self.enter_submodules()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # TODO: exit submodules in a separate routine to avoid this weirdness.
         super().__exit__(exc_type, exc_val, exc_tb)
-        multiload_thread_locals.in_progress.pop(self.full_name)
+        pop_in_progress(self.full_name)
 
     def capture(self):
-        if self.fromlist and not self.fromlist_is_registered:
-            self.register_fromlist()
         if "." not in self.full_name and self.is_exempt:
             return False
-        captured_module = sys.modules.pop(self.full_name)
-        assert not hasattr(captured_module, "_parla_context")
-        captured_module._parla_context = multiload_thread_locals.current_context
-        self.captured_modules[multiload_thread_locals.current_context.__index__()] = captured_module
-        for submodule in self.submodules:
-            delattr(captured_module, submodule.short_name)
-        for submodule in self.submodules:
-            submodule.capture()
+        update_sysmodules_from_in_progress(self.full_name)
+        forward = sys.modules.pop(self.full_name)
+        self.prune_non_module_names(forward)
+        assert forward is get_in_progress(self.full_name)
+        self.capture_submodules(forward)
         return True
 
     def register(self):
-        forward = forward_module(self.captured_modules)
-        sys.modules[self.full_name] = forward
+        assert sys.modules.get(self.full_name) is None
+        sys.modules[self.full_name] = get_in_progress(self.full_name)
+        # Attribute updates can actually be done here or in the capture
+        # routine since the current import has already run by then anyway.
         for submodule in self.submodules:
-            submodule.register()
-            # All submodules listed in this import tree
-            # should be forwarding if this submodule is a forwarding module.
+            # All submodules listed in this import tree should be
+            # forwarding if this submodule is a forwarding module.
             assert submodule.is_multiload
-            loaded_submodule = sys.modules[submodule.full_name]
-            assert is_forwarding(loaded_submodule)
-            deep_setattr(forward, submodule.short_name, loaded_submodule)
+            setattr_on_all(forward, submodule.short_name, get_in_progress(submodule.short_name))
+            submodule.register()
 
     @property
     def is_multiload(self):
         return True
 
+# A module needs to be multiloaded in the current import
+# if it hasn't already been imported and if there isn't
+# already a multiload in progress.
 def may_need_multiload(full_name):
-    return full_name not in sys.modules and full_name not in multiload_thread_locals.in_progress 
+    return full_name not in sys.modules and not check_in_progress(full_name)
 
+# Raise an error if this is a module that ought to be multiloaded,
+# but has instead been already imported.
+def check_for_bad_multiload(full_name):
+    if check_in_progress(full_name):
+        return
+    module = sys.modules.get(full_name)
+    if module is None or is_forwarding(module) or is_exempt(full_name, module):
+        return
+    raise ImportError("Attempting to multiload module {} which has already been imported normally.".format(full_name))
+
+# Build a tree of ModuleImport or ModuleMultiload objects
+# to observe the changes made by the call to the builtin
+# __import__ routine. For example, if someone does
+# from m1.m2.m3 import n1, n2, n3 the tree has
+# m1 as its root. m2 is a child of m1. m3 is a child of m2.
+# n1, n2, and n3 are children of m3.
+# Fan out only occurs at the lowest level, and only with
+# "from" style imports. When a fromlist is nonempty,
+# entries in the tree may be created for things that are
+# not actually modules since it's not clear what is
+# a module or not until after the import runs.
+# The non-module entries are trimmed away when the
+# "capture" method of the parent module is first called. 
 def build_import_tree(full_name, fromlist):
     short_names = full_name.split(".")
     full_names = [".".join(short_names[:i+1]) for i in range(len(short_names))]
@@ -541,7 +685,7 @@ def build_import_tree(full_name, fromlist):
     else:
         root = ModuleImport(full_names[0], short_names[0])
     previous = root
-    for full_name, short_name in zip(islice(full_names, 1,None), islice(short_names, 1, None)):
+    for full_name, short_name in zip(islice(full_names, 1, None), islice(short_names, 1, None)):
         if may_need_multiload(full_name):
             started_multiloading = True
             submodule = ModuleMultiload(full_name, short_name)
@@ -551,9 +695,32 @@ def build_import_tree(full_name, fromlist):
         previous.add_submodule(submodule)
         previous = submodule
     if fromlist:
-        previous.set_fromlist(fromlist)
+        previous.tag_for_pruning()
+        for name in fromlist:
+            if name == "*":
+                # * imports don't actually trigger imports of submodules.
+                # All they do is pick up attributes of the parent module
+                # once it has been initialized.
+                # Because of this, * imports don't trigger any multiloads.
+                continue
+            submodule_full_name = ".".join([full_name, name])
+            if may_need_multiload(submodule_full_name):
+                # Note: some of these names may correspond to things
+                # that aren't actually modules, but the ones that aren't
+                # will be pruned away when the capture method on
+                # their parent module is first run.
+                submodule = ModuleMultiload(submodule_full_name, name)
+            else:
+                submodule = ModuleImport(submodule_full_name, name)
+            previous.add_submodule(submodule)
     return root
 
+# The actual function that's used to override __import__.
+# It builds a tree of ModuleImport and/or ModuleMultiload objects
+# that represents the import by calling in to build_import_tree.
+# It then uses that tree to observe the changes made by running
+# the builtin __import__ and capture the results into the wrapper
+# module objects with the context-switching-aware __getattr__.
 def import_override(name, glob = None, loc = None, fromlist = tuple(), level = 0):
     if multiload_thread_locals.wrap_imports:
         full_name = get_full_name(name, glob, loc, fromlist, level)
