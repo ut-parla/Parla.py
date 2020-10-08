@@ -206,6 +206,15 @@ def get_forward_dir(module):
 # Again see https://www.python.org/dev/peps/pep-0562/ for details.
 def get_forward_getattr(module):
     def forward_getattr(name: str):
+        # Hack around the fact that the frozen importlib
+        # accesses __path__ from the parent module while importing
+        # submodules.
+        # The real fix is to reorganize things so that imports of
+        # modules are done into each environment separately.
+        # That reorganization is also what's needed to support
+        # loading distinct sets of modules into each context.
+        if name == "__path__":
+            return getattr(module._parla_base_modules[0], name)
         return getattr(module._parla_base_modules[multiload_thread_locals.current_context.__index__()], name)
     return forward_getattr
 
@@ -304,6 +313,10 @@ def update_sysmodules_from_in_progress(full_name):
     sys_cached = sys.modules.get(full_name)
     if sys_cached is None:
         return
+    # TODO: Is there a way to make this function only
+    # be called once we know that the module is not exempt?
+    if is_exempt(full_name, sys_cached):
+        return
     incomplete_forward = get_in_progress(full_name)
     assert incomplete_forward is not None
     if is_forwarding(sys_cached):
@@ -347,10 +360,16 @@ exempt_cache = set(sys.builtin_module_names)
 external_cache = set()
 stdlib_base_paths = [os.path.abspath(p) for p in sys.path if p.startswith(sys.prefix) and "site-packages" not in p and p != sys.prefix]
 
+# TODO: is_exempt handling elsewhere needs a refactor if possible.
+# This routine is okay, but is there any way to bail earlier in
+# the main routine so that multiple calls to this aren't needed?
 def is_exempt(name, module):
     if name in exempt_cache:
         return True
     if name in external_cache:
+        return False
+    if is_forwarding(module):
+        # It's already in-progress, so not exempt.
         return False
     if not hasattr(module, "__file__"):
         exempt_cache.add(name)
@@ -408,12 +427,20 @@ def deep_setattr(module, attr, val):
         setattr(module, attr, val)
 
 def setattr_on_all(module, attr, val):
-    for wrapped in module._parla_base_modules:
+    for wrapped in module._parla_base_modules.values():
         setattr(wrapped, attr, val)
 
 def delattr_if_present_on_current(module, attr):
     assert is_forwarding(module)
-    current = module._parla_base_modules[multiload_thread_locals.current_context.__index__()]
+    # TODO: Once the iteration order is refactored to do whole module imports
+    # in one pass instead of doing imports into all contexts for each module
+    # this try/except won't be necessary. Currently the issue is that
+    # if a child import is running the parent module may not actually be
+    # there in the given context yet, which is weird.
+    try:
+        current = module._parla_base_modules[multiload_thread_locals.current_context.__index__()]
+    except KeyError:
+        return
     if hasattr(current, attr):
         delattr(current, attr)
 
@@ -443,6 +470,8 @@ class ModuleImport:
         self.full_name = full_name
         self.short_name = short_name
         self.is_pruned = True
+        if self.full_name == "mpmath.libmp.backend":
+            print("initializing")
 
     def add_submodule(self, submodule):
         self.submodules.append(submodule)
@@ -456,8 +485,13 @@ class ModuleImport:
         # a bad multiload, may_need_multiload is actually false.
         check_for_bad_multiload(self.full_name)
         # Update sysmodules if this is the first time we're
-        # seeing the module being built by the builtin __import__. 
+        # seeing the module being built by the builtin __import__.
+        if self.full_name == "mpmath.libmp.backend":
+            print("updating sysmodules")
+            print(self.full_name in sys.modules)
         update_sysmodules_from_in_progress(self.full_name)
+        if self.full_name == "mpmath.libmp.backend":
+            assert is_forwarding(sys.modules[self.full_name])
         self.enter_submodules()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -580,6 +614,11 @@ class ModuleImport:
         # possible in general, that case isn't debugged yet.
         # We've already returned here in the case of an exempt
         # module, so this has to be true.
+        if self.full_name == "mpmath.libmp.backend":
+            print("capturing")
+        if not is_forwarding(loaded_module):
+            print(self.full_name)
+            print(dir(loaded_module))
         assert is_forwarding(loaded_module)
         # TODO: refactor this out into a separate routine that can be
         # reused in the multiload and non-multiload cases.
