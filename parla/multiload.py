@@ -557,13 +557,13 @@ class ModuleImport:
             # and names can be bound to other modules).
             # If it's already in-progress from an ongoing import
             # there will still be some kind of entry in sys.modules.
-            if loaded_submodule is None:
-                # Clar out the unneded entry from the in-progress cache.
+            if loaded_submodule is None and submodule.is_multiload:
+                # Clear out the unneeded entry from the in-progress cache.
                 # for most things this is done in the __exit__
                 # method, but we're removing this submodule now
                 # so __exit__ won't be called later.
                 pop_in_progress(submodule.full_name)
-            else:
+            elif loaded_submodule is not None:
                 assert type(loaded_submodule) is types.ModuleType
                 assert is_submodule(loaded_submodule, loaded_module)
                 # We could prune away in-progress modules here too,
