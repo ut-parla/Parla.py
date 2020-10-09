@@ -470,8 +470,6 @@ class ModuleImport:
         self.full_name = full_name
         self.short_name = short_name
         self.is_pruned = True
-        if self.full_name == "mpmath.libmp.backend":
-            print("initializing")
 
     def add_submodule(self, submodule):
         self.submodules.append(submodule)
@@ -486,12 +484,7 @@ class ModuleImport:
         check_for_bad_multiload(self.full_name)
         # Update sysmodules if this is the first time we're
         # seeing the module being built by the builtin __import__.
-        if self.full_name == "mpmath.libmp.backend":
-            print("updating sysmodules")
-            print(self.full_name in sys.modules)
         update_sysmodules_from_in_progress(self.full_name)
-        if self.full_name == "mpmath.libmp.backend":
-            assert is_forwarding(sys.modules[self.full_name])
         self.enter_submodules()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -609,16 +602,30 @@ class ModuleImport:
         if "." not in self.full_name and self.is_exempt:
             return False
         loaded_module = sys.modules[self.full_name]
+        if not is_forwarding(loaded_module):
+            # In some cases it's possible for an in-progress
+            # multiload to not have an entry inserted into
+            # sys.modules until after a subsequent import runs.
+            # This happens because the module object placed
+            # into sys.modules doesn't get created until
+            # the code for the module is run, and the __init__.py
+            # file for the containing folder is run first.
+            # More concretely say a.b imports e from a.c.d
+            # using a fromlist style import, and a.c's __init__
+            # first imports a.c.f which also imports e from
+            # a.c.d using a fromlist style import. In this case,
+            # the second import will run before the module
+            # object for a.c.d is even in sys.modules.
+            # If that's the case, this may be the first time
+            # we see the newly created module object.
+            # In that case, immediately swap it in here.
+            update_sysmodules_from_in_progress(self.full_name)
+            loaded_module = sys.modules[self.full_name]
         # Multiloading a submodule of a non-multiloaded parent
         # module isn't currently supported, though it may be
         # possible in general, that case isn't debugged yet.
         # We've already returned here in the case of an exempt
         # module, so this has to be true.
-        if self.full_name == "mpmath.libmp.backend":
-            print("capturing")
-        if not is_forwarding(loaded_module):
-            print(self.full_name)
-            print(dir(loaded_module))
         assert is_forwarding(loaded_module)
         # TODO: refactor this out into a separate routine that can be
         # reused in the multiload and non-multiload cases.
