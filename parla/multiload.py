@@ -318,14 +318,10 @@ def update_sysmodules_from_in_progress(full_name):
     if is_exempt(full_name, sys_cached):
         return
     incomplete_forward = get_in_progress(full_name)
-    #if incomplete_forward is None:
-    #    print("None:", full_name)
-    #else:
-    #    print(full_name)
-    assert incomplete_forward is not None
     if is_forwarding(sys_cached):
-        assert sys_cached is incomplete_forward
+        assert incomplete_forward is None or sys_cached is incomplete_forward
         return
+    assert incomplete_forward is not None
     current_context_id = multiload_thread_locals.current_context.__index__()
     assert current_context_id not in incomplete_forward._parla_base_modules
     incomplete_forward._parla_base_modules[current_context_id] = sys_cached
@@ -489,8 +485,6 @@ class ModuleImport:
         if self.full_name in sys.modules:
             self.module_was_present = True
         if may_need_multiload(self.full_name):
-            #if self.full_name == "mpmath.libmp.six":
-            #    print("marked")
             mark_in_progress(self.full_name)
         else:
             check_for_bad_multiload(self.full_name)
