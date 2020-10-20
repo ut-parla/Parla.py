@@ -173,12 +173,22 @@ def forward_setattr(self, name, value):
         return object.__setattr__(self, name, value)
     return object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()].__setattr__(name, value)
 
+# Hopefully we'll overload this later using a technique like
+# the one used in forbiddenfruit, so cache the original version first.
 builtin_module_setattr = types.ModuleType.__setattr__
 
 def module_setattr(self, name, value):
     if is_forwarding(self):
         return forward_setattr(self, name, value)
     return builtin_module_setattr(self, name, value)
+
+def mark_capturing(full_name, capturing):
+    forward = get_in_progress(full_name)
+    attrname = "_parla_capturing_import"
+    previous = getattr(forward, attrname, None)
+    if previous is not None:
+        previous.is_multiload = False
+    builtin_module_setattr(forward, attrname, capturing)
 
 # Need forbiddenfruit module to do this.
 #curse(types.ModuleType, "__setattr__", module_setattr)
@@ -470,8 +480,9 @@ class ModuleImport:
         self.full_name = full_name
         self.short_name = short_name
         self.is_pruned = True
-        self.was_in_progress = full_name in sys.modules
-        self.module_was_present = False
+        # Are either of these actually needed?
+        # self.was_in_progress = full_name in sys.modules
+        # self.module_was_present = False
         self.is_multiload = False
 
     def add_submodule(self, submodule):
@@ -481,35 +492,36 @@ class ModuleImport:
         for submodule in self.submodules:
             submodule.__enter__()
 
+    def mark_capturing(self):
+        forward = get_in_progress(self.full_name)
+        assert forward is not None
+        attrname = "_parla_capturing_import"
+        previous = getattr(forward, attrname, None)
+        self.is_multiload = True
+        if previous is not None:
+            previous.is_multiload = False
+        builtin_module_setattr(forward, attrname, capturing)
+
     def __enter__(self):
-        if self.full_name in sys.modules:
-            self.module_was_present = True
+        #if self.full_name in sys.modules:
+        #    self.module_was_present = True
         if may_need_multiload(self.full_name):
             mark_in_progress(self.full_name)
+            self.mark_capturing()
+        elif should_supersede(self.full_name):
+            self.mark_capturing()
         else:
             check_for_bad_multiload(self.full_name)
             # Update sysmodules if this is the first time we're
             # seeing the module being built by the builtin __import__.
             update_sysmodules_from_in_progress(self.full_name)
-            self.enter_submodules()
+        self.enter_submodules()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if not self.was_in_progress and check_in_progress(self.full_name):
+        if self.is_multiload:
             pop_in_progress(self.full_name)
         for submodule in self.submodules:
             submodule.__exit__(exc_type, exc_val, exc_tb)
-
-    @property
-    def in_progress(self):
-        try:
-            return self.in_progress_cache
-        except AttributeError:
-            pass
-        if check_in_progress(self.full_name):
-            self.in_progress_cache = True
-            return True
-        self.in_progress_cache = False
-        return False
 
     def tag_for_pruning(self):
         self.is_pruned = False
@@ -578,40 +590,24 @@ class ModuleImport:
         # so this is the earliest we can stop.
         if "." not in self.full_name and is_exempt(self.full_name, sys.modules[self.full_name]):
             return False
-        if not self.module_was_present and self.full_name in sys.modules:
-            self.is_multiload = True
+        # A module that's already been multiloaded
+        if get_in_progress(self.full_name) is None:
+            loaded_module = sys.modules[self.full_name]
+            assert is_forwarding(loaded_module)
+        elif self.is_multiload:
+            in_progress = get_in_progress(self.full_name)
             update_sysmodules_from_in_progress(self.full_name)
             loaded_module = sys.modules.pop(self.full_name)
             assert loaded_module is get_in_progress(self.full_name)
         else:
             loaded_module = sys.modules[self.full_name]
-            if not is_forwarding(loaded_module):
-                # In some cases it's possible for an in-progress
-                # multiload to not have an entry inserted into
-                # sys.modules until after a subsequent import runs.
-                # This happens because the module object placed
-                # into sys.modules doesn't get created until
-                # the code for the module is run, and the __init__.py
-                # file for the containing folder is run first.
-                # More concretely say a.b imports e from a.c.d
-                # using a fromlist style import, and a.c's __init__
-                # first imports a.c.f which also imports e from
-                # a.c.d using a fromlist style import. In this case,
-                # the second import will run before the module
-                # object for a.c.d is even in sys.modules.
-                # If that's the case, this may be the first time
-                # we see the newly created module object.
-                # In that case, immediately swap it in here.
-                update_sysmodules_from_in_progress(self.full_name)
-                loaded_module = sys.modules[self.full_name]
+            assert is_forwarding(loaded_module)
         # Multiloading a submodule of a non-multiloaded parent
         # module isn't currently supported, though it may be
         # possible in general, that case isn't debugged yet.
         # We've already returned here in the case of an exempt
         # module, so this has to be true.
         assert is_forwarding(loaded_module)
-        # TODO: refactor this out into a separate routine that can be
-        # reused in the multiload and non-multiload cases.
         # This is the earliest we can tell if names listed in
         # a fromlist in a from-style import are actually associated
         # with submodules that we need to manage, so prune away
@@ -634,6 +630,9 @@ class ModuleImport:
 # already a multiload in progress.
 def may_need_multiload(full_name):
     return full_name not in sys.modules and not check_in_progress(full_name)
+
+def should_supersede(full_name):
+    return full_name not in sys.modules and check_in_progress(full_name)
 
 # Raise an error if this is a module that ought to be multiloaded,
 # but has instead been already imported.
