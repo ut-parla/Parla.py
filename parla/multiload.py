@@ -496,11 +496,14 @@ class ModuleImport:
         forward = get_in_progress(self.full_name)
         assert forward is not None
         attrname = "_parla_capturing_import"
-        previous = getattr(forward, attrname, None)
+        try:
+            previous = object.__getattribute__(forward, attrname)
+        except AttributeError:
+            previous = None
         self.is_multiload = True
         if previous is not None:
             previous.is_multiload = False
-        builtin_module_setattr(forward, attrname, capturing)
+        builtin_module_setattr(forward, attrname, self)
 
     def __enter__(self):
         #if self.full_name in sys.modules:
