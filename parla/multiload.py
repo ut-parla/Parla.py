@@ -576,6 +576,26 @@ class ModuleImport:
             did_work = did_work or submodule_did_work
         return did_work
 
+    def prepare(self, main_name):
+        if main_name != self.full_name and self.is_multiload:
+            # This is a hack that should be removable after
+            # the refactor to allow loading different sets
+            # of modules into distinct contexts.
+            # Conceptually this transforms imports of the style
+            # import a.b
+            # into
+            # import a
+            # import a.b
+            # The former case is broken due to how Python's
+            # builtin __import__ handles caching of stuff in sys.modules.
+            # In particular, since the current version of the code builds
+            # multiloads from the bottom up instead of handling the
+            # insertions/removals into/from sys.modules all at once for
+            # each environment.
+            builtin_import(self.full_name)
+        for submodule in self.submodules:
+            submodule.prepare(main_name)
+
     # See what changed after the import ran,
     # and restore the state to how it was before
     # so that the import can be safely rerun.
@@ -698,8 +718,13 @@ def import_override(name, glob = None, loc = None, fromlist = tuple(), level = 0
         full_name = get_full_name(name, glob, loc, fromlist, level)
         import_tree = build_import_tree(full_name, fromlist)
         with import_tree:
+            first_run = True
             for context in multiload_contexts:
                 with context:
+                    if not first_run:
+                        import_tree.prepare(full_name)
+                    else:
+                        first_run = False
                     ret = builtin_import(name, glob, loc, fromlist, level)
                     did_work = import_tree.capture()
                     if not did_work:
