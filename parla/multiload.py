@@ -5,6 +5,7 @@
     import parla
 """
 
+from gc import get_referrers
 import os
 import sys
 import threading
@@ -153,6 +154,11 @@ def get_in_progress(full_name):
 
 def pop_in_progress(full_name):
     return multiload_thread_locals.in_progress.pop(full_name)
+
+def insert_in_progress(full_name, module):
+    assert is_forwarding(module)
+    assert not check_in_progress(full_name)
+    multiload_thread_locals.in_progress[full_name] = module
 
 # Create all the replicas/contexts we want
 multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in range(NUMBER_OF_REPLICAS)]
@@ -358,15 +364,16 @@ def has_entry_for_current_environment(module):
 def register_module(forwarding_module, module):
     context = multiload_thread_locals.current_context.__index__()
     assert context not in forwarding_module._parla_base_modules
+    assert not hasattr(module, "_parla_context")
+    module._parla_context = context
     forwarding_module._parla_base_modules[context] = module
 
-class ModuleImportNew:
+class ModuleImport:
     def __init__(self, full_name, short_name):
         self.submodules = []
         self.full_name = full_name
         self.short_name = short_name
         self.is_pruned = True
-        self.was_present = False
     def add_submodule(self, submodule):
         self.submodules.append(submodule)
     def capture_module(self):
@@ -384,6 +391,8 @@ class ModuleImportNew:
             else:
                 wrapped_parent = parent_module
             if hasattr(wrapped_parent, self.short_name):
+                if self.full_name == "mpmath.functions.functions":
+                    print("setattr")
                 setattr(wrapped_parent, self.short_name, cached)
         sys.modules.pop(self.full_name)
         sys.modules[self.full_name] = cached
@@ -397,13 +406,16 @@ class ModuleImportNew:
             if cached is None:
                 if is_forwarding(current):
                     if not has_entry_for_current_environment(current):
-                        self.was_present = True
-                        multiload_thread_locals.in_progress[self.full_name] = sys.modules.pop(self.full_name)
+                        insert_in_progress(self.full_name, sys.modules.pop(self.full_name))
                 else:
                     if not is_exempt(self.full_name, current):
                         raise ImportError("Attempting to import module {} within a given execution context that has already been imported globally".format(self.full_name))
             else:
                 self.capture_module()
+        for submodule in self.submodules:
+            submodule.__enter__()
+    def tag_for_pruning(self):
+        self.is_pruned = False
     def prune_non_module_names(self, loaded_module):
         if self.is_pruned:
             return
@@ -424,12 +436,19 @@ class ModuleImportNew:
             # and names can be bound to other modules).
             # If it's already in-progress from an ongoing import
             # there will still be some kind of entry in sys.modules.
-            if loaded_submodule is None and submodule.is_multiload:
+            if loaded_submodule is None:
                 # Clear out the unneeded entry from the in-progress cache.
                 # for most things this is done in the __exit__
                 # method, but we're removing this submodule now
                 # so __exit__ won't be called later.
-                pop_in_progress(submodule.full_name)
+                if check_in_progress(submodule.full_name):
+                    if submodule.full_name == "mpmath.functions.functions":
+                        bad_module = sys.modules["mpmath.functions"].functions
+                        #for o in get_referrers(bad_module):
+                        #    print(o)
+                        print("bad import", multiload_thread_locals.current_context.__index__(), bad_module._parla_context)
+                        raise ImportError
+                    pop_in_progress(submodule.full_name)
             elif loaded_submodule is not None:
                 assert type(loaded_submodule) is types.ModuleType
                 assert is_submodule(loaded_submodule, loaded_module)
@@ -451,24 +470,27 @@ class ModuleImportNew:
         # during import, so we just clean up the cache.
         if current is None:
             if cached is not None and cached._parla_base_modules:
-                sys.modules[self.full_name] = cached
-            pop_in_progress(self.full_name)
+                if cached._parla_base_modules:
+                    sys.modules[self.full_name] = cached
+                pop_in_progress(self.full_name)
             # This branch is only supposed to happen during exception handling.
             # Raise an error if it happens during normal use.
             assert exc_val is not None
         else:
             if cached is not None:
                 self.capture_module()
-            if cached is None:
+            else:
+                #if not (is_forwarding(current) or is_exempt(self.full_name, current)):
+                #    print(self.full_name)
                 assert is_forwarding(current) or is_exempt(self.full_name, current)
  
-def build_import_tree_new(full_name, fromlist):
+def build_import_tree(full_name, fromlist):
     short_names = full_name.split(".")
     full_names = [".".join(short_names[:i+1]) for i in range(len(short_names))]
-    root = ModuleImportNew(full_names[0], short_names[0])
+    root = ModuleImport(full_names[0], short_names[0])
     previous = root
-    for full_name, short_name in zip(islice(full_names, 1, None)), islice(short_names, 1, None)):
-        submodule = ModuleImportNew(full_name, short_name)
+    for full_name, short_name in zip(islice(full_names, 1, None), islice(short_names, 1, None)):
+        submodule = ModuleImport(full_name, short_name)
         previous.add_submodule(submodule)
         previous = submodule
     if fromlist:
@@ -477,26 +499,43 @@ def build_import_tree_new(full_name, fromlist):
             if name == "*":
                 continue
             submodule_full_name = ".".join([full_name, name])
-            submodule = ModuleImportNew(submodule_full_name, name)
+            submodule = ModuleImport(submodule_full_name, name)
             previous.add_submodule(submodule)
     return root
 
 def import_in_current(name, glob = None, loc = None, fromlist = tuple(), level = 0):
     full_name = get_full_name(name, glob, loc, fromlist, level)
-    import_tree = build_import_tree_new(full_name, fromlist)
+    import_tree = build_import_tree(full_name, fromlist)
     with import_tree:
+        #if full_name == "mpmath.functions.functions" or full_name == "mpmath.functions" and "functions" in fromlist:
+        #    s = "mpmath.functions.functions"
+        #    print("before", s in sys.modules, check_in_progress(s))
+        #if full_name == "mpmath.functions.functions":
+        #    print("before", "mpmath.functions" in sys.modules)
+        #    print([s for s in sys.modules.keys() if s.startswith("mpmath.functions")])
+        if full_name == "mpmath" and not fromlist:
+            print("*" * 40)
+        was_present = "mpmath.functions" in sys.modules and hasattr(sys.modules["mpmath.functions"], "functions")
         builtin_import(name, glob, loc, fromlist, level)
+        if not was_present and "mpmath.functions" in sys.modules and hasattr(sys.modules["mpmath.functions"], "functions"):
+            print(full_name)
+        #if full_name == "mpmath.functions.functions" or full_name == "mpmath.functions" and "functions" in fromlist:
+        #    s = "mpmath.functions.functions"
+        #    print("after", s in sys.modules, check_in_progress(s))
+        #if full_name == "mpmath.functions.functions" or full_name == "mpmath" and fromlist is not None and "functions" in fromlist:
+        #    print("after", "mpmath.functions" in sys.modules)
+        #    print([s for s in sys.modules.keys() if s.startswith("mpmath.functions")])
 
 @contextmanager
 def outermost_multiload_here():
-    assert multiload_thread_locals.multiloading = True
+    assert multiload_thread_locals.multiloading
     multiload_thread_locals.multiloading = False
     try:
         yield
     finally:
         multiload_thread_locals.multiloading = True
 
-def import_override_new(name, glob = None, loc = None, fromlist = tuple(), level = 0):
+def import_override(name, glob = None, loc = None, fromlist = tuple(), level = 0):
     if multiload_thread_locals.multiloading:
         with outermost_multiload_here():
             for context in multiload_contexts:
@@ -504,6 +543,7 @@ def import_override_new(name, glob = None, loc = None, fromlist = tuple(), level
                     import_in_current(name, glob, loc, fromlist, level)
     else:
         import_in_current(name, glob, loc, fromlist, level)
+    full_name = get_full_name(name, glob, loc, fromlist, level)
     if fromlist:
         return sys.modules[full_name]
     return sys.modules[full_name.split(".", 1)[0]]
