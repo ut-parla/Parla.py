@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <dlfcn.h>
+#include <assert.h>
 
 #include "log.h"
 
@@ -21,21 +22,19 @@
 
 /// Declare a stub for a symbol, n.
 #define _$_STUB(n) static void* _$_mangle_stub(n) = NULL; \
-    static void* _$_mangle_resolver(n)() { __stub$init_all_stubs(); \
-        DEBUG("Loading symbol: %s", #n); return _$_mangle_stub(n); } \
+    static void* _$_mangle_resolver(n)() { \
+        void *lib = dlmopen(LM_ID_BASE, NULL, RTLD_LAZY); \
+        if(lib == NULL) { perror("dlmopen failed"); abort(); } \
+        _$_mangle_stub(n) = dlsym(lib, #n); assert(_$_mangle_stub(n)); \
+        return _$_mangle_stub(n); } \
     int n() __attribute__((ifunc (_$_string(_$_mangle_resolver(n)))))
+//        DEBUG("Binding ifunc symbol: %s = %p", #n, _$_mangle_stub(n)); \
 
 /// Begin the init function for this stub library.
-#define _$_START_INIT(so) static void __stub$init_all_stubs() { \
-    DEBUG("Opening library to stub. "); \
-    static volatile int __stub$inited = 0; \
-    if (__glibc_likely(__stub$inited)) return; \
-    DEBUG("Opening library to stub."); \
-    void *lib = dlmopen(LM_ID_BASE, so, RTLD_NOW); \
-    if(lib == NULL) { perror("dlmopen failed"); abort(); }
+#define _$_START_INIT(so) // No longer needed
 /// Load a stub inside the init function
-#define _$_LOAD_STUB(n) _$_mangle_stub(n) = dlsym(lib, #n)
+#define _$_LOAD_STUB(n) // No longer needed
 /// End the init function for this stub library.
-#define _$_END_INIT() __stub$inited = 1; }
+#define _$_END_INIT() // No longer needed
 
 #endif
