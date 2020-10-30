@@ -305,7 +305,7 @@ class ModuleImport:
             if wrapped_submodule is None:
                 continue
             sys.modules[submodule_name] = wrapped_submodule
-            for attr_name in dir(wrapped_submodule):
+            for attr_name in wrapped_submodule.__dict__.keys():
                 attr = getattr(wrapped_submodule, attr_name)
                 if type(attr) is types.ModuleType:
                     if self.is_submodule_name(attr.__name__):
