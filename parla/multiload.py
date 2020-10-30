@@ -5,7 +5,7 @@
     import parla
 """
 
-from gc import get_referrers
+from distutils.sysconfig import get_config_var
 import os
 import sys
 import threading
@@ -74,7 +74,7 @@ class MultiloadContext():
             with self:
                 self.saved_rtld = sys.getdlopenflags()
                 sys.setdlopenflags(self.saved_rtld | ctypes.RTLD_GLOBAL)
-                self.dlopen("libpython3.{}_parla_stub.so".format(sys.version_info[1]))
+                self.dlopen("{}_parla_stub.so".format(get_config_var("INSTSONAME").split(".so")[0]))
                 sys.setdlopenflags(self.saved_rtld)
 
     def dispose(self):
