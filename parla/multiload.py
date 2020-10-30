@@ -74,7 +74,7 @@ class MultiloadContext():
             with self:
                 self.saved_rtld = sys.getdlopenflags()
                 sys.setdlopenflags(self.saved_rtld | ctypes.RTLD_GLOBAL)
-                self.dlopen("libpython3.7m_parla_stub.so")
+                self.dlopen("libpython3.{}_parla_stub.so".format(sys.version_info[1]))
                 sys.setdlopenflags(self.saved_rtld)
 
     def dispose(self):
@@ -300,8 +300,6 @@ class ModuleImport:
         existing_names = self.collect_names_from_sys()
         entries.update({name : sys.modules.pop(name) for name in existing_names})
         for submodule_name, submodule in entries.items():
-            if not is_forwarding(submodule):
-                print(submodule.__name__)
             assert is_forwarding(submodule)
             wrapped_submodule = get_module_for_current_context(submodule)
             if wrapped_submodule is None:
@@ -336,7 +334,10 @@ class ModuleImport:
             assert forward is not None and is_forwarding(forward)
             sys.modules[forward_name] = forward
             if current is not None:
-                for attr_name in dir(current):
+                # Use __dict__.keys() since numpy uses a lazy import
+                # for numpy.testing and this logic breaks when
+                # a lazy import is triggered here.
+                for attr_name in current.__dict__.keys():
                     attr = getattr(current, attr_name)
                     if type(attr) is types.ModuleType:
                         if self.is_submodule_name(attr.__name__):
