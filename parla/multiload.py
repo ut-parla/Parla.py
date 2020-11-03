@@ -74,6 +74,10 @@ class MultiloadContext():
             with self:
                 self.saved_rtld = sys.getdlopenflags()
                 sys.setdlopenflags(self.saved_rtld | ctypes.RTLD_GLOBAL)
+                self.dlopen("libutil.so.1")
+                self.dlopen("librt.so.1")
+                self.dlopen("libm.so.6")
+                self.dlopen("libpthread.so.0")
                 self.dlopen("{}_parla_stub.so".format(get_config_var("INSTSONAME").split(".so")[0]))
                 sys.setdlopenflags(self.saved_rtld)
 
