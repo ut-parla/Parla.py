@@ -48,7 +48,6 @@ context_affinity_override_set_allowed_cpus_py.argtypes = [ctypes.c_long, ctypes.
 context_dlopen = _parla_supervisor.context_dlopen
 context_dlopen.argtypes = [ctypes.c_long, ctypes.c_char_p]
 
-
 class virt_dlopen_state(ctypes.Structure):
     _fields_ = [("enabled", ctypes.c_char),
                 ("lm", ctypes.c_long)]
@@ -57,6 +56,10 @@ virt_dlopen_swap_state = _parla_supervisor.virt_dlopen_swap_state
 virt_dlopen_swap_state.argtypes = [ctypes.c_char, ctypes.c_long]
 virt_dlopen_swap_state.restype = virt_dlopen_state
 
+# Load a bunch of extension modules to fill the cache
+
+for i in range(128):
+    importlib.import_module(f"parla.cache_filler_{i}")
 
 # Context representation
 
