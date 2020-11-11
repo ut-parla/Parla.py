@@ -1,0 +1,41 @@
+#! /bin/sh
+
+# Turn off LD_DEBUG temporarily to make debugging easier
+if [ -n "$LD_DEBUG" ]; then
+    LD_DEBUG_OLD="$LD_DEBUG"
+    unset LD_DEBUG
+fi
+
+# Print usage if we don't have enough arguments
+if [ "$#" -lt 2 ]; then
+  echo "Usage: $0 <libc_dir> <cmd> ..." >&2
+  exit 253
+fi
+
+# Get arguments and environment information
+ARCH=`uname -m | tr "_" "-"`
+LIBDIR="${1%/}/lib"
+PROGRAM="`which "$2"`"
+shift
+shift
+
+# Find ld.so
+for f in $LIBDIR/ld-linux-$ARCH.so.*; do
+    if [ -n "$LD_LINUX_SO" ]; then
+        echo "ERROR: multiple ld-linux-$ARCH.so.* files found in $LIBDIR." >&2
+        exit 254
+    fi
+    LD_LINUX_SO="$f"
+done
+
+# Set LD_DEBUG again and report info if it was set
+if [ -n "$LD_DEBUG_OLD" ]; then
+  echo "Using ld.so $LD_LINUX_SO with additional library path $LIBDIR" >&2
+  export LD_DEBUG="$LD_DEBUG_OLD"
+fi
+
+# Setup LD_LIBRARY_PATH to point to the matching libc
+export LD_LIBRARY_PATH="$LIBDIR${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
+# Start the program using an explicit ld.so call
+$LD_LINUX_SO "$PROGRAM" "$@"

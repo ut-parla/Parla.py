@@ -1,20 +1,21 @@
+import threading
 from contextlib import contextmanager
 
 import logging
 from functools import wraps, lru_cache
-from typing import Dict
-
-import numpy
+from typing import Dict, List, Optional, Collection
 
 from parla import array
 from parla.array import ArrayType
 from . import device
 from .device import *
+from .environments import EnvironmentComponentInstance, TaskEnvironment, EnvironmentComponentDescriptor
 
 logger = logging.getLogger(__name__)
 
 try:
     import cupy
+    import cupy.cuda
 except (ImportError, AttributeError):
     import inspect
     # Ignore the exception if the stack includes the doc generator
@@ -22,13 +23,13 @@ except (ImportError, AttributeError):
         raise
     cupy = None
 
-__all__ = ["gpu"]
+__all__ = ["gpu", "GPUComponent", "MultiGPUComponent"]
 
 
-def _wrap_for_device(ctx, f):
+def _wrap_for_device(ctx: "_GPUDevice", f):
     @wraps(f)
     def ff(*args, **kwds):
-        with ctx.context():
+        with ctx._device_context():
             return f(*args, **kwds)
     return ff
 
@@ -50,7 +51,7 @@ class _GPUMemory(Memory):
         return _DeviceCUPy(self.device)
 
     def __call__(self, target):
-        with self.device.context():
+        with self.device._device_context():
             if cupy.cuda.Device() != getattr(target, "device", None):
                 logger.debug("Moving data: %r => %r", getattr(target, "device", None), cupy.cuda.Device())
                 return cupy.asarray(target)
@@ -69,11 +70,14 @@ class _GPUDevice(Device):
                     cvus=attrs["MultiProcessorCount"])
 
     @contextmanager
-    def context(self):
-        with cupy.cuda.Device(self.index):
-            with cupy.cuda.Stream(null=False, non_blocking=True) as stream:
-                yield
-                stream.synchronize()
+    def _device_context(self):
+        with self.cupy_device:
+            yield
+
+    @property
+    @lru_cache(None)
+    def cupy_device(self):
+        return cupy.cuda.Device(self.index)
 
     @lru_cache(None)
     def memory(self, kind: MemoryKind = None):
@@ -84,10 +88,13 @@ class _GPUDevice(Device):
 
 
 class _GPUArchitecture(Architecture):
+    _devices: List[_GPUDevice]
+
     def __init__(self, name, id):
         super().__init__(name, id)
         devices = []
         if not cupy:
+            self._devices = []
             return
         for device_id in range(2**16):
             cupy_device = cupy.cuda.Device(device_id)
@@ -131,3 +138,91 @@ class _CuPyArrayType(ArrayType):
 
 if cupy:
     array._register_array_type(cupy.ndarray, _CuPyArrayType())
+
+# Integration with parla.environments
+
+class GPUComponentInstance(EnvironmentComponentInstance):
+    stream: cupy.cuda.Stream
+    gpus: List[_GPUDevice]
+
+    def __init__(self, descriptor: "GPUComponent", env: TaskEnvironment):
+        super().__init__(descriptor)
+        gpus = [d for d in env.placement if isinstance(d, _GPUDevice)]
+        assert len(gpus) == 1
+        self.gpu = gpus[0]
+        with self.gpu.cupy_device:
+            self.stream = cupy.cuda.Stream(null=False, non_blocking=True)
+
+    def __enter__(self):
+        self.gpus[0].cupy_device.__enter__()
+        self.stream.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stream.__exit__(exc_type, exc_val, exc_tb)
+        return self.gpus[0].cupy_device.__exit__(exc_type, exc_val, exc_tb)
+
+class GPUComponent(EnvironmentComponentDescriptor):
+    """A single GPU CUDA component which configures the environment to use the specific GPU using a single
+    non-blocking stream
+
+    """
+
+    def combine(self, other):
+        assert isinstance(other, GPUComponent)
+        return self
+
+    def __call__(self, env: TaskEnvironment) -> GPUComponentInstance:
+        return GPUComponentInstance(self, env)
+
+
+class _GPULocals(threading.local):
+    _gpus: Optional[Collection[_GPUDevice]]
+
+    def __init__(self):
+        super(_GPULocals, self).__init__()
+        self._gpus = None
+
+    @property
+    def gpus(self):
+        if self._gpus:
+            return self._gpus
+        else:
+            raise RuntimeError("No GPUs configured for this context")
+
+_gpu_locals = _GPULocals()
+
+def get_gpus() -> Collection[Device]:
+    return _gpu_locals.gpus
+
+
+class MultiGPUComponentInstance(EnvironmentComponentInstance):
+    gpus: List[_GPUDevice]
+
+    def __init__(self, descriptor: "MultiGPUComponent", env: TaskEnvironment):
+        super().__init__(descriptor)
+        self.gpus = [d for d in env.placement if isinstance(d, _GPUDevice)]
+        assert self.gpus
+
+    def __enter__(self):
+        assert _gpu_locals._gpus is None
+        _gpu_locals._gpus = self.gpus
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        assert _gpu_locals._gpus == self.gpus
+        _gpu_locals._gpus = None
+        return False
+
+class MultiGPUComponent(EnvironmentComponentDescriptor):
+    """A multi-GPU CUDA component which exposes the GPUs to the task via `get_gpus`.
+
+    The task code is responsible for selecting and using the GPUs and any associated streams.
+    """
+
+    def combine(self, other):
+        assert isinstance(other, MultiGPUComponent)
+        return self
+
+    def __call__(self, env: TaskEnvironment) -> MultiGPUComponentInstance:
+        return MultiGPUComponentInstance(self, env)

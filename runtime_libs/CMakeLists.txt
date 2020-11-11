@@ -7,9 +7,11 @@ set(CMAKE_C_STANDARD 11)
 
 add_library(parla_supervisor SHARED virt_dlopen.c supervisor_wrappers.c log.c)
 target_link_libraries(parla_supervisor dl)
+install(TARGETS parla_supervisor DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 
 add_library(parla_context SHARED affinity_override.c log.c)
 target_link_libraries(parla_context dl)
+install(TARGETS parla_context DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 
 add_custom_target(python_stubs)
 
@@ -30,17 +32,10 @@ foreach(pylib ${Python_LIBRARIES})
         COMMENT "Generating stub library for ${pylib_full_name}."
         VERBATIM
     )
-        
-    #add_custom_command(
-    #    "generate_${pylib_name}_stub"
-    #    COMMAND "bash ${CMAKE_SOURCE_DIR}/generate_stub_library.sh ${pylib}"
-    #    OUTPUT "${CMAKE_BINARY_DIR}/libstub_${pylib_name}.c"
-    #    WORKING_DIR "${CMAKE_BINARY_DIR}"
-    #    COMMENT "Generating stub library for ${pylib}"
-    #    VERBATIM
-    #)
-    add_library("${pylib_name}_stub" SHARED "${CMAKE_BINARY_DIR}/libstub_${pylib_name_with_ext}.c")
-    #add_dependencies("${pylib_name}_stub" "generate_${pylib_name}_stub")
-    add_dependencies(python_stubs "${pylib_name}_stub")
+    add_library("${pylib_name}_parla_stub" SHARED "${CMAKE_BINARY_DIR}/libstub_${pylib_name_with_ext}.c")
+    install(TARGETS "${pylib_name}_parla_stub" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    target_link_libraries("${pylib_name}_parla_stub" dl)
+    target_include_directories("${pylib_name}_parla_stub" PRIVATE ${CMAKE_SOURCE_DIR})
+    add_dependencies(python_stubs "${pylib_name}_parla_stub")
 endforeach(pylib)
 

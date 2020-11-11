@@ -8,6 +8,7 @@
 #include <errno.h>
 
 #include "virt_dlopen.h"
+#include "log.h"
 
 #include "preload_shim.h"
 
@@ -26,9 +27,9 @@ virt_dlopen_state virt_dlopen_swap_state(char enabled, long int lm) {
 
 PRELOAD_SHIM(void*, dlopen, (const char *filename, int flags)) {
     if (current_state.enabled) {
-        // Clear the global flag since it is not supported by dlmopen.
-        flags &= ~RTLD_GLOBAL;
+        DEBUG("Loading %s (%x) into %ld", filename, flags, current_state.lm);
         void* lib = dlmopen(current_state.lm, filename, flags);
+//        DEBUG("Loaded %p", lib);
         if (current_state.lm == LM_ID_NEWLM && lib != NULL) {
             int ret = dlinfo(lib, RTLD_DI_LMID, &current_state.lm);
             if (ret != 0) {

@@ -2,6 +2,9 @@ import logging
 from abc import ABCMeta, abstractmethod
 from typing import Dict
 
+# FIXME: This load of numpy will cause problems if it needs to be multiloaded
+# from parla import multiload
+# with multiload():
 import numpy as np
 
 from parla.device import Memory

@@ -2,20 +2,23 @@ import abc
 import logging
 import random
 from abc import abstractmethod, ABCMeta
-from collections import deque, namedtuple
+from collections import deque, namedtuple, defaultdict
 from contextlib import contextmanager
 import threading
 import time
+from itertools import combinations
 from numbers import Number
 from threading import Thread, Condition
-from typing import Optional, Collection, Union, Dict, List, Any, Tuple
+from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar
 
 from .device import get_all_devices, Device, Architecture
+from .environments import TaskEnvironmentRegistry, TaskEnvironment
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements"]
 
+# TODO: This module is pretty massively over-engineered the actual use case could use a much simpler scheduler.
 
 _ASSIGNMENT_FAILURE_WARNING_LIMIT = 32
 
@@ -88,41 +91,79 @@ class TaskException(TaskState):
 
 ResourceDict = Dict[str, Union[float, int]]
 
-class ResourceRequirements(object, metaclass=abc.ABCMeta):
-    __slots__ = ["resources", "ndevices"]
 
+class ResourceRequirements(object, metaclass=abc.ABCMeta):
+    __slots__ = ["resources", "ndevices", "tags"]
+
+    tags: FrozenSet[Any]
     resources: ResourceDict
     ndevices: int
 
-    def __init__(self, resources: ResourceDict, ndevices):
-        self.resources = resources
+    def __init__(self, resources: ResourceDict, ndevices: int, tags: Collection[Any]):
         assert all(isinstance(v, str) for v in resources.keys())
         assert all(isinstance(v, (float, int)) for v in resources.values())
+        self.resources = resources
         self.ndevices = ndevices
-        # if "memory" not in resources:
-        #     logger.info(
-        #         "memory resource not provided in device request for %r (add memory=x where x is the bytes used)",
-        #         architecture_or_device)
+        self.tags = frozenset(tags)
+
+    @property
+    def possibilities(self) -> Iterable["ResourceRequirements"]:
+        return [self]
 
     @property
     def exact(self):
         return False
 
+    @abstractmethod
+    def __parla_placement__(self):
+        raise NotImplementedError()
 
-class DeviceSetRequirements(ResourceRequirements):
-    __slots__ = ["devices"]
-    devices: List[Device]
 
-    def __init__(self, resources: ResourceDict, ndevices: int, devices: List[Device]):
-        super().__init__(resources, ndevices)
-        assert devices
-        assert all(isinstance(dd, Device) for dd in devices)
-        self.devices = list(devices)
+class EnvironmentRequirements(ResourceRequirements):
+    __slots__ = ["environment"]
+    environment: TaskEnvironment
+
+    def __init__(self, resources: ResourceDict, environment: TaskEnvironment, tags: Collection[Any]):
+        super().__init__(resources, len(environment.placement), tags)
+        self.environment = environment
+
+    @property
+    def devices(self):
+        return self.environment.placement
 
     @property
     def exact(self):
+        return True
+
+    def __parla_placement__(self):
+        return self.environment.__parla_placement__()
+
+    def __repr__(self):
+        return "EnvironmentRequirements({}, {})".format(self.resources, self.environment)
+
+
+class DeviceSetRequirements(ResourceRequirements):
+    __slots__ = ["devices"]
+    devices: FrozenSet[Device]
+
+    def __init__(self, resources: ResourceDict, ndevices: int, devices: Collection[Device], tags: Collection[Any]):
+        super().__init__(resources, ndevices, tags)
+        assert devices
+        assert all(isinstance(dd, Device) for dd in devices)
+        self.devices = frozenset(devices)
         assert len(self.devices) >= self.ndevices
+
+    @property
+    def possibilities(self) -> Iterable["DeviceSetRequirements"]:
+        return (DeviceSetRequirements(self.resources, self.ndevices, ds, self.tags)
+                for ds in combinations(self.devices, self.ndevices))
+
+    @property
+    def exact(self):
         return len(self.devices) == self.ndevices
+
+    def __parla_placement__(self):
+        return self.devices
 
     def __repr__(self):
         return "DeviceSetRequirements({}, {}, {}, exact={})".format(self.resources, self.ndevices, self.devices, self.exact)
@@ -132,15 +173,20 @@ class OptionsRequirements(ResourceRequirements):
     __slots__ = ["options"]
     options: List[List[Device]]
 
-    def __init__(self, resources, ndevices, options):
-        super().__init__(resources, ndevices)
+    def __init__(self, resources, ndevices, options, tags: Collection[Any]):
+        super().__init__(resources, ndevices, tags)
         assert len(options) > 1
         assert all(isinstance(a, Device) for a in options)
         self.options = options
 
     @property
-    def possibilities(self):
-        return (DeviceSetRequirements(self.resources, self.ndevices, ds) for ds in self.options)
+    def possibilities(self) -> Iterable[DeviceSetRequirements]:
+        return (opt
+                for ds in self.options
+                for opt in DeviceSetRequirements(self.resources, self.ndevices, ds, self.tags).possibilities)
+
+    def __parla_placement__(self):
+        return list(set(d for ds in self.options for d in ds))
 
     def __repr__(self):
         return "OptionsRequirements({}, {}, {})".format(self.resources, self.ndevices, self.options)
@@ -211,11 +257,16 @@ class Task:
     def run(self):
         ctx = get_scheduler_context()
         task_state = TaskException(RuntimeError("Unknown fatal error"))
-        assert isinstance(self.req, DeviceSetRequirements) and self.req.exact, "Task was not assigned before running."
-        for d in self.req.devices:
-            ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
+        assert self.assigned, "Task was not assigned before running."
+        assert isinstance(self.req, EnvironmentRequirements), \
+            "Task was not assigned a specific environment requirement before running."
         try:
-            with _scheduler_locals._devices_scope(self.req.devices):
+            # Allocate the resources used by this task (blocking)
+            for d in self.req.devices:
+                ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
+            # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
+            with _scheduler_locals._environment_scope(self.req.environment), self.req.environment:
+                # Run the task and assign the new task state
                 try:
                     assert isinstance(self._state, TaskRunning)
                     task_state = self._state.func(self, *self._state.args)
@@ -223,8 +274,11 @@ class Task:
                         task_state = TaskCompleted(None)
                 except Exception as e:
                     task_state = TaskException(e)
+                    logger.exception("Exception in task")
                 finally:
                     logger.info("Finally for task %r", self)
+                    # Deallocate all the resources, both from the allocation above and from the "assignment" done by
+                    # the scheduler.
                     for d in self.req.devices:
                         ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
                         ctx.scheduler._unassigned_resources.deallocate_resources(d, self.req.resources)
@@ -296,25 +350,28 @@ class SchedulerContext(metaclass=ABCMeta):
 
 
 class _SchedulerLocals(threading.local):
+    _environment: Optional[TaskEnvironment]
+    _scheduler_context_stack: List[SchedulerContext]
+
     def __init__(self):
         super(_SchedulerLocals, self).__init__()
         self._scheduler_context_stack = []
+        self._environment = None
 
     @property
-    def devices(self):
-        if hasattr(self, "_devices"):
-            return self._devices
+    def environment(self):
+        if self._environment:
+            return self._environment
         else:
-            raise InvalidSchedulerAccessException("Devices not set in this context")
+            raise InvalidSchedulerAccessException("TaskEnvironment not set in this context")
 
     @contextmanager
-    def _devices_scope(self, devices: List[Device]):
-        assert all(isinstance(d, Device) for d in devices)
-        self._devices = devices
+    def _environment_scope(self, env: TaskEnvironment):
+        self._environment = env
         try:
             yield
         finally:
-            self._devices = None
+            self._environment = None
 
     @property
     def scheduler_context(self) -> SchedulerContext:
@@ -331,11 +388,12 @@ def get_scheduler_context() -> SchedulerContext:
     return _scheduler_locals.scheduler_context
 
 
-def get_devices() -> List[Device]:
-    return _scheduler_locals.devices
+def get_devices() -> Collection[Device]:
+    return _scheduler_locals.environment.placement
 
 
 class ControllableThread(Thread, metaclass=ABCMeta):
+    _should_run: bool
     _monitor: threading.Condition
 
     def __init__(self):
@@ -466,6 +524,9 @@ class ResourcePool:
     _monitor: Condition
     _devices: Dict[Device, Dict[str, float]]
 
+    # Resource pools track device resources. Environments are a separate issue and are not tracked here. Instead,
+    # tasks will consume resources based on their devices even though those devices are bundled into an environment.
+
     def __init__(self, multiplier):
         self._multiplier = multiplier
         self._monitor = threading.Condition(threading.Lock())
@@ -547,16 +608,26 @@ class ResourcePool:
 class AssignmentFailed(Exception):
     pass
 
-
-def shuffled(l):
-    l = list(l)
-    random.shuffle(l)
-    return l
-
+_T = TypeVar('_T')
+def shuffled(lst: Iterable[_T]) -> List[_T]:
+    """Shuffle a list non-destructively."""
+    lst = list(lst)
+    random.shuffle(lst)
+    return lst
 
 class Scheduler(ControllableThread, SchedulerContext):
-    def __init__(self, n_threads, period=0.01, max_worker_queue_depth=2):
+    _environments: TaskEnvironmentRegistry
+    _worker_threads: List[WorkerThread]
+    _unassigned_resources: ResourcePool
+    _available_resources: ResourcePool
+    period: float
+    max_worker_queue_depth: int
+
+    def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 0.01,
+                 max_worker_queue_depth: int = 2):
         super().__init__()
+        n_threads = n_threads or len(environments)
+        self._environments = TaskEnvironmentRegistry(*environments)
         self._exceptions = []
         self._active_task_count = 1 # Start with one count that is removed when the scheduler is "exited"
         self.max_worker_queue_depth = max_worker_queue_depth
@@ -626,49 +697,66 @@ class Scheduler(ControllableThread, SchedulerContext):
                         except IndexError:
                             return None
 
-    def _try_assignment(self, req: DeviceSetRequirements):
-        selected_devices: List[Device] = []
-        for d in shuffled(req.devices):
-            assert len(selected_devices) < req.ndevices
-            assert isinstance(d, Device)
-            if self._unassigned_resources.allocate_resources(d, req.resources):
-                selected_devices.append(d)
-                # If we have all out devices then break.
-                if len(selected_devices) == req.ndevices:
-                    break
-        if len(selected_devices) == req.ndevices:
-            ret = DeviceSetRequirements(req.resources, req.ndevices, selected_devices)
-            assert ret.exact
-            return ret
-        else:
+    def _try_assignment(self, req: EnvironmentRequirements) -> bool:
+        # Allocate available resources
+        allocated_devices: List[Device] = []
+        try:
+            for d in shuffled(req.devices):
+                assert len(allocated_devices) < req.ndevices
+                assert isinstance(d, Device)
+                if self._unassigned_resources.allocate_resources(d, req.resources):
+                    allocated_devices.append(d)
+                else:
+                    raise AssignmentFailed()
+            # Select an environment the matches the allocated resources.
+            return True
+        except AssignmentFailed:
             # Free any resources we already assigned
-            for d in selected_devices:
+            for d in allocated_devices:
                 self._unassigned_resources.deallocate_resources(d, req.resources)
-            return None
+            return False
 
     def run(self) -> None:
-        try:
+        # noinspection PyBroadException
+        try: # Catch all exception to report them usefully
             while self._should_run:
                 task: Optional[Task] = self._dequeue_task()
                 if not task:
                     # Exit if the dequeue fails. This implies a failure or shutdown.
                     break
 
-                logger.info("Task %r: Assigning", task)
-                if isinstance(task.req, OptionsRequirements):
+                if not task.assigned:
+                    # Build a list of environments with "qualities" assigned based on how well they match a possible
+                    # option for the task
+                    env_match_quality = defaultdict(lambda: 0)
                     for opt in shuffled(task.req.possibilities):
-                        a = self._try_assignment(opt)
-                        if a:
-                            task.assigned = True
-                            task.req = a
-                            break
-                elif isinstance(task.req, DeviceSetRequirements) and not task.assigned:
-                    a = self._try_assignment(task.req)
-                    if a:
-                        task.assigned = True
-                        task.req = a
+                        if isinstance(opt, DeviceSetRequirements):
+                            for e in self._environments.find_all(placement=opt.devices, tags=opt.tags, exact=False):
+                                intersection = e.placement & opt.devices
+                                match_quality = len(intersection) / len(e.placement)
+                                env_match_quality[e] = max(env_match_quality[e], match_quality)
+                        elif isinstance(opt, EnvironmentRequirements):
+                            env_match_quality[opt.environment] = max(env_match_quality[opt.environment], 1)
+                    environments_to_try = list(env_match_quality.keys())
+                    environments_to_try.sort(key=env_match_quality.__getitem__, reverse=True)
+                    print(task, ":", env_match_quality, "  ", environments_to_try)
 
-                if not task.req.exact:
+                    # Try the environments in order
+                    specific_requirements = None
+                    for env in environments_to_try:
+                        specific_requirements = EnvironmentRequirements(task.req.resources, env, task.req.tags)
+                        if self._try_assignment(specific_requirements):
+                            print(task, ":", env)
+                            task.assigned = True
+                            task.req = specific_requirements
+                            break
+                        else:
+                            print(task, ":", "no match")
+
+                # assert task.req.exact == task.assigned
+                assert not task.assigned or isinstance(task.req, EnvironmentRequirements)
+
+                if not task.assigned:
                     task._assignment_tries = getattr(task, "_assignment_tries", 0) + 1
                     if task._assignment_tries > _ASSIGNMENT_FAILURE_WARNING_LIMIT:
                         logger.warning("Task %r: Failed to assign devices. The required resources may not be "

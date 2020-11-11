@@ -3,16 +3,22 @@ A simple inner product implemented in Parla.
 
 This is probably the most basic example of Parla.
 """
-import numpy as np
 
-from parla import Parla
+from parla import Parla, multiload, TaskEnvironment
+from parla.multiload import MultiloadComponent, CPUAffinity
+
+with multiload():
+    import numpy as np
+
 from parla.array import copy, storage_size
-from parla.cuda import gpu
+from parla.cuda import gpu, GPUComponent
 from parla.cpu import cpu
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import *
 import time
 import os
+
+
 
 def main():
     divisions = 10
@@ -48,5 +54,12 @@ def main():
 
 
 if __name__ == '__main__':
-    with Parla():
+    # Setup task execution environments
+    envs = []
+    envs.extend([TaskEnvironment(placement=[d], components=[GPUComponent()]) for d in gpu.devices])
+    envs.extend([TaskEnvironment(placement=[d], components=[MultiloadComponent([CPUAffinity])]) for d in cpu.devices])
+    if "N_DEVICES" in os.environ:
+        envs = envs[:int(os.environ.get("N_DEVICES"))]
+    # Start Parla runtime
+    with Parla(envs):
         main()
