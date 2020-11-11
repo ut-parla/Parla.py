@@ -363,7 +363,7 @@ class ModuleImport:
                         assert wrapped_attr is not None
                         setattr(wrapped_submodule, attr_name, wrapped_attr)
         self.restore_module_specs()
-        #importlib.invalidate_caches()
+        importlib.invalidate_caches()
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.name in sys.modules and is_exempt(self.name, sys.modules[self.name]):
             multiload_thread_locals.in_progress.pop(self.name)
