@@ -252,6 +252,7 @@ def is_forwarding(module):
 # Technique to check if something is in the standard library.
 # Based loosely off of https://stackoverflow.com/a/22196023.
 exempt_cache = set(sys.builtin_module_names)
+exempt_cache.add("parla")
 external_cache = set()
 stdlib_base_paths = [os.path.abspath(p) for p in sys.path if p.startswith(sys.prefix) and "site-packages" not in p and p != sys.prefix]
 
