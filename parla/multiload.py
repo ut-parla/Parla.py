@@ -8,6 +8,7 @@
 from distutils.sysconfig import get_config_var
 import os
 import sys
+import gc
 import threading
 import types
 import importlib
@@ -60,6 +61,18 @@ virt_dlopen_swap_state.restype = virt_dlopen_state
 
 for i in range(128):
     importlib.import_module(f"parla.cache_filler_{i}")
+
+module_spec_cache = None
+for item in gc.get_objects():
+    if type(item) is dict:
+        for key in item:
+            if type(key) is tuple and len(key) == 2 and key[1] == "parla.cache_filler_0":
+                module_spec_cache = item
+
+assert module_spec_cache is not None
+# Our cache of module spec objects that we use
+# to update the main module_spec_cache.
+module_spec_caches_for_contexts = dict()
 
 # Context representation
 
@@ -150,6 +163,14 @@ multiload_contexts = [MultiloadContext() if i else MultiloadContext(0) for i in 
 for i in range(NUMBER_OF_REPLICAS):
     assert multiload_contexts[i].nsid == i
 free_multiload_contexts = list(multiload_contexts)
+
+def get_context_module_specs():
+    index = multiload_thread_locals.current_context.__index__()
+    context_specs = module_spec_caches_for_contexts.get(index)
+    if context_specs is None:
+        context_specs = dict()
+        module_spec_caches_for_contexts[index] = context_specs
+    return context_specs
 
 def allocate_multiload_context() -> MultiloadContext:
     return free_multiload_contexts.pop()
@@ -301,6 +322,28 @@ class ModuleImport:
                 continue
             existing_names.append(submodule_name)
         return existing_names
+    def cache_module_specs(self):
+        context_specs = get_context_module_specs()
+        for key, spec in module_spec_cache.items():
+            path, submodule_name = key
+            if self.is_submodule_name(submodule_name):
+                updated = module_spec_cache[key]
+                current = context_specs.get(key)
+                if current is None:
+                    context_specs[key] = updated
+                else:
+                    assert current is updated
+    def restore_module_specs(self):
+        context_specs = get_context_module_specs()
+        present_keys = []
+        for key in module_spec_cache:
+            path, submodule_name = key
+            if self.is_submodule_name(submodule_name):
+                present_keys.append(key)
+        for key in present_keys:
+            module_spec_cache.pop(key)
+        for key, spec in context_specs.items():
+            module_spec_cache[key] = spec
     def __enter__(self):
         entries = dict()
         multiload_thread_locals.in_progress[self.name] = entries
@@ -319,6 +362,8 @@ class ModuleImport:
                         wrapped_attr = get_module_for_current_context(attr)
                         assert wrapped_attr is not None
                         setattr(wrapped_submodule, attr_name, wrapped_attr)
+        self.restore_module_specs()
+        #importlib.invalidate_caches()
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.name in sys.modules and is_exempt(self.name, sys.modules[self.name]):
             multiload_thread_locals.in_progress.pop(self.name)
@@ -332,7 +377,8 @@ class ModuleImport:
                 forwarding_modules[submodule_name] = module
             current_wrapped = get_module_for_current_context(module)
             if current_wrapped is None:
-                register_module(module, sys.modules[submodule_name])
+                module_to_insert = sys.modules[submodule_name]
+                register_module(module, module_to_insert)
             assert get_module_for_current_context(module) is sys.modules[submodule_name]
         for forward_name, forward in forwarding_modules.items():
             current = get_module_for_current_context(forward)
@@ -349,6 +395,7 @@ class ModuleImport:
                     if type(attr) is types.ModuleType:
                         if self.is_submodule_name(attr.__name__):
                             setattr(current, attr_name, forwarding_modules[attr.__name__])
+        self.cache_module_specs()
         multiload_thread_locals.in_progress.pop(self.name)
 
 # Our modifications to the import machinery aren't
