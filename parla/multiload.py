@@ -418,6 +418,18 @@ class ModuleImport:
         self.cache_module_specs()
         multiload_thread_locals.in_progress.pop(self.name)
 
+def may_import_new_module(full_name, fromlist):
+    name_pieces = full_name.split(".")
+    for i in range(len(name_pieces)):
+        name = ".".join(name_pieces[:i])
+        if name not in sys.modules:
+            return True
+    module = sys.modules[full_name]
+    for name in fromlist:
+        if not hasattr(module, name):
+            return True
+    return False
+
 # Our modifications to the import machinery aren't
 # thread-safe unless concurrent threads are importing completely disjoint modules.
 # These locks manage that.
@@ -439,6 +451,8 @@ def import_in_current(name, glob = None, loc = None, fromlist = tuple(), level =
                 return
             if not is_forwarding(current_base) and not is_exempt(base_name, current_base):
                 raise ImportError("Attempting to import module {} within a given execution context that has already been imported globally".format(base_name))
+        if not may_import_new_module(full_name, fromlist):
+            builtin_import(name, glob, loc, fromlist, level)
         with ModuleImport(base_name):
             builtin_import(name, glob, loc, fromlist, level)
 
