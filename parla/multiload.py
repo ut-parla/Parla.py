@@ -94,7 +94,8 @@ class MultiloadContext():
                 self.dlopen("librt.so.1")
                 self.dlopen("libm.so.6")
                 self.dlopen("libpthread.so.0")
-                self.dlopen("{}_parla_stub.so".format(get_config_var("INSTSONAME").split(".so")[0]))
+                libpython_name_prefix = get_config_var("INSTSONAME").rstrip(".a").split(".so")[0]
+                self.dlopen("{}_parla_stub.so".format(libpython_name_prefix))
                 sys.setdlopenflags(self.saved_rtld)
 
     def dispose(self):
