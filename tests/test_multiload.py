@@ -1,4 +1,95 @@
-from pytest import skip
+import types
+
+def is_submodule(root, module):
+    return module.__name__.startswith(root.__name__ + ".") or module.__name__ == root.__name__
+
+def check_module(mod):
+    root_name = mod.__name__
+    submodules = {mod}
+    def collect_submodules(submodule):
+        for name in dir(submodule):
+            obj = getattr(submodule, name)
+            if type(obj) is types.ModuleType:
+                if is_submodule(mod, obj) and obj not in submodules:
+                    submodules.add(obj)
+                    collect_submodules(obj)
+    collect_submodules(mod)
+    for submodule in submodules:
+        print(submodule.__name__)
+    for submodule in submodules:
+        assert hasattr(submodule, "_parla_base_modules")
+        for key1, module1 in submodule._parla_base_modules.items():
+            for key2, module2 in submodule._parla_base_modules.items():
+                if key1 != key2:
+                    assert module1 is not module2
+
+def test_numpy():
+    import ctypes
+    import sys
+    from parla.multiload import multiload, multiload_contexts as contexts, multiload_thread_locals
+    assert "numpy" not in sys.modules
+    with multiload():
+        import numpy
+    def check_module(mod):
+        root_name = mod.__name__
+        submodules = {mod}
+        def collect_submodules(submodule):
+            for name in dir(submodule):
+                obj = getattr(submodule, name)
+                if type(obj) is types.ModuleType:
+                    if is_submodule(mod, obj) and obj not in submodules:
+                        submodules.add(obj)
+                        collect_submodules(obj)
+        collect_submodules(mod)
+        for submodule in submodules:
+            print(submodule.__name__)
+        for submodule in submodules:
+            assert hasattr(submodule, "_parla_base_modules")
+            for key1, module1 in submodule._parla_base_modules.items():
+                for key2, module2 in submodule._parla_base_modules.items():
+                    if key1 != key2:
+                        assert module1 is not module2
+    check_module(numpy)
+    ctypes.pythonapi.PyCapsule_GetPointer.restype = ctypes.c_void_p
+    ctypes.pythonapi.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
+    umath_apis = []
+    umath_api_capsules = []
+    #print(dir(numpy.core._multiarray_umath._UFUNC_API))
+    for context in contexts:
+        with context:
+            #print(multiload_thread_locals.current_context.nsid)
+            umath_apis.append(ctypes.pythonapi.PyCapsule_GetPointer(numpy.core._multiarray_umath._UFUNC_API, None))
+            umath_api_capsules.append(id(numpy.core._multiarray_umath._UFUNC_API))
+    umath_apis_2 = []
+    umath_api_capsules_2 = []
+    tanh_copies = []
+    for module in numpy.core._multiarray_umath._parla_base_modules.values():
+        umath_apis_2.append(ctypes.pythonapi.PyCapsule_GetPointer(module._UFUNC_API, None))
+        umath_api_capsules_2.append(id(module._UFUNC_API))
+        tanh_copies.append(id(module.tanh))
+    assert umath_apis == umath_apis_2
+    assert umath_api_capsules == umath_api_capsules_2
+    array_apis = []
+    for context in contexts:
+        with context:
+            array_apis.append(ctypes.pythonapi.PyCapsule_GetPointer(numpy.core._multiarray_umath._ARRAY_API, None))
+    mt_classes = []
+    mt_vtables = []
+    mt_classes = []
+    rand_ids = []
+    for context in contexts:
+        with context:
+            mt_vtables.append(ctypes.pythonapi.PyCapsule_GetPointer(numpy.random._mt19937.MT19937.__pyx_vtable__, None))
+            mt_classes.append(id(numpy.random._mt19937.MT19937))
+            rand_ids.append(id(numpy.random.mtrand.rand))
+    for i in range(len(contexts)):
+        for j in range(len(contexts)):
+            if i != j:
+                assert mt_vtables[i] != mt_vtables[j]
+                assert umath_apis[i] != umath_apis[j]
+                assert array_apis[i] != array_apis[j]
+                assert tanh_copies[i] != tanh_copies[j]
+                assert umath_api_capsules[i] != umath_api_capsules[j]
 
 # from parla.multiload import multiload, run_in_context, multiload_context
 #

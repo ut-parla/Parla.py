@@ -453,6 +453,7 @@ def import_in_current(name, glob = None, loc = None, fromlist = tuple(), level =
                 raise ImportError("Attempting to import module {} within a given execution context that has already been imported globally".format(base_name))
         if not may_import_new_module(full_name, fromlist):
             builtin_import(name, glob, loc, fromlist, level)
+            return
         with ModuleImport(base_name):
             builtin_import(name, glob, loc, fromlist, level)
 
