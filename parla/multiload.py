@@ -66,7 +66,7 @@ module_spec_cache = None
 for item in gc.get_objects():
     if type(item) is dict:
         for key in item:
-            if type(key) is tuple and len(key) == 2 and key[1] == "parla.cache_filler_0":
+            if type(key) is tuple and len(key) == 2 and type(key[1]) is str and key[1] == "parla.cache_filler_0":
                 module_spec_cache = item
 
 assert module_spec_cache is not None
@@ -254,6 +254,7 @@ def is_forwarding(module):
 # Based loosely off of https://stackoverflow.com/a/22196023.
 exempt_cache = set(sys.builtin_module_names)
 exempt_cache.add("parla")
+exempt_cache.add("_pytest")
 external_cache = set()
 stdlib_base_paths = [os.path.abspath(p) for p in sys.path if p.startswith(sys.prefix) and "site-packages" not in p and p != sys.prefix]
 
