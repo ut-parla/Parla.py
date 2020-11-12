@@ -80,6 +80,10 @@ class MultiloadContext():
     nsid: int
 
     def __init__(self, nsid = None):
+        # TODO: Does the allowed_cpu state belong here? It should protentially be lifted out into a CPUAffinity
+        #  component
+        self.allowed_cpus = os.sched_getaffinity(0)
+        self.cpu_affinity_stack = []
         if nsid is None:
             nsid = context_new()
             assert nsid >= 0
@@ -118,6 +122,7 @@ class MultiloadContext():
         for i, cpu in enumerate(cpus):
             cpu_array[i] = cpu
         context_affinity_override_set_allowed_cpus_py(self.nsid, len(cpus), cpu_array)
+        self.allowed_cpus = set(cpus)
 
     def dlopen(self, name: str):
         r = context_dlopen(self.nsid, name.encode("ascii"))
@@ -130,11 +135,16 @@ class MultiloadContext():
     def __enter__(self):
         multiload_thread_locals.context_stack.append(self)
         self.force_dlopen_in_context()
+        self.cpu_affinity_stack.append(os.sched_getaffinity(0))
+        os.sched_setaffinity(0, self.allowed_cpus)
+        # print(f"Pushing CPU affinity ({self.cpu_affinity_stack[-1]}) and forcing CPU affinity {self.allowed_cpus}")
         return self
 
     def __exit__(self, *args):
         removed = multiload_thread_locals.context_stack.pop()
         assert removed is self
+        # print(f"Popping CPU affinity ({self.cpu_affinity_stack[-1]})")
+        os.sched_setaffinity(0, self.cpu_affinity_stack.pop())
         multiload_thread_locals.context_stack[-1].force_dlopen_in_context()
 
 # Thread local storage wrappers

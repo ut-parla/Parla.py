@@ -13,6 +13,7 @@
 #include <sys/param.h>
 
 #include "preload_shim.h"
+#include "log.h"
 
 static cpu_set_t allowed_cpus = {-1, };
 
@@ -30,6 +31,16 @@ static inline cpu_set_t affinity_override_restrict_cpu_set(size_t cpusetsize, co
     CPU_ZERO(&tmp);
     CPU_AND_S(cpusetsize, &tmp, cpuset, &allowed_cpus);
     return tmp;
+}
+
+PRELOAD_SHIM(int, pthread_create, (pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine) (void *), void *arg)) {
+    init_pthread_create();
+    int ret = next_pthread_create(thread, attr, start_routine, arg);
+    if (ret == 0) {
+//        DEBUG("Setting CPU affinity for new thread: %p", (void*)*thread);
+        pthread_setaffinity_np(*thread, sizeof(allowed_cpus), &allowed_cpus);
+    }
+    return ret;
 }
 
 PRELOAD_SHIM(int, pthread_setaffinity_np, (pthread_t thread, size_t cpusetsize, const cpu_set_t *cpuset)) {
