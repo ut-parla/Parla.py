@@ -23,7 +23,7 @@ from .environments import EnvironmentComponentDescriptor, EnvironmentComponentIn
 
 #from forbiddenfruit import curse
 
-__all__ = ["multiload", "MultiloadContext", "MultiloadComponent", "CPUAffinity"]
+__all__ = ["multiload", "MultiloadContext", "MultiloadComponent", "CPUAffinity", "mark_module_as_global"]
 
 NUMBER_OF_REPLICAS = 12
 MAX_REPLICA_ID = 16
@@ -265,6 +265,13 @@ def is_forwarding(module):
 exempt_cache = set(sys.builtin_module_names)
 exempt_cache.add("parla")
 exempt_cache.add("_pytest")
+
+def mark_module_as_global(module):
+    if type(module) is types.ModuleType:
+        module = module.__name__
+    assert "." not in module
+    exempt_cache.add(module)
+
 external_cache = set()
 stdlib_base_paths = [os.path.abspath(p) for p in sys.path if p.startswith(sys.prefix) and "site-packages" not in p and p != sys.prefix]
 
