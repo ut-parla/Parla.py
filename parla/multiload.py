@@ -57,11 +57,17 @@ virt_dlopen_swap_state = _parla_supervisor.virt_dlopen_swap_state
 virt_dlopen_swap_state.argtypes = [ctypes.c_char, ctypes.c_long]
 virt_dlopen_swap_state.restype = virt_dlopen_state
 
-# Load a bunch of extension modules to fill the cache
-
+# Load a bunch of extension modules to saturate Python's cache of
+# shared object handles. See
+# https://github.com/python/cpython/blob/2d2af320d94afc6561e8f8adf174c9d3fd9065bc/Python/dynload_shlib.c#L51-L55
 for i in range(128):
     importlib.import_module(f"parla.cache_filler_{i}")
 
+# Get a reference to the cache of extension module spec objects
+# described in
+# https://github.com/python/cpython/blob/dff1ad509051f7e07e77d1e3ec83314d53fb1118/Python/import.c#L440-L454
+# so that we can swap out entries that correspond to the different
+# contexts.
 module_spec_cache = None
 for item in gc.get_objects():
     if type(item) is dict:
