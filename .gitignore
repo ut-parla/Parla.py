@@ -3,3 +3,4 @@ docs/build
 __pycache__
 .idea
 /runtime_libs/build/
+/build/

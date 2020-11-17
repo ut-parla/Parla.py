@@ -104,8 +104,8 @@ class MultiloadContext():
                 self.dlopen("librt.so.1")
                 self.dlopen("libm.so.6")
                 self.dlopen("libpthread.so.0")
-                libpython_name_prefix = get_config_var("INSTSONAME").rstrip(".a").split(".so")[0]
-                self.dlopen("{}_parla_stub.so".format(libpython_name_prefix))
+                libpython_name = get_config_var("INSTSONAME").rstrip(".a").split(".so")[0].lstrip("lib")
+                self.load_stub_library(libpython_name)
                 sys.setdlopenflags(self.saved_rtld)
 
     def dispose(self):
@@ -129,6 +129,14 @@ class MultiloadContext():
             cpu_array[i] = cpu
         context_affinity_override_set_allowed_cpus_py(self.nsid, len(cpus), cpu_array)
         self.allowed_cpus = set(cpus)
+
+    def load_stub_library(self, library_name):
+        """Load the stub library for `library_name`.
+
+        `library_name` should not include "lib" at the beginning or `.so*` at the end.
+        For example, if `library_name` is "cudart" this function will load "libcudart_parla_stub.so"."""
+        # TODO: This should probably look for the library in extra places so they don't need to be in LD_LIBRARY_PATH
+        self.dlopen(f"lib{library_name}_parla_stub.so")
 
     def dlopen(self, name: str):
         r = context_dlopen(self.nsid, name.encode("ascii"))
