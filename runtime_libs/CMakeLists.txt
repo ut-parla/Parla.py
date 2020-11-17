@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.13)
 project(parla_runtime_libs C)
 
 find_package(Python COMPONENTS Development)
@@ -17,25 +17,45 @@ add_custom_target(python_stubs)
 
 list(REMOVE_DUPLICATES Python_LIBRARIES)
 
+function(forwarding_library lib)
+    set(options VERSIONED)
+    set(oneValueArgs OUTPUT_NAME SONAME)
+    set(multiValueArgs)
+    cmake_parse_arguments(forwarding_library
+                          "${options}" "${oneValueArgs}"
+                          "${multiValueArgs}" ${ARGN} )
+    get_filename_component(lib_full_name "${lib}" NAME)
+    string(REGEX REPLACE "\\.so[.]*$" "" lib_libname "${lib_full_name}")
+    string(REGEX REPLACE "lib" "" lib_name "${lib_libname}")
+    string(REGEX REPLACE "lib" "" lib_name_with_ext "${lib_full_name}")
+    add_custom_command(
+        OUTPUT
+            "${CMAKE_BINARY_DIR}/libstub_${lib_name_with_ext}.c"
+            "${CMAKE_BINARY_DIR}/libstub_${lib_name_with_ext}.versionscript"
+        BYPRODUCTS "${CMAKE_BINARY_DIR}/libstub_${lib_name_with_ext}.versionscript.tmp"
+        COMMAND bash "${CMAKE_SOURCE_DIR}/generate_stub_library.sh" "${lib}" "${forwarding_library_SONAME}"
+        WORKING_DIR "${CMAKE_BINARY_DIR}"
+        COMMENT "Generating stub library for ${lib_full_name}."
+        VERBATIM
+    )
+    add_library("${lib_name}_parla_stub" SHARED "${CMAKE_BINARY_DIR}/libstub_${lib_name_with_ext}.c")
+    install(TARGETS "${lib_name}_parla_stub" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    target_link_libraries("${lib_name}_parla_stub" dl)
+    if(${forwarding_library_VERSIONED})
+        target_link_options("${lib_name}_parla_stub" PRIVATE -Wl,--version-script=${CMAKE_BINARY_DIR}/libstub_${lib_name_with_ext}.versionscript)
+    endif()
+    target_include_directories("${lib_name}_parla_stub" PRIVATE ${CMAKE_SOURCE_DIR})
+    set(${forwarding_library_OUTPUT_NAME} "${lib_name}" PARENT_SCOPE)
+endfunction()
+
 message("python libs: ${Python_LIBRARIES}")
 
 foreach(pylib ${Python_LIBRARIES})
     message(${pylib})
-    get_filename_component(pylib_full_name "${pylib}" NAME)
-    string(REGEX REPLACE "\\.so[.]*$" "" pylib_libname "${pylib_full_name}")
-    string(REGEX REPLACE "lib" "" pylib_name "${pylib_libname}")
-    string(REGEX REPLACE "lib" "" pylib_name_with_ext "${pylib_full_name}")
-    add_custom_command(
-        OUTPUT "${CMAKE_BINARY_DIR}/libstub_${pylib_name_with_ext}.c"
-        COMMAND bash "${CMAKE_SOURCE_DIR}/generate_stub_library.sh" "${pylib}"
-        WORKING_DIR "${CMAKE_BINARY_DIR}"
-        COMMENT "Generating stub library for ${pylib_full_name}."
-        VERBATIM
-    )
-    add_library("${pylib_name}_parla_stub" SHARED "${CMAKE_BINARY_DIR}/libstub_${pylib_name_with_ext}.c")
-    install(TARGETS "${pylib_name}_parla_stub" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
-    target_link_libraries("${pylib_name}_parla_stub" dl)
-    target_include_directories("${pylib_name}_parla_stub" PRIVATE ${CMAKE_SOURCE_DIR})
-    add_dependencies(python_stubs "${pylib_name}_parla_stub")
+    forwarding_library(${pylib} OUTPUT_NAME lib_name SONAME NULL)
+    add_dependencies(python_stubs "${lib_name}_parla_stub")
 endforeach(pylib)
 
+find_package(CUDAToolkit)
+
+forwarding_library(${CUDA_CUDART} VERSIONED)

@@ -1,12 +1,18 @@
 #! /bin/bash
 
 SO="$1"
+SONAME="\"$(basename "$SO")\""
+if [ -n "$2" ]; then
+  SONAME="$2"
+fi
 STUBSO="libstub_$(basename "$SO"| sed "s/^lib//")"
 STUBC="$STUBSO.c"
+STUBVERSIONSCRIPTTMP="$STUBSO.versionscript.tmp"
+STUBVERSIONSCRIPT="$STUBSO.versionscript"
 
 function extract_symbols() {
   readelf --wide --dyn-syms "$1" | \
-    sed -n 's/[[:space:]]\+/\t/g;/^\(\t[^\t]\+\)\{6\}\t[[:digit:]]\+/p'
+    sed -n 's/[[:space:]]\+/\t/g;/^\(\t[^\t]\+\)\{6\}\t[[:digit:]]\+\t[^[:space:]]\+/p'
 }
 
 function get_symbol_name() {
@@ -14,17 +20,37 @@ function get_symbol_name() {
     echo "$line" | cut -f 8
 }
 
+function escape_symbol_name() {
+    name="$1"
+    echo "$name" | sed 's/[^[:alnum:]$]/_/g'
+}
+
+function split_symbol_name() {
+#    global SYMBOL_NAME SYMBOL_VERSION
+    name="$1"
+    read -r SYMBOL_NAME SYMBOL_VERSION < <(echo "$name" | sed 's/@@/ /')
+}
+
 # Generate a macro call for each exported symbol
 function generate() {
-  macro="$1"
   i=0
   extract_symbols $SO | (while read line; do
       name="$(get_symbol_name "$line")"
       if [ "$name" = "_init" ] || [ "$name" = "_fini" ]; then
           continue
       fi
-      echo "$macro($name); /* $(echo "$line" | tr '\t' ' ') */" >> "$STUBC"
-      printf "\rGenerating $macro... %d " $i
+      escaped_name="$(escape_symbol_name "$name")"
+      split_symbol_name "$name"
+      echo "/* $(echo "$line" | tr '\t' ' ') */" >> "$STUBC"
+      if [ -n "$SYMBOL_VERSION" ]; then
+        macro='_$_STUB_VERSION'
+        echo "$macro($SYMBOL_NAME, \"$SYMBOL_VERSION\", $escaped_name, \"$name\");" >> "$STUBC"
+        echo "$SYMBOL_VERSION {};" >> "$STUBVERSIONSCRIPTTMP"
+      else
+        macro='_$_STUB'
+        echo "$macro($SYMBOL_NAME);" >> "$STUBC"
+      fi
+      printf "\rGenerating $macro... %d $SYMBOL_NAME, $SYMBOL_VERSION        " $i
       i=$((i+1))
     done)
   echo "Done."
@@ -39,22 +65,21 @@ cat >> "$STUBC" <<EOF
 // This stub library should be loaded inside a dlmopen namespace to forward calls
 // to the original library in the base namespace.
 
-// Build: gcc -shared $STUBC -o $STUBSO -ldl
-
 EOF
+# // Build: gcc -shared $STUBC -o $STUBSO -ldl
 
 cat>> "$STUBC" <<"EOF"
 #include "stub_library.h"
 
-// Declare the init function for calling from the stubs.
-static void __stub$init_all_stubs();
-
 EOF
 
-echo "// Declare the ifunc stubs along with their resolvers" >> "$STUBC"
-generate _\$_STUB
-
 echo "// Create the init function" >> "$STUBC"
-echo "_\$_START_INIT(NULL)" >> "$STUBC"
-generate _\$_LOAD_STUB
-echo "_\$_END_INIT()" >> "$STUBC"
+echo '_$_INIT('"$SONAME"')' >> "$STUBC"
+echo >> "$STUBC"
+
+echo "// Declare the ifunc stubs along with their resolvers" >> "$STUBC"
+generate
+
+if [ -f "$STUBVERSIONSCRIPTTMP" ]; then
+  sort -u "$STUBVERSIONSCRIPTTMP" > "$STUBVERSIONSCRIPT"
+fi
