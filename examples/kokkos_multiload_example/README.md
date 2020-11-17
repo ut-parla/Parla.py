@@ -3,14 +3,14 @@ This directory contains an example of integrating Kokkos into Parla.
 How to Build
 ------------
 
-1) Download Kokkos from https://github.com/kokkos/kokkos (use the develop branch)
+1) Download Kokkos from https://github.com/kokkos/kokkos (use the master branch)
 2) Set KOKKOS_DIR as a path to the root kokkos folder (e.g. export KOKKOS_DIR=~/kokkos)
 3) Run build_kokkos.sh (Make sure gpu architecture is set correctly. Pascal60 should be zemaitis. )
 
 4) Make sure you have a python enviornment that supports cython and parla
 5) Run build_cython.sh while in this directory. Our simple kokkos cython extension is now built and can be used.
 6) Run the example: multiload_kokkos.py
-
+o
 How to Modify
 -------------
 If you want to change the kokkos function only three files in dev must be updated:
@@ -26,4 +26,5 @@ zo
 
 Ongoing Development
 -------------------
+
 
