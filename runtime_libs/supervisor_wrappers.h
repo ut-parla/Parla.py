@@ -14,6 +14,8 @@ int context_setenv (long int context, const char *name, const char *value, int o
 /** Unset an environment variable inside a context. */
 int context_unsetenv (long int context, const char *name);
 
+void context_set_pid_mutilation_number(long int context, int i);
+
 /** Set the allowed affinity inside a context created with context_new. */
 void context_affinity_override_set_allowed_cpus (long int context, size_t cpusetsize, const cpu_set_t *cpuset);
 void context_affinity_override_set_allowed_cpus_py (long int context, size_t ncpus, const int *cpus);

@@ -16,8 +16,7 @@ if __name__ == '__main__':
         return result
 
     for i in range(m):
-        multiload_contexts[i].load_stub_library("cuda")
-        multiload_contexts[i].load_stub_library("cudart")
+        multiload_contexts[i].enable_fake_pid()
         with multiload_contexts[i]:
             import numpy as np
             import kokkos.gpu.core as kokkos
@@ -30,5 +29,5 @@ if __name__ == '__main__':
 
     for i in range(m):
         with multiload_contexts[i]:
-            kokkos.end(i)
+            kokkos.end()
 

@@ -43,6 +43,9 @@ context_setenv.argtypes = [ctypes.c_long, ctypes.c_char_p, ctypes.c_char_p, ctyp
 context_unsetenv = _parla_supervisor.context_unsetenv
 context_setenv.argtypes = [ctypes.c_long, ctypes.c_char_p]
 
+context_set_pid_mutilation_number = _parla_supervisor.context_set_pid_mutilation_number
+context_set_pid_mutilation_number.argtypes = [ctypes.c_long, ctypes.c_int]
+
 context_affinity_override_set_allowed_cpus_py = _parla_supervisor.context_affinity_override_set_allowed_cpus_py
 context_affinity_override_set_allowed_cpus_py.argtypes = [ctypes.c_long, ctypes.c_size_t, ctypes.POINTER(ctypes.c_int)]
 
@@ -116,6 +119,15 @@ class MultiloadContext():
         return self.nsid
 
     # Context control API
+
+    def _set_pid_mutilation_number(self, i):
+        context_set_pid_mutilation_number(self.nsid, i)
+
+    def enable_fake_pid(self):
+        self._set_pid_mutilation_number(self.nsid)
+
+    def disable_fake_pid(self):
+        self._set_pid_mutilation_number(0)
 
     def setenv(self, name: str, value):
         context_setenv(self.nsid, name.encode("ascii"), str(value).encode("ascii"), 1)

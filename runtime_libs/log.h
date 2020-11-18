@@ -10,7 +10,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 
-#define DEBUG(str, ...) fprintf(stderr, "LOG: [%d] %s %s:%d " str "\n", getpid(), __PRETTY_FUNCTION__, __FILE__, __LINE__, ## __VA_ARGS__)
+#define DEBUG(str, ...) fprintf(stderr, "LOG: %s %s:%d " str "\n", __PRETTY_FUNCTION__, __FILE__, __LINE__, ## __VA_ARGS__)
 
 #define CHECK(p, s) if(!(p)) perror(s)
 

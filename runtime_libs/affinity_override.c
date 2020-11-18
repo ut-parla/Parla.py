@@ -11,11 +11,18 @@
 #include <assert.h>
 #include <string.h>
 #include <sys/param.h>
+#include <sys/types.h>
 
 #include "preload_shim.h"
 #include "log.h"
 
 static cpu_set_t allowed_cpus = {-1, };
+
+static int pid_mutilation_number = 0;
+
+void set_pid_mutilation_number(int i) {
+    pid_mutilation_number = i;
+}
 
 void affinity_override_set_allowed_cpus(size_t cpusetsize, const cpu_set_t *cpuset) {
     assert(cpusetsize <= sizeof(cpu_set_t));
@@ -72,4 +79,14 @@ PRELOAD_SHIM(int, get_nprocs, (void)) {
 PRELOAD_SHIM(int, get_nprocs_conf, (void)) {
     init_get_nprocs_conf();
     return MIN(next_get_nprocs_conf(), CPU_COUNT(&allowed_cpus));
+}
+
+
+PRELOAD_SHIM(pid_t, getpid, (void)) {
+    init_getpid();
+    pid_t pid = next_getpid();
+    pid_t p = pid - pid_mutilation_number * 1111;
+    if (pid != p)
+        DEBUG("Lying about PID: Real pid %d, returning %d", pid, p);
+    return p;
 }

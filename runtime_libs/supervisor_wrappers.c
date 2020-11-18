@@ -58,6 +58,7 @@ CONTEXT_CALLER(LIBC_SO, int, setenv, (name, value, overwrite), const char *name,
 CONTEXT_CALLER(LIBC_SO, int, unsetenv, (name), const char *name)
 
 CONTEXT_CALLER_VOID("libparla_context.so", void, affinity_override_set_allowed_cpus, (cpusetsize, cpuset), size_t cpusetsize, const cpu_set_t *cpuset)
+CONTEXT_CALLER_VOID("libparla_context.so", void, set_pid_mutilation_number, (i), int i)
 
 void context_affinity_override_set_allowed_cpus_py (Lmid_t context, size_t ncpus, const int *cpus) {
     cpu_set_t tmp;
