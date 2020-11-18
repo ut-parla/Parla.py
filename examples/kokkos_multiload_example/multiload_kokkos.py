@@ -12,7 +12,7 @@ if __name__ == '__main__':
     def thing(i):
         n = 100000
         array = np.arange(1, n+1, dtype='float64')
-        result = kokkos.reduction(array)
+        result = kokkos.reduction(array, i)
         return result
 
     for i in range(m):

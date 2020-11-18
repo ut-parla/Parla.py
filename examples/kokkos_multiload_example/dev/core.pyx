@@ -6,6 +6,17 @@ def start(dev=0):
 def end():
     finalize()
 
+def add_vectors(a, b, c):
+    cdef int N = len(a)
+    
+    cdef float[:] c_a = a
+    cdef float[:] c_b = b
+    cdef float[:] c_out = c
+
+    #call out of c++ & cuda code
+    addition(&c_out[0], &c_a[0], &c_b[0], N)
+    return c
+
 """
 def reduction(array):
     cdef int N = len(array)
@@ -25,7 +36,7 @@ def reduction(array):
     return result
 """
 
-def reduction(array):
+def reduction(array, dev_id):
     """
     array can be host (numpy).
     If current context is a device, a copy to the device will be performed.
@@ -33,10 +44,10 @@ def reduction(array):
     result = None
     cdef int N = len(array)
     cdef double[:] arr
+    cdef int c_did = dev_id
 
     arr = array
-    result = kokkos_function_copy(&arr[0], N)
-
+    result = kokkos_function_copy(&arr[0], N, dev_id)
     return result
 
 

@@ -31,8 +31,44 @@ void finalize(){
 	Kokkos::finalize();
 }
 
+#ifdef ENABLE_CUDA
+/*The CUDA kernel */
+__global__ void vector_add_cu(float *out, float *a, float *b, int n){
+	for(int i = 0; i < n; i++){
+		out[i] = a[i] + b[i];
+	}
+}
 
-double kokkos_function_copy(double* array, const int N){
+/* Implementation of the function to be wrapped by Cython */
+void addition(float *out, float *a, float *b, int N){
+    
+    float *d_a, *d_b, *d_out;    
+
+    cudaMalloc((void**)&d_a, sizeof(float)*N);
+    cudaMalloc((void**)&d_b, sizeof(float)*N);
+    cudaMalloc((void**)&d_out, sizeof(float)*N);
+
+    cudaMemcpy(d_a, a, sizeof(float)*N, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_b, b, sizeof(float)*N, cudaMemcpyHostToDevice);
+
+    vector_add_cu<<<1, 1>>>(d_out, d_a, d_b, N);
+
+    cudaMemcpy(out, d_out, sizeof(float)*N, cudaMemcpyDeviceToHost);
+
+    cudaFree(d_a);
+    cudaFree(d_b);
+    cudaFree(d_out);
+}
+#else
+void addition(float *out, float *a, float *b, int N){
+    for(int i = 0; i < N; ++i){
+        out[i] = a[i] + b[i];
+    }    
+}
+#endif
+
+
+double kokkos_function_copy(double* array, const int N, const int dev_id){
 
 	using h_view = typename Kokkos::View<double*, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
 
@@ -43,17 +79,27 @@ double kokkos_function_copy(double* array, const int N){
 
 
 	//Wrap raw pointer in Kokkos View for easy management. 	     
-	// h_view host_array(array, N);
+	//h_view host_array(array, N);
 	
 	//Allocate memory on device (no op if only host)
 	//auto device_array = Kokkos::create_mirror_view(host_array);
 	//Copy to device (no op if only host)
 	//Kokkos::deep_copy(device_array, host_array);
 
+	#ifdef ENABLE_CUDA
+		cudaSetDevice(dev_id);
+		cudaStream_t stream;
+		cudaStreamCreate(&stream);
+		Kokkos::Cuda cuda1(stream);
+		auto range_policy = Kokkos::RangePolicy<Kokkos::Cuda>(cuda1, 0, N);
+	#else
+		auto range_policy = Kokkos::RangePolicy<Kokkos::Serial>(0, N);
+	#endif
+
 	double sum = 0.0;
 	{
 		Kokkos::parallel_reduce("Reduction", N, KOKKOS_LAMBDA(const int i, double& lsum){
-			lsum += i;
+			lsum += 1;
 		}, sum);
 
 		Kokkos::fence();
