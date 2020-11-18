@@ -2,7 +2,7 @@ import logging
 # logging.basicConfig(level=logging.INFO)
 
 #import parla.cpu
-from parla.multiload import multiload, MultiloadContext
+from parla.multiload import multiload, multiload_contexts
 import timeit
 import time
 
@@ -16,17 +16,19 @@ if __name__ == '__main__':
         return result
 
     for i in range(m):
-        with MultiloadContext(i):
+        multiload_contexts[i].load_stub_library("cuda")
+        multiload_contexts[i].load_stub_library("cudart")
+        with multiload_contexts[i]:
             import numpy as np
             import kokkos.gpu.core as kokkos
             kokkos.start(i)
 
     for i in range(m):
-        with MultiloadContext(i):
+        with multiload_contexts[i]:
             ctx = thing(i)
         print(i, ctx)
 
     for i in range(m):
-        with MultiloadContext(i):
+        with multiload_contexts[i]:
             kokkos.end(i)
 

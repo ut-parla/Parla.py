@@ -35,6 +35,7 @@ inc_dirs = inc_dirs + [KOKKOS_DIR+'/gpu_build/core/']
 # hmlp library directory
 lib_dirs = [KOKKOS_DIR]
 lib_dirs = lib_dirs + [KOKKOS_DIR+'/gpu_build/lib/lib64']
+lib_dirs = lib_dirs + [KOKKOS_DIR+'/gpu_build/lib/lib']
 
 
 def scandir(dir, files=[]):
@@ -57,7 +58,7 @@ def makeExtension(extName):
         library_dirs = lib_dirs,
         runtime_library_dirs = lib_dirs,
         extra_compile_args=["-std=c++11","-O3", "-Wno-sign-compare", "--expt-extended-lambda", "-Xcudafe","--diag_suppress=esa_on_defaulted_function_ignored", "-DENABLE_CUDA", "-w"],
-        extra_link_args=["-lkokkoscore", "-Wl,--no-as-needed", "-Wl,--verbose", "-ldl", "-lpthread"]
+        extra_link_args=["--cudart", "shared", "-lkokkoscore", "-Wl,--no-as-needed", "-Wl,--verbose", "-ldl", "-lpthread"]
     )
 
 

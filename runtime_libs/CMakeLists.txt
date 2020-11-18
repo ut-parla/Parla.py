@@ -31,7 +31,7 @@ function(forwarding_library lib)
     add_custom_command(
         OUTPUT
             "${CMAKE_BINARY_DIR}/libstub_${lib_name_with_ext}.c"
-            "${CMAKE_BINARY_DIR}/libstub_${lib_name_with_ext}.versionscript"
+#            "${CMAKE_BINARY_DIR}/libstub_${lib_name_with_ext}.versionscript"
         BYPRODUCTS "${CMAKE_BINARY_DIR}/libstub_${lib_name_with_ext}.versionscript.tmp"
         COMMAND bash "${CMAKE_SOURCE_DIR}/generate_stub_library.sh" "${lib}" "${forwarding_library_SONAME}"
         WORKING_DIR "${CMAKE_BINARY_DIR}"
@@ -59,3 +59,4 @@ endforeach(pylib)
 find_package(CUDAToolkit)
 
 forwarding_library(${CUDA_CUDART} VERSIONED)
+forwarding_library(${CUDA_cuda_driver_LIBRARY})

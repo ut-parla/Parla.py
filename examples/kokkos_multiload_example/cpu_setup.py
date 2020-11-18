@@ -36,6 +36,7 @@ inc_dirs = inc_dirs + [KOKKOS_DIR+'/cpu_build/core/']
 # hmlp library directory
 lib_dirs = [KOKKOS_DIR]
 lib_dirs = lib_dirs + [KOKKOS_DIR+'/cpu_build/lib/lib64']
+lib_dirs = lib_dirs + [KOKKOS_DIR+'/cpu_build/lib/lib']
 
 
 def scandir(dir, files=[]):
