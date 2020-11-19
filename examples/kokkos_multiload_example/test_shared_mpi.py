@@ -1,19 +1,21 @@
-from mpi4py import MPI
-import numpy as np
-import kokkos.gpu.core as kokkos
 import time
+import numpy as np
+
+t = time.time()
+from mpi4py import MPI
+import kokkos.gpu.core as kokkos
 
 comm = MPI.COMM_WORLD
 size = comm.Get_size()
 rank = comm.Get_rank()
 
-t = time.time()
 kokkos.start(rank)
 t = time.time() - t
+
 print("Kokkos init time: ", t, flush=True)
 
 
-n_local = 100000000
+n_local = 1000000000
 N = size * n_local
 
 itemsize = MPI.DOUBLE.Get_size()
@@ -33,9 +35,12 @@ t = time.time() -t
 
 print(rank, "Allocate shared block time: ", t, flush=True)
 
+t = time.time()
 if rank == 0:
     array[:N] = np.arange(1, N+1, dtype='float64')
 comm.Barrier()
+t = time.time() - t
+print(rank, "Initialize array time: ", t, flush=True)
 
 start = (rank)*n_local
 end = (rank+1)*n_local

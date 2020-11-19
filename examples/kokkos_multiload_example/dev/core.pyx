@@ -1,4 +1,5 @@
 from core cimport *
+import time
 
 def start(dev=0):
     init(dev)
@@ -41,6 +42,7 @@ def reduction(array, dev_id):
     array can be host (numpy).
     If current context is a device, a copy to the device will be performed.
     """
+    t = time.time()
     cdef double result
     cdef int N = len(array)
     cdef double[:] arr
@@ -49,6 +51,8 @@ def reduction(array, dev_id):
     arr = array
     with nogil:
         result = kokkos_function_copy(&arr[0], N, c_did)
+    t = time.time() - t
+    print("Kernel time", dev_id, t)
     return result
 
 

@@ -13,7 +13,7 @@ t = time.time() - t
 print("Kokkos init time: ", t, flush=True)
 
 
-n_local = 100000000
+n_local = 1000000000
 N = size * n_local
 
 sendbuf = None

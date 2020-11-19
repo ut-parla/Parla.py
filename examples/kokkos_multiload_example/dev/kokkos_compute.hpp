@@ -72,38 +72,46 @@ double kokkos_function_copy(double* array, const int N, const int dev_id){
 
 	using h_view = typename Kokkos::View<double*, Kokkos::HostSpace, Kokkos::MemoryTraits<Kokkos::Unmanaged>>;
 
-	#ifdef ENABLE_CUDA
-		//const cudaInternalDevices &dev_info = CudaInternalDevices::singleton();
-		//auto cuda_space = Kokkos::Cuda();
-	#endif
-
-
 	//Wrap raw pointer in Kokkos View for easy management. 	     
-	//h_view host_array(array, N);
+	h_view host_array(array, N);
 	
 	//Allocate memory on device (no op if only host)
 	//auto device_array = Kokkos::create_mirror_view(host_array);
+
 	//Copy to device (no op if only host)
 	//Kokkos::deep_copy(device_array, host_array);
 
+	//Setting range policy and doing explicit copies isn't necessary. The above should work, but this is a safety
 	#ifdef ENABLE_CUDA
 		cudaSetDevice(dev_id);
 		cudaStream_t stream;
 		cudaStreamCreate(&stream);
 		Kokkos::Cuda cuda1(stream);
 		auto range_policy = Kokkos::RangePolicy<Kokkos::Cuda>(cuda1, 0, N);
+
+		//Explicit copies because the default execution space isn't being set correctly
+		using d_view = typename Kokkos::View<double*, Kokkos::CudaSpace>;
+		d_view device_array("device_array", N);
+		Kokkos::deep_copy(device_array, host_array);
 	#else
 		auto range_policy = Kokkos::RangePolicy<Kokkos::Serial>(0, N);
+		using d_view = typename Kokkos::View<double*, Kokkos::HostSpace>;
+		d_view device_array("device_array", N);
+		Kokkos::deep_copy(device_array, host_array);
 	#endif
 
 	double sum = 0.0;
 	{
 		Kokkos::parallel_reduce("Reduction", N, KOKKOS_LAMBDA(const int i, double& lsum){
-			lsum += 1;
+			lsum += device_array(i);
 		}, sum);
 
 		Kokkos::fence();
 	}
+
+	#ifdef ENABLE_CUDA
+		cudaStreamDestroy(stream);
+	#endif
 
 	return sum;
 };

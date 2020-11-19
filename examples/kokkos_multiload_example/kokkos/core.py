@@ -4,7 +4,7 @@ import sys
 import numpy as np
 import kokkos
 this = sys.modules[__name__]
-
+import time
 
 def setup(nCPU, nGPU):
 	this.modules = generate_import_list(nCPU, nGPU)
@@ -33,6 +33,9 @@ def finalize():
     spec.end()
 
 def reduction(array):
+    t = time.time()
     result = None
     result = spec.reduction(array)
+    t  = time.time() - t
+    print("Reduction kernel time: ", t, flush=True)
     return result
