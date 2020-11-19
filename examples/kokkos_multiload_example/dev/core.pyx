@@ -41,13 +41,14 @@ def reduction(array, dev_id):
     array can be host (numpy).
     If current context is a device, a copy to the device will be performed.
     """
-    result = None
+    cdef double result
     cdef int N = len(array)
     cdef double[:] arr
     cdef int c_did = dev_id
 
     arr = array
-    result = kokkos_function_copy(&arr[0], N, dev_id)
+    with nogil:
+        result = kokkos_function_copy(&arr[0], N, c_did)
     return result
 
 
