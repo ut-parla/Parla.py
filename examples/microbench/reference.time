@@ -1,0 +1,20 @@
+model name : Intel(R) Xeon(R) CPU E5-2650 v4 @ 2.20GHz
+2 physical CPUs, 12 cores/CPU, 2 hardware threads/core = 48 hw threads total
+-- No CPU affinity --
+10000000 system calls in 2791092534ns (279.1ns/syscall)
+2000000 process context switches in 5988322098ns (2994.2ns/ctxsw)
+2000000  thread context switches in 4815703691ns (2407.9ns/ctxsw)
+sched_setscheduler(): Operation not permitted
+2000000  thread context switches in 196040526ns (98.0ns/ctxsw)
+-- With CPU affinity --
+10000000 system calls in 2677402031ns (267.7ns/syscall)
+2000000 process context switches in 5409706380ns (2704.9ns/ctxsw)
+2000000  thread context switches in 3314969320ns (1657.5ns/ctxsw)
+sched_setscheduler(): Operation not permitted
+2000000  thread context switches in 589654042ns (294.8ns/ctxsw)
+-- With CPU affinity to CPU 0 --
+10000000 system calls in 2793516351ns (279.4ns/syscall)
+2000000 process context switches in 3726841034ns (1863.4ns/ctxsw)
+2000000  thread context switches in 3676483158ns (1838.2ns/ctxsw)
+sched_setscheduler(): Operation not permitted
+2000000  thread context switches in 200474983ns (100.2ns/ctxsw)
