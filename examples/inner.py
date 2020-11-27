@@ -4,15 +4,16 @@ A simple inner product implemented in Parla.
 This is probably the most basic example of Parla.
 """
 
-from parla import Parla, multiload, TaskEnvironment
-from parla.multiload import MultiloadComponent, CPUAffinity
+from parla import Parla, TaskEnvironment
+#from parla.multiload import MultiloadComponent, CPUAffinity
 
-with multiload():
-    import numpy as np
+#with multiload():
+#    import numpy as np
+import numpy as np
 
 from parla.array import copy, storage_size
 from parla.cuda import gpu, GPUComponent
-from parla.cpu import cpu
+from parla.cpu import cpu, UnboundCPUComponent
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import *
 import time
@@ -57,7 +58,8 @@ if __name__ == '__main__':
     # Setup task execution environments
     envs = []
     envs.extend([TaskEnvironment(placement=[d], components=[GPUComponent()]) for d in gpu.devices])
-    envs.extend([TaskEnvironment(placement=[d], components=[MultiloadComponent([CPUAffinity])]) for d in cpu.devices])
+    envs.extend([TaskEnvironment(placement=[d], components=[UnboundCPUComponent()]) for d in cpu.devices])
+    #envs.extend([TaskEnvironment(placement=[d], components=[MultiloadComponent([CPUAffinity])]) for d in cpu.devices])
     if "N_DEVICES" in os.environ:
         envs = envs[:int(os.environ.get("N_DEVICES"))]
     # Start Parla runtime
