@@ -147,9 +147,9 @@ class GPUComponentInstance(EnvironmentComponentInstance):
 
     def __init__(self, descriptor: "GPUComponent", env: TaskEnvironment):
         super().__init__(descriptor)
-        gpus = [d for d in env.placement if isinstance(d, _GPUDevice)]
-        assert len(gpus) == 1
-        self.gpu = gpus[0]
+        self.gpus = [d for d in env.placement if isinstance(d, _GPUDevice)]
+        assert len(self.gpus) == 1
+        self.gpu = self.gpus[0]
         with self.gpu.cupy_device:
             self.stream = cupy.cuda.Stream(null=False, non_blocking=True)
 
