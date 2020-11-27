@@ -8,10 +8,12 @@ import numpy
 
 import os
 import psutil
+from typing import List
 
 from . import array, device
 from .array import ArrayType
 from .device import Architecture, Memory, Device, MemoryKind
+from .environments import EnvironmentComponentInstance, TaskEnvironment, EnvironmentComponentDescriptor
 
 __all__ = ["cpu"]
 
@@ -90,6 +92,34 @@ class _CPUCoresArchitecture(Architecture):
 
     def __call__(self, id, *args, **kwds) -> _CPUDevice:
         return _CPUDevice(self, id, *args, **kwds, n_cores=1)
+
+
+class UnboundCPUComponentInstance(EnvironmentComponentInstance):
+
+    def __init__(self, descriptor, env):
+        super().__init__(descriptor)
+        cpus = [d for d in env.placement if isinstance(d, _CPUDevice)]
+        assert len(cpus) == 1
+        self.cpus = cpus
+
+    def __enter__(self):
+        return
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return
+
+
+class UnboundCPUComponent(EnvironmentComponentDescriptor):
+    """A single CPU component that represents a "core" but isn't automatically bound to the given core.
+    """
+
+    def combine(self, other):
+        assert isinstance(other, UnboundCPUComponent)
+        assert self.cpus == other.cpus
+        return self
+
+    def __call__(self, env: TaskEnvironment) -> UnboundCPUComponentInstance:
+        return UnboundCPUComponentInstance(self, env)
 
 
 cpu = _CPUCoresArchitecture("CPU Cores", "cpu")
