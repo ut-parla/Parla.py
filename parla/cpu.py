@@ -1,9 +1,8 @@
 import logging
 from typing import Dict
 
-# FIXME: This load of numpy will cause problems if it needs to be multiloaded
-# from parla import multiload
-# with multiload():
+# FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
+#  Loading numpy locally works for some things, but not for the array._register_array_type call.
 import numpy
 
 import os
