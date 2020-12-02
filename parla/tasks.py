@@ -385,7 +385,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     # TODO: Document tags argument
 
     if not taskid:
-        taskid = TaskID("global_" + str(len(_task_locals.global_tasks)), len(_task_locals.global_tasks))
+        taskid = TaskID("global_" + str(len(_task_locals.global_tasks)), (len(_task_locals.global_tasks),))
         _task_locals.global_tasks += [taskid]
 
     def decorator(body):
