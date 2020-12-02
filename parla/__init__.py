@@ -16,7 +16,8 @@ class Parla:
     environments: Collection[TaskEnvironment]
     _sched: task_runtime.Scheduler
 
-    def __init__(self, environments: Collection[TaskEnvironment], **kwds):
+    def __init__(self, environments: Collection[TaskEnvironment]=None, **kwds):
+        environments = environments or [TaskEnvironment(placement=[d]) for d in get_all_devices()]
         self.environments = environments
         self.kwds = kwds
 

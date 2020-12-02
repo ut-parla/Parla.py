@@ -69,6 +69,10 @@ class _GPUDevice(Device):
         return dict(threads=attrs["MultiProcessorCount"] * attrs["MaxThreadsPerMultiProcessor"], memory=total,
                     cvus=attrs["MultiProcessorCount"])
 
+    @property
+    def default_components(self) -> Collection["EnvironmentComponentDescriptor"]:
+        return [GPUComponent()]
+
     @contextmanager
     def _device_context(self):
         with self.cupy_device:
@@ -154,13 +158,14 @@ class GPUComponentInstance(EnvironmentComponentInstance):
             self.stream = cupy.cuda.Stream(null=False, non_blocking=True)
 
     def __enter__(self):
-        self.gpus[0].cupy_device.__enter__()
+        self.gpu.cupy_device.__enter__()
         self.stream.__enter__()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stream.__exit__(exc_type, exc_val, exc_tb)
-        return self.gpus[0].cupy_device.__exit__(exc_type, exc_val, exc_tb)
+        self.stream.synchronize()
+        return self.gpu.cupy_device.__exit__(exc_type, exc_val, exc_tb)
 
 class GPUComponent(EnvironmentComponentDescriptor):
     """A single GPU CUDA component which configures the environment to use the specific GPU using a single

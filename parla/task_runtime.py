@@ -264,25 +264,25 @@ class Task:
             # Allocate the resources used by this task (blocking)
             for d in self.req.devices:
                 ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
-            # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
-            with _scheduler_locals._environment_scope(self.req.environment), self.req.environment:
-                # Run the task and assign the new task state
-                try:
-                    assert isinstance(self._state, TaskRunning)
+            # Run the task and assign the new task state
+            try:
+                assert isinstance(self._state, TaskRunning)
+                # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
+                with _scheduler_locals._environment_scope(self.req.environment), self.req.environment:
                     task_state = self._state.func(self, *self._state.args)
-                    if task_state is None:
-                        task_state = TaskCompleted(None)
-                except Exception as e:
-                    task_state = TaskException(e)
-                    logger.exception("Exception in task")
-                finally:
-                    logger.info("Finally for task %r", self)
-                    # Deallocate all the resources, both from the allocation above and from the "assignment" done by
-                    # the scheduler.
-                    for d in self.req.devices:
-                        ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
-                        ctx.scheduler._unassigned_resources.deallocate_resources(d, self.req.resources)
-                    self._set_state(task_state)
+                if task_state is None:
+                    task_state = TaskCompleted(None)
+            except Exception as e:
+                task_state = TaskException(e)
+                logger.exception("Exception in task")
+            finally:
+                logger.info("Finally for task %r", self)
+                # Deallocate all the resources, both from the allocation above and from the "assignment" done by
+                # the scheduler.
+                for d in self.req.devices:
+                    ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
+                    ctx.scheduler._unassigned_resources.deallocate_resources(d, self.req.resources)
+                self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
             raise e
@@ -739,19 +739,16 @@ class Scheduler(ControllableThread, SchedulerContext):
                             env_match_quality[opt.environment] = max(env_match_quality[opt.environment], 1)
                     environments_to_try = list(env_match_quality.keys())
                     environments_to_try.sort(key=env_match_quality.__getitem__, reverse=True)
-                    print(task, ":", env_match_quality, "  ", environments_to_try)
+                    # print(task, ":", env_match_quality, "  ", environments_to_try)
 
                     # Try the environments in order
                     specific_requirements = None
                     for env in environments_to_try:
                         specific_requirements = EnvironmentRequirements(task.req.resources, env, task.req.tags)
                         if self._try_assignment(specific_requirements):
-                            print(task, ":", env)
                             task.assigned = True
                             task.req = specific_requirements
                             break
-                        else:
-                            print(task, ":", "no match")
 
                 # assert task.req.exact == task.assigned
                 assert not task.assigned or isinstance(task.req, EnvironmentRequirements)
