@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 
 from parla import Parla
@@ -5,10 +7,14 @@ from parla.cpu import cpu
 from parla.tasks import spawn
 from numba import jit
 
-# Divide an array of values into two "bins"
-# and return the index separating them
 @jit
 def subdivide(array, split):
+    """
+    Divide an array of values into two "bins" and return the index separating them
+    :param array: The array to split.
+    :param split: The value around which to split.
+    :return: The resulting split index.
+    """
     low = 0
     high = array.shape[0] - 1
     while True:
@@ -26,9 +32,11 @@ def subdivide(array, split):
             return low
         high -= 1
 
-# Insertion sort for non-recursive base case
 @jit
 def insertion_sort(array):
+    """
+    Insertion sort for non-recursive base case.
+    """
     for i in range(array.shape[0]):
         j = i
         while j > 0 and array[j-1] > array[j]:
@@ -36,6 +44,13 @@ def insertion_sort(array):
             j -= 1
 
 def quicksort(array, lower = 0, upper = 1., threshold = 100):
+    """
+    Parallel quicksort an array in place.
+    :param array: The array to sort.
+    :param lower: The minimum value in the array.
+    :param upper: The maximum value in the array.
+    :param threshold: The size threshold at which to switch to insertion sort.
+    """
     if array.shape[0] < threshold:
         insertion_sort(array)
         return
@@ -50,8 +65,12 @@ def quicksort(array, lower = 0, upper = 1., threshold = 100):
     def upper_block_task():
         quicksort(upper_array, split, upper, threshold)
 
-a = np.random.rand(10000)
-a_sorted = np.sort(a)
-with Parla():
-    quicksort(a)
-assert (a == a_sorted).all()
+if __name__ == '__main__':
+    a = np.random.rand(100000)
+    a_sorted = np.sort(a)
+    start = time.perf_counter()
+    with Parla():
+        quicksort(a)
+    end = time.perf_counter()
+    print(end - start, "seconds")
+    assert (a == a_sorted).all()
