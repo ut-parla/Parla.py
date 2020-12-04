@@ -2,9 +2,9 @@ import logging
 from abc import ABCMeta, abstractmethod
 from typing import Dict
 import copy as cp
-# FIXME: This load of numpy will cause problems if it needs to be multiloaded
-# from parla import multiload
-# with multiload():
+
+# FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
+#  Loading numpy locally works for some things, but not for the array._register_array_type call.
 import numpy as np
 
 from parla.device import Memory

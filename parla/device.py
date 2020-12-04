@@ -6,7 +6,7 @@ The model is used to describe the placement restrictions for computations and st
 from contextlib import contextmanager
 from enum import Enum
 from functools import lru_cache
-from typing import Optional, List, Mapping, Dict, Iterable
+from typing import Optional, List, Mapping, Dict, Iterable, Collection
 from abc import ABCMeta, abstractmethod
 
 import logging
@@ -117,6 +117,11 @@ class Device(metaclass=ABCMeta):
     @property
     @abstractmethod
     def resources(self) -> Dict[str, float]:
+        raise NotImplementedError()
+
+    @property
+    @abstractmethod
+    def default_components(self) -> Collection["EnvironmentComponentDescriptor"]:
         raise NotImplementedError()
 
     def memory(self, kind: MemoryKind = None):
