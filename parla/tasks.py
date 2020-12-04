@@ -11,9 +11,14 @@ Parla supports simple task parallelism.
 import logging
 import threading
 import inspect
+import dis
+from types import CodeType
+from guppy import hpy
 from abc import abstractmethod, ABCMeta
 from contextlib import asynccontextmanager
 from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, FrozenSet, Dict
+import array
+import copy
 
 from parla.device import Device, Architecture, get_all_devices
 from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task
@@ -288,6 +293,43 @@ class _TaskLocals(threading.local):
 
 _task_locals = _TaskLocals()
 
+def _move_function_local(body):
+    """
+    A function copy all data to desired device
+    """
+    new_global = {}
+    new_closure= []
+    memory_pairs = []
+    device_array = None
+    if not body.__globals__ == None:
+        for key, val in body.__globals__.items():
+            if array.is_array(val):
+                device_array = array.get_device_array(val)
+                new_global[key] = device_array.get_copy()
+            else:
+                new_global[key]=val
+    if not body.__closure__ == None:
+        for x in body.__closure__:
+            if array.is_array(x.cell_contents):
+                device_array = array.get_device_array(x.cell_contents)
+                new_cell = device_array.get_copy()
+                new_cell = _make_cell(new_cell)
+                #memory_pairs.append(tuple([x.cell_contents, copy.deepcopy(x.cell_contents), new_cell.cell_contents]))
+            else:
+                new_cell = x
+            new_closure.append(new_cell)
+    new_body = type(body)(
+            body.__code__, new_global, body.__name__, body.__defaults__,
+            closure=tuple(new_closure))
+    new_body.__annotations__ = body.__annotations__
+    new_body.__doc__ = body.__doc__
+    new_body.__kwdefaults__ = body.__kwdefaults__
+    new_body.__module__ = body.__module__
+    return new_body,device_array
+
+
+
+
 
 def _task_callback(task, body) -> TaskState:
     """
@@ -295,6 +337,13 @@ def _task_callback(task, body) -> TaskState:
     """
     try:
         body = body
+
+        memory_pairs = []
+        device_array = None
+        if inspect.isfunction(body):
+            body,device_array = _move_function_local(body)
+
+
         if inspect.iscoroutinefunction(body):
             logger.debug("Constructing coroutine task: %s", task.taskid)
             body = body()
@@ -320,11 +369,15 @@ def _task_callback(task, body) -> TaskState:
                 if e.args:
                     (result,) = e.args
                 return TaskCompleted(result)
+
         else:
             logger.debug("Executing function task: %s", task.taskid)
             result = body()
             return TaskCompleted(result)
     finally:
+        if not device_array == None:
+            cur_device = get_current_devices()[0]
+            device_array.update_default(cur_device)
         logger.debug("Finished: %s", task.taskid)
     assert False
 

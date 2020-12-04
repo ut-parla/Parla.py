@@ -10,11 +10,14 @@ import cupy
 from numba import jit, void, float64
 import math
 import time
+import os
 
-from parla import Parla
+
+from parla import Parla, TaskEnvironment
 from parla.array import copy, clone_here
 from parla.tasks import *
 from parla.cuda import *
+from parla.cpu import cpu, UnboundCPUComponent
 from parla.cpu import *
 from parla.function_decorators import *
 
@@ -128,5 +131,13 @@ def main():
         print(*times)
 
 if __name__ == '__main__':
-    with Parla():
+    # Setup task execution environments
+    envs = []
+    envs.extend([TaskEnvironment(placement=[d], components=[GPUComponent()]) for d in gpu.devices])
+    envs.extend([TaskEnvironment(placement=[d], components=[UnboundCPUComponent()]) for d in cpu.devices])
+    #envs.extend([TaskEnvironment(placement=[d], components=[MultiloadComponent([CPUAffinity])]) for d in cpu.devices])
+    if "N_DEVICES" in os.environ:
+        envs = envs[:int(os.environ.get("N_DEVICES"))]
+    # Start Parla runtime
+    with Parla(envs):
         main()
