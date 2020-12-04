@@ -2,6 +2,7 @@ import logging
 from abc import ABCMeta, abstractmethod
 from typing import Dict
 import copy as cp
+import itertools
 
 # FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
 #  Loading numpy locally works for some things, but not for the array._register_array_type call.
@@ -203,13 +204,15 @@ class LocalArray:
         cur_update = self.repr[device]
         if can_assign_from(self.default, cur_update):
             logger.debug("Direct update from %r to %r", get_memory(cur_update), get_memory(self.default))
-            for i in range(len(cur_update)):
+            #for i in range(len(cur_update)):
+            for i in itertools.product(*[range(s) for s in self.default_copy.shape]):
                 if not cur_update[i]==self.default_copy[i]:
                     self.default[i] = cur_update[i]
         else:
             logger.debug("Copy then update from %r to %r", get_memory(cur_update), get_memory(self.default))
             cur_update = get_memory(self.default)(cur_update)
-            for i in range(len(cur_update)):
+            #for i in range(len(cur_update)):
+            for i in itertools.product(*[range(s) for s in self.default_copy.shape]):
                 if not cur_update[i]==self.default_copy[i]:
                     self.default[i] = cur_update[i]
 

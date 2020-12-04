@@ -338,10 +338,10 @@ def _task_callback(task, body) -> TaskState:
     try:
         body = body
 
-        memory_pairs = []
         device_array = None
         if inspect.isfunction(body):
-            body,device_array = _move_function_local(body)
+            if body.__name__ == "t2" or body.__name__ == "t4":
+                body,device_array = _move_function_local(body)
 
 
         if inspect.iscoroutinefunction(body):

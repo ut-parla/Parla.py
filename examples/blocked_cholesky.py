@@ -130,13 +130,6 @@ def main():
         assert(np.max(np.absolute(a - computed_L @ computed_L.T)) < 1E-8)
 
 if __name__ == '__main__':
-    # Setup task execution environments
-    envs = []
-    envs.extend([TaskEnvironment(placement=[d], components=[GPUComponent()]) for d in gpu.devices])
-    envs.extend([TaskEnvironment(placement=[d], components=[UnboundCPUComponent()]) for d in cpu.devices])
-    #envs.extend([TaskEnvironment(placement=[d], components=[MultiloadComponent([CPUAffinity])]) for d in cpu.devices])
-    if "N_DEVICES" in os.environ:
-        envs = envs[:int(os.environ.get("N_DEVICES"))]
     # Start Parla runtime
-    with Parla(envs):
+    with Parla():
         main()
