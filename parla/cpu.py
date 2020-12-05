@@ -1,9 +1,8 @@
 import logging
-from typing import Dict
+from typing import Dict, Collection
 
-# FIXME: This load of numpy will cause problems if it needs to be multiloaded
-# from parla import multiload
-# with multiload():
+# FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
+#  Loading numpy locally works for some things, but not for the array._register_array_type call.
 import numpy
 
 import os
@@ -52,6 +51,10 @@ class _CPUDevice(Device):
     @property
     def resources(self) -> Dict[str, float]:
         return dict(threads=self.n_cores, memory=self.available_memory, vcus=self.n_cores)
+
+    @property
+    def default_components(self) -> Collection["EnvironmentComponentDescriptor"]:
+        return []
 
     def memory(self, kind: MemoryKind = None):
         return _CPUMemory(self, kind)

@@ -60,3 +60,5 @@ find_package(CUDAToolkit)
 
 forwarding_library(${CUDA_CUDART} VERSIONED)
 forwarding_library(${CUDA_cuda_driver_LIBRARY})
+
+forwarding_library(/usr/lib/x86_64-linux-gnu/libnuma.so VERSIONED)

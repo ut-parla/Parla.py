@@ -28,7 +28,7 @@ function escape_symbol_name() {
 function split_symbol_name() {
 #    global SYMBOL_NAME SYMBOL_VERSION
     name="$1"
-    read -r SYMBOL_NAME SYMBOL_VERSION < <(echo "$name" | sed 's/@@/ /')
+    read -r SYMBOL_NAME SYMBOL_VERSION < <(echo "$name" | sed 's/@@\?/ /')
 }
 
 # Generate a macro call for each exported symbol

@@ -1,10 +1,10 @@
 import logging
 from abc import ABCMeta, abstractmethod
 from typing import Dict
+import collections
 
-# FIXME: This load of numpy will cause problems if it needs to be multiloaded
-# from parla import multiload
-# with multiload():
+# FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
+#  Loading numpy locally works for some things, but not for the array._register_array_type call.
 import numpy as np
 
 from parla.device import Memory
@@ -12,7 +12,8 @@ from parla.tasks import get_current_devices
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["get_array_module", "get_memory", "is_array", "asnumpy", "copy", "clone_here", "storage_size"]
+__all__ = ["get_array_module", "get_memory", "is_array", "asnumpy", "copy", "clone_here", "storage_size","get_device_array"]
+
 
 
 class ArrayType(metaclass=ABCMeta):
@@ -138,3 +139,43 @@ def storage_size(*arrays):
     :return: the total size of the arrays passed as arguments.
     """
     return sum(a.size * a.itemsize for a in arrays)
+
+
+
+
+
+class LocalArray(collections.abc.Sequence):
+    def __init__(self, default):
+        self.default = default
+
+    def __getitem__(self,idx):
+        ori = self.default[idx]
+        if is_array(ori):
+            local_data = clone_here(self.default[idx])
+            return local_data
+        else:
+            return ori
+
+    def __setitem__(self,idx, val):
+        copy(self.default[idx], val)
+
+    def __len__(self):
+        return len(self.default)
+
+    def __repr__(self):
+        return "Multi-device-array for {%s}"%(str(self.default))
+
+
+_Array_Set = []
+
+
+
+def get_device_array(source):
+    for a in _Array_Set:
+        if (a.default==source).all():
+            return  a
+    new_array = LocalArray(source)
+    _Array_Set.append(new_array)
+    return new_array
+
+

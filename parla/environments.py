@@ -64,8 +64,15 @@ class TaskEnvironment(ContextManager):
 
     def __init__(self,
                  placement: Collection[Union[Architecture, Device, "parla.tasks.Task", "parla.tasks.TaskID", Any]],
-                 components: Collection[EnvironmentComponentDescriptor],
+                 components: Collection[EnvironmentComponentDescriptor] = None,
                  tags: Collection[Any] = ()):
+        """
+        Create a new task execution environment which will run with the given placement.
+        :param placement: A placement list containing devices and architectures.
+        :param components: The components that should be used for this environment,
+            or None meaning the default components should be used.
+        :param tags: A set of arbitrary tags associated with this environment. Tasks can select environments by tag.
+        """
         from .tasks import get_placement_for_set
 
         tags = frozenset(tags)
@@ -77,6 +84,8 @@ class TaskEnvironment(ContextManager):
 
         self.placement = get_placement_for_set(placement)
 
+        if components is None:
+            components = [c for d in self.placement for c in d.default_components]
         components = TaskEnvironment._combine_like_components(components)
         self.components = {type(c): c(self) for c in components}
 

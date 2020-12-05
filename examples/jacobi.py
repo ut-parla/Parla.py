@@ -1,43 +1,36 @@
 """
-Multi-device Jacobi iteration using entirely Parla kernels.
+Multi-device Jacobi iteration using entirely custom kernels.
 
 This example shows how to write CUDA style kernels within Parla to optimize GPU kernels.
 """
-
-import os
 import time
 
-import numpy as np
 import numba.cuda
-import cupy
+import numpy as np
 
-from parla import Parla
+from parla import Parla, get_all_devices
 from parla.array import copy
-from parla.cuda import gpu
 from parla.cpu import cpu
+from parla.cuda import gpu
 from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
 
-# CPU code to perform a single step in the Jacobi iteration.
-# Specialized later by jacobi_gpu
+
 @specialized
 @numba.njit(parallel=True)
 def jacobi(a0, a1):
+    """
+    CPU code to perform a single step in the Jacobi iteration.
+    """
     a1[1:-1,1:-1] = .25 * (a0[2:,1:-1] + a0[:-2,1:-1] + a0[1:-1,2:] + a0[1:-1,:-2])
 
 
-# Actual cuda kernel to do a single step
-@numba.cuda.jit
-def gpu_jacobi_kernel(a0, a1):
-    i, j = numba.cuda.grid(2)
-    if 0 < i < a1.shape[0]-1 and 0 < j < a1.shape[1]-1:
-        a1[i,j] = .25 * (a0[i-1,j] + a0[i+1,j] + a0[i,j-1] + a0[i,j+1])
-
-
-# GPU kernel call to perform a single step in the Jacobi iteration.
 @jacobi.variant(gpu)
 def jacobi_gpu(a0, a1):
+    """
+    GPU kernel call to perform a single step in the Jacobi iteration.
+    """
     threads_per_block_x = 32
     threads_per_block_y = 1024//threads_per_block_x
     blocks_per_grid_x = (a0.shape[0] + (threads_per_block_x - 1)) // threads_per_block_x
@@ -45,16 +38,23 @@ def jacobi_gpu(a0, a1):
     gpu_jacobi_kernel[(blocks_per_grid_x,blocks_per_grid_y), (threads_per_block_x,threads_per_block_y)](a0, a1)
 
 
+@numba.cuda.jit
+def gpu_jacobi_kernel(a0, a1):
+    """
+    Actual CUDA kernel to do a single step.
+    """
+    i, j = numba.cuda.grid(2)
+    if 0 < i < a1.shape[0]-1 and 0 < j < a1.shape[1]-1:
+        a1[i,j] = .25 * (a0[i-1,j] + a0[i+1,j] + a0[i,j-1] + a0[i,j+1])
+
+
 def main():
-    devs = list(gpu.devices) + list(cpu.devices)
-    if "N_DEVICES" in os.environ:
-        devs = devs[:int(os.environ.get("N_DEVICES"))]
-    divisions = len(devs)*2
+    divisions = len(get_all_devices())*2
 
     # Set up an "n" x "n" grid of values and run
-    # "steps" number of iterations of the 4 point stencil on it.
+    # "steps" iterations of the 4 point stencil on it.
     n = 300
-    steps = 200
+    steps = 20
 
     # Set up two arrays containing the input data.
     # This demo uses the standard technique of computing
@@ -66,33 +66,27 @@ def main():
     a1 = a0.copy()
 
     # An object that distributes arrays across all the given devices.
-    mapper = LDeviceSequenceBlocked(divisions, devices=devs)
+    mapper = LDeviceSequenceBlocked(divisions, devices=get_all_devices())
 
     # Partition a0 and a1.
     # Here we just partition the rows across the different devices.
-    # Other partitioning schemes are possible.
     a0_row_groups = mapper.partition_tensor(a0, overlap=1)
     a1_row_groups = mapper.partition_tensor(a1, overlap=1)
 
-    # Trigger JIT
     @spawn()
-    async def warmups():
+    async def trigger_compilation():
         warmup = TaskSpace()
         for i in range(divisions):
             @spawn(warmup[i], placement=mapper.device(i))
             async def w():
                 jacobi(a1_row_groups[i], a0_row_groups[i])
-                cupy.cuda.get_current_stream().synchronize()
-                cupy.cuda.Stream.null.synchronize()
         await warmup
-
     time.sleep(5)
 
     start = time.perf_counter()
     # Main parla task.
-    @spawn(placement=cpu(0))
+    @spawn(placement=cpu)
     async def run_jacobi():
-        assert steps > 0
         # Specify which set of blocks is used as input or output
         # (they will be swapped for each iteration).
         in_blocks = a0_row_groups
@@ -134,10 +128,8 @@ def main():
             # the tasks from the previous step.
             previous_block_tasks = current_block_tasks
         await previous_block_tasks
-        cupy.cuda.get_current_stream().synchronize()
-        cupy.cuda.Stream.null.synchronize()
         end = time.perf_counter()
-        print(end - start)
+        print(end - start, "seconds")
 
         # This depends on all the tasks from the last iteration step.
         for j in range(divisions):
