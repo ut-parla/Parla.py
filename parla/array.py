@@ -3,7 +3,7 @@ from abc import ABCMeta, abstractmethod
 from typing import Dict
 import copy as cp
 import itertools
-
+import collections
 # FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
 #  Loading numpy locally works for some things, but not for the array._register_array_type call.
 import numpy as np
@@ -13,7 +13,7 @@ from parla.tasks import get_current_devices
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["get_array_module", "get_memory", "is_array", "asnumpy", "copy", "clone_here", "storage_size","get_current_device_copy"]
+__all__ = ["get_array_module", "get_memory", "is_array", "asnumpy", "copy", "clone_here", "storage_size","get_device_array"]
 
 
 
@@ -141,82 +141,36 @@ def storage_size(*arrays):
     """
     return sum(a.size * a.itemsize for a in arrays)
 
-"""
-A hack to deal with concurrent to same stream during data movement
-"""
-def atomic_copy(destination,original_copy, source):
-    try:
-        if is_array(source):
-            if can_assign_from(destination, source):
-                logger.debug("Direct assign from %r to %r", get_memory(source), get_memory(destination))
-                for i in range(len(source)):
-                    if not original_copy[i] == source[i]:
-                        destination[i]=source[i]
-            else:
-                logger.debug("Copy then assign from %r to %r", get_memory(source), get_memory(destination))
-                source = get_memory(destination)(source)
-                for i in range(len(source)):
-                    if not original_copy[i] == source[i]:
-                        destination[i]=source[i]
-        else:
-            # We assume all non-array types are by-value and hence already exist in the Python interpreter
-            # and don't need to be copied.
-            destination[:] = source
-    except ValueError:
-        raise ValueError("Failed to copy from {} to {} ({} {} to {} {})".format(get_memory(source), get_memory(destination),
-                                                                          source, getattr(source, "shape", None),
-                                                                          destination, getattr(destination, "shape", None)))
 
 
 
-class LocalArray:
-    def __init__(self, default, kind=None):
+
+class LocalArray(collections.abc.Sequence):
+    def __init__(self, default):
         self.default = default
-        self.default_copy = cp.deepcopy(default)
-        cur_device = get_current_devices()[0]
-        local_copy = cur_device.memory(kind)(default)
-        self.repr = {cur_device:local_copy}
 
-    def get_copy(self, kind=None):
-        device = get_current_devices()[0]
-        if device in self.repr.keys():
-            source = self.default
-
-            destination = self.repr[device]
-            if can_assign_from(destination, source):
-                logger.debug("Direct assign from %r to %r", get_memory(source), get_memory(destination))
-                destination[:] = source
-            else:
-                logger.debug("Copy then assign from %r to %r", get_memory(source), get_memory(destination))
-            destination[:] = get_memory(destination)(source)
-
-
-            return  destination
+    def __getitem__(self,idx):
+        print(idx)
+        ori = self.default[idx]
+        if is_array(ori):
+            local_data = clone_here(self.default[idx])
+            return local_data
         else:
-            #copy data to local device
-            source = self.default
-            local_copy = device.memory(kind)(source)
-            self.repr[device]=local_copy
-            #self.cur_device = device
-            return  local_copy
+            return ori
 
-    def update_default(self,device):
-        cur_update = self.repr[device]
-        if can_assign_from(self.default, cur_update):
-            logger.debug("Direct update from %r to %r", get_memory(cur_update), get_memory(self.default))
-            #for i in range(len(cur_update)):
-            for i in itertools.product(*[range(s) for s in self.default_copy.shape]):
-                if not cur_update[i]==self.default_copy[i]:
-                    self.default[i] = cur_update[i]
-        else:
-            logger.debug("Copy then update from %r to %r", get_memory(cur_update), get_memory(self.default))
-            cur_update = get_memory(self.default)(cur_update)
-            #for i in range(len(cur_update)):
-            for i in itertools.product(*[range(s) for s in self.default_copy.shape]):
-                if not cur_update[i]==self.default_copy[i]:
-                    self.default[i] = cur_update[i]
+    def __setitem__(self,idx, val):
+        print(idx)
+        copy(self.default[idx], val)
+
+    def __len__(self):
+        return len(self.default)
+
+    def __repr__(self):
+        return "Multi-device-array for {%s}"%(str(self.default))
+
 
 _Array_Set = []
+
 
 
 def get_device_array(source):
@@ -226,3 +180,5 @@ def get_device_array(source):
     new_array = LocalArray(source)
     _Array_Set.append(new_array)
     return new_array
+
+

@@ -24,20 +24,15 @@ def main():
         a_part = mapper.partition_tensor(a)
         b_part = mapper.partition_tensor(b)
         # Create array to store partial sums from each logical device
-        global partial_sums
         partial_sums = np.empty(len(a_part))
         # Define a space of task names for the product tasks
         P = TaskSpace("P")
         for i in range(len(a_part)):
             @spawn(P[i], data=[a_part[i], b_part[i]])
             def inner_local():
-                if i < 0:
-                    print(1)
-                a_local = a_part[i]
-                b_local = b_part[i]
                 # Perform the local inner product using the numpy multiply operation, @.
-                #copy(partial_sums[i:i+1], a_local @ b_local)
-                partial_sums[i:i+1]=a_local @ b_local
+                #copy(partial_sums[i:i+1], a_part[i] @ b_part[i])
+                partial_sums[i:i+1]=a_part[i] @ b_part[i]
         @spawn(dependencies=P, data=[partial_sums])
         def reduce():
             return np.sum(partial_sums)
