@@ -1,7 +1,7 @@
 import logging
 from abc import ABCMeta, abstractmethod
 from typing import Dict
-import collections
+from collections.abc import Sequence
 
 # FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
 #  Loading numpy locally works for some things, but not for the array._register_array_type call.
@@ -12,8 +12,8 @@ from parla.tasks import get_current_devices
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["get_array_module", "get_memory", "is_array", "asnumpy", "copy", "clone_here", "storage_size","get_device_array"]
-
+__all__ = ["get_array_module", "get_memory", "is_array", "asnumpy", "copy", "clone_here", "storage_size",
+            "get_device_array"]
 
 
 class ArrayType(metaclass=ABCMeta):
@@ -141,10 +141,7 @@ def storage_size(*arrays):
     return sum(a.size * a.itemsize for a in arrays)
 
 
-
-
-
-class LocalArray(collections.abc.Sequence):
+class LocalArray(Sequence):
     def __init__(self, default):
         self.default = default
 
@@ -169,7 +166,6 @@ class LocalArray(collections.abc.Sequence):
 _Array_Set = []
 
 
-
 def get_device_array(source):
     for a in _Array_Set:
         if (a.default==source).all():
@@ -177,5 +173,3 @@ def get_device_array(source):
     new_array = LocalArray(source)
     _Array_Set.append(new_array)
     return new_array
-
-

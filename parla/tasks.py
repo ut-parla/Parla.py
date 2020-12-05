@@ -11,14 +11,9 @@ Parla supports simple task parallelism.
 import logging
 import threading
 import inspect
-import dis
-from types import CodeType
-from guppy import hpy
 from abc import abstractmethod, ABCMeta
 from contextlib import asynccontextmanager
 from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, FrozenSet, Dict
-import array
-import copy
 
 from parla.device import Device, Architecture, get_all_devices
 from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task
@@ -293,6 +288,7 @@ class _TaskLocals(threading.local):
 
 _task_locals = _TaskLocals()
 
+
 def _move_function_local(body):
     """
     A function copy all data to desired device
@@ -327,8 +323,6 @@ def _move_function_local(body):
     new_body.__kwdefaults__ = body.__kwdefaults__
     new_body.__module__ = body.__module__
     return new_body
-
-
 
 
 def _task_callback(task, body) -> TaskState:
@@ -366,7 +360,6 @@ def _task_callback(task, body) -> TaskState:
                 if e.args:
                     (result,) = e.args
                 return TaskCompleted(result)
-
         else:
             logger.debug("Executing function task: %s", task.taskid)
             result = body()

@@ -7,15 +7,12 @@ import numpy as np
 from numba import jit, void, float64
 import math
 import time
-import os
 
-
-from parla import Parla, TaskEnvironment
+from parla import Parla
 from parla.array import copy, clone_here
 from parla.tasks import *
 # from parla.cuda import *
 from parla.cpu import *
-
 
 
 @jit(void(float64[:,:]), nopython=True, nogil=True)
@@ -71,17 +68,12 @@ def cholesky_blocked_inplace(a):
             # Inter-block GEMM
             @spawn(gemm1[j, k], [solve[j, k]])
             def t1():
-                #out = clone_here(a[j,j])  # Move data to the current device
-                #rhs = clone_here(a[j,k])
-
-                out = a[j,j]  # Move data to the current device
+                out = a[j,j]
                 rhs = a[j,k]
 
                 out -= rhs @ rhs.T
 
                 a[j,j] = out
-
-                #copy(a[j,j], out)  # Move the result to the global array
 
         # Cholesky on block
         @spawn(subcholesky[j], [gemm1[j, 0:j]])
@@ -93,18 +85,13 @@ def cholesky_blocked_inplace(a):
                 # Inter-block GEMM
                 @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k]])
                 def t3():
-                    #out = clone_here(a[i,j])  # Move data to the current device
-                    #rhs1 = clone_here(a[i,k])
-                    #rhs2 = clone_here(a[j,k])
-
-                    out = a[i,j]  # Move data to the current device
+                    out = a[i,j]
                     rhs1 = a[i,k]
                     rhs2 = a[j,k]
 
                     out -= rhs1 @ rhs2.T
 
-                    a[i,j] = out  # Move the result to the global array
-                   # copy(a[i,j], out)  # Move the result to the global array
+                    a[i,j] = out
 
             # Triangular solve
             @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]])
@@ -141,6 +128,5 @@ def main():
         assert(np.max(np.absolute(a - computed_L @ computed_L.T)) < 1E-8)
 
 if __name__ == '__main__':
-    # Start Parla runtime
     with Parla():
         main()

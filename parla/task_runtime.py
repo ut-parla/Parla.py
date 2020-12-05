@@ -217,7 +217,7 @@ class Task:
             # Expose the self reference to other threads as late as possible, but not after potentially getting
             # scheduled.
             taskid.task = self
-
+            
             logger.debug("Task %r: Creating", self)
 
             self._check_remaining_dependencies()
@@ -382,8 +382,6 @@ class _SchedulerLocals(threading.local):
 
 
 _scheduler_locals = _SchedulerLocals()
-
-
 
 
 def get_scheduler_context() -> SchedulerContext:
