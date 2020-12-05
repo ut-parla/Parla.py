@@ -420,7 +420,6 @@ class WorkerThread(ControllableThread, SchedulerContext):
         # In this implementation the right is the "local-end", so append/pop are used by this worker and
         # appendleft/popleft are used by the scheduler or other workers.
         self._queue = deque()
-        self.start()
         self._status = "Initializing"
 
     @property
@@ -637,7 +636,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._available_resources = ResourcePool(multiplier=1.0)
         self._unassigned_resources = ResourcePool(multiplier=max_worker_queue_depth*1.0)
         self._worker_threads = [WorkerThread(self, i) for i in range(n_threads)]
-        self._should_run = True
+        for t in self._worker_threads:
+            t.start()
         self.start()
 
     @property
