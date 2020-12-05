@@ -16,6 +16,7 @@ import time
 import os
 
 
+
 def main():
     divisions = 10
     mapper = LDeviceSequenceBlocked(divisions)
@@ -31,12 +32,12 @@ def main():
             @spawn(P[i], data=[a_part[i], b_part[i]])
             def inner_local():
                 # Perform the local inner product using the numpy multiply operation, @.
-                #copy(partial_sums[i:i+1], a_part[i] @ b_part[i])
-                partial_sums[i:i+1]=a_part[i] @ b_part[i]
+                partial_sums[i:i+1] = a_part[i] @ b_part[i]
         @spawn(dependencies=P, data=[partial_sums])
         def reduce():
             return np.sum(partial_sums)
         return await reduce
+
 
     @spawn()
     async def main_task():
@@ -45,7 +46,6 @@ def main():
         b = np.random.rand(n)
         print("Starting.", a.shape, b.shape)
         res = await inner(a, b)
-        print(res)
         assert np.allclose(np.inner(a, b), res)
         print("Success.", res)
 
