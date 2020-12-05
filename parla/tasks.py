@@ -299,148 +299,6 @@ def _move_function_local(body):
     """
     new_global = {}
     new_closure= []
-    #memory_pairs = []
-    #device_array = []
-    #var_maps = {}
-    #array_names = set()
-    #int_names = set()
-
-    ##Locate all variable related to data stream
-    #if not body.__globals__ == None:
-    #    for key, val in body.__globals__.items():
-    #        if array.is_array(val):
-    #            var_maps[key] = val
-    #            array_names.add(key)
-    #        elif isinstance(val, int):
-    #            var_maps[key] = val
-    #            int_names.add(key)
-    #            #device_array = array.get_device_array(val)
-    #            #new_global[key] = device_array.get_copy()
-    #        #else:
-    #            #new_global[key]=val
-    ##local all nonlcoals
-    #code = body.__code__
-    #n_nonlocals = len(code.co_freevars)
-    #for i in range(n_nonlocals):
-    #    cur_name = code.co_freevars[i]
-    #    cur_val = body.__closure__[i].cell_contents
-    #    var_maps[cur_name] = cur_val
-    #    if array.is_array(cur_val):
-    #        array_names.add(cur_name)
-    #    elif isinstance(cur_val, int):
-    #        int_names.add(cur_name)
-    #print("\nname:")
-    #print(body.__name__)
-    #print(dis.dis(body.__code__))
-    ##print(n_nonlocals)
-    ##print(array_names)
-    ##if len(array_names)>0:
-    ##    print(var_maps[list(array_names)[0]])
-    ##    print(repr(var_maps[list(array_names)[0]]))
-    ##print(int_names)
-    #cur_segments = []
-    #read = {}
-    #write = {}
-    #cur_arr = None
-    ## Locate small segments
-    #for ins in dis.get_instructions(code):
-    #    if (ins.opcode == 136 or ins.opcode == 116):
-    #        #load array
-    #        #print(ins.argrepr)
-    #        if ins.argrepr in array_names:
-    #            cur_arr = repr(var_maps[ins.argrepr])
-    #            print("load arr")
-    #            #cur_arr_name = ins.argrepr
-    #            #cur_segments = {cur_arr_val:[]}
-    #        #load int
-    #        elif ins.argrepr in int_names:
-    #            print("load deref int")
-    #            cur_segments.append(var_maps[ins.argrepr])
-    #    #elif not cur_arr_val == None:
-    #    #load const
-    #    if ins.opcode == 100:
-    #        #we only care about int in index
-    #        if  ins.argrepr.isdigit():
-    #            cur_segments.append(int(ins.argrepr))
-    #        #const.append(int(ins.argrepr))
-    #    #binary power
-    #    elif ins.opcode == 19:
-    #        add = cur_segments[-2:]
-    #        results = add[0]**add[1]
-    #        cur_segments = cur_segments[:-2]+[results]
-    #    #binary multiply
-    #    elif ins.opcode ==20:
-    #        add = cur_segments[-2:]
-    #        results = add[0]*add[1]
-    #        cur_segments = cur_segments[:-2]+[results]
-    #    #binary mod
-    #    elif ins.opcode ==22:
-    #        add = cur_segments[-2:]
-    #        results = add[0]%add[1]
-    #        cur_segments = cur_segments[:-2]+[results]
-    #    #binary add
-    #    elif ins.opcode ==23:
-    #        print("binary add")
-    #        print(cur_segments)
-    #        add = cur_segments[-2:]
-    #        results = add[0]+add[1]
-    #        cur_segments = cur_segments[:-2]+[results]
-    #        print(cur_segments)
-    #    #binary sub
-    #    elif ins.opcode ==24:
-    #        add = cur_segments[-2:]
-    #        results = add[0]+add[1]
-    #        cur_segments = cur_segments[:-2]+[results]
-    #    #binary floor divide
-    #    elif ins.opcode ==26:
-    #        add = cur_segments[-2:]
-    #        results = add[0]//add[1]
-    #        cur_segments = cur_segments[:-2]+[results]
-    #    #build index tuple
-    #    elif ins.opcode == 102:
-    #        index = tuple(cur_segments)
-    #        cur_segments = [index]
-    #    #build index slice
-    #    elif ins.opcode == 133:
-    #        index = slice(*cur_segments)
-    #        cur_segments = [index]
-    #        print(index)
-    #        print(cur_segments)
-    #    # subscribe
-    #    elif ins.opcode == 25:
-    #        idx = cur_segments[-1]
-    #        if not cur_arr == None:
-    #            if cur_arr in read.keys():
-    #                read[cur_arr].append(idx)
-    #            else:
-    #                read[cur_arr]=[idx]
-    #        cur_segments = cur_segments[:-1]
-    #        cur_arr = None
-    #    # store subscribe:
-    #    elif ins.opcode == 60:
-    #        idx = cur_segments[-1]
-    #        if not cur_arr == None:
-    #            if cur_arr in write.keys():
-    #                write[cur_arr].append(idx)
-    #            else:
-    #                write[cur_arr] = [idx]
-    #        cur_segments = cur_segments[:-1]
-    #        cur_arr = None
-    #    # store local
-    #    elif ins.opcode == 125:
-    #        cur_val = cur_segments[-1]
-    #        cur_segments = cur_segments[:-1]
-    #        var_maps[ins.argrepr] = cur_val
-    #    # load local
-    #    elif ins.opcode == 124:
-    #        cur_segments.append(var_maps[ins.argrepr])
-    #    # write to nonlocal or global
-    #    elif ins.opcode == 137 or ins.opcode==97:
-    #        write[repr(var_maps[ins.argrepr])] = []
-
-
-    #if len(read) > 0:
-    #    print(read)
 
     if not body.__globals__ == None:
         for key, val in body.__globals__.items():
@@ -480,12 +338,8 @@ def _task_callback(task, body) -> TaskState:
     try:
         body = body
 
-        device_array = []
         if inspect.isfunction(body):
-            #if body.__name__ == "t2" or body.__name__ == "t4":
-            #body, device_array = _move_function_local(body)
             body = _move_function_local(body)
-
 
         if inspect.iscoroutinefunction(body):
             logger.debug("Constructing coroutine task: %s", task.taskid)
@@ -518,9 +372,6 @@ def _task_callback(task, body) -> TaskState:
             result = body()
             return TaskCompleted(result)
     finally:
-        #if len(device_array) > 0:
-        #    for arr in device_array:
-        #        arr.cleanup()
         logger.debug("Finished: %s", task.taskid)
     assert False
 
@@ -626,46 +477,6 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
             separated_body.__module__ = body.__module__
 
         taskid.dependencies = dependencies
-
-        #print("\n")
-        #print("name:")
-        #print(separated_body.__name__)
-        #if not separated_body.__closure__==None:
-        #    print("closure:")
-        #    for x in separated_body.__closure__:
-        #        print(str(x))
-        #        #print(dir(x))
-        #        #print(x.cell_contents)
-        #        #print(dir(x.cell_contents))
-        #print("code:")
-        #code = separated_body.__code__
-        #print("freevars")
-        #print(code.co_freevars)
-        ##print("codeinfo:")
-        ##print(dis.code_info(code))
-        #print("byte_code:")
-        #print(dis.dis(code))
-        #print("iterate: ")
-        #for ins in dis.get_instructions(code):
-        #    print("op code")
-        #    print(ins.opcode)
-        #    print("operation name:")
-        #    print(ins.opname)
-        #    print("operation argument:")
-        #    print(ins.arg)
-        #    print("operation argvalues:")
-        #    print(ins.argval)
-        #    print("operation argrepr:")
-        #    print(ins.argrepr)
-        #    print("line start")
-        #    print(ins.starts_line)
-        #    print("offset")
-        #    print(ins.offset)
-
-
-
-
-
 
         # Spawn the task via the Parla runtime API
         task = task_runtime.get_scheduler_context().spawn_task(

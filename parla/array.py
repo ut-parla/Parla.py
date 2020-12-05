@@ -1,9 +1,8 @@
 import logging
 from abc import ABCMeta, abstractmethod
 from typing import Dict
-import copy as cp
-import itertools
 import collections
+
 # FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
 #  Loading numpy locally works for some things, but not for the array._register_array_type call.
 import numpy as np
@@ -150,7 +149,6 @@ class LocalArray(collections.abc.Sequence):
         self.default = default
 
     def __getitem__(self,idx):
-        print(idx)
         ori = self.default[idx]
         if is_array(ori):
             local_data = clone_here(self.default[idx])
@@ -159,7 +157,6 @@ class LocalArray(collections.abc.Sequence):
             return ori
 
     def __setitem__(self,idx, val):
-        print(idx)
         copy(self.default[idx], val)
 
     def __len__(self):
