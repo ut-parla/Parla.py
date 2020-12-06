@@ -11,6 +11,8 @@ Parla supports simple task parallelism.
 import logging
 import threading
 import inspect
+import dis
+import warnings
 from abc import abstractmethod, ABCMeta
 from contextlib import asynccontextmanager
 from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, FrozenSet, Dict
@@ -289,6 +291,135 @@ class _TaskLocals(threading.local):
 _task_locals = _TaskLocals()
 
 
+def detect_data(body):
+
+    var_maps = {}
+    array_names = set()
+    int_names = set()
+    #Locate all variable related to data stream
+    if not body.__globals__ == None:
+        for key, val in body.__globals__.items():
+            if array.is_array(val) or isinstance(val, list):
+                var_maps[key] = val
+                array_names.add(key)
+            elif isinstance(val,int):
+                var_maps[key] = val
+                int_names.add(key)
+    #local all nonlcoals
+    code = body.__code__
+    n_nonlocals = len(code.co_freevars)
+    for i in range(n_nonlocals):
+        cur_name = code.co_freevars[i]
+        cur_val = body.__closure__[i].cell_contents
+        var_maps[cur_name] = cur_val
+        if array.is_array(cur_val) or isinstance(cur_val, list):
+            array_names.add(cur_name)
+        elif isinstance(cur_val,int):
+            int_names.add(cur_name)
+
+    idx_maps = {}
+    cur_segments= []
+    cur_arr = None
+    read = {}
+    write = {}
+
+    for ins in dis.get_instructions(code):
+        #load sequence
+        if ins.opcode == 136 or ins.opcode == 116:
+            if ins.argrepr in array_names:
+                if not cur_arr == None:
+                    read[cur_arr] = []
+                cur_arr = ins.argrepr
+            elif ins.argrepr in int_names:
+                cur_segments.append(var_maps[ins.argrepr])
+        #store sequence
+        if ins.opcode == 137 or ins.opcode == 97:
+            if ins.argrepr in array_names:
+                write[ins.argrepr] = []
+                cur_arr = None
+        if cur_arr is not None:
+            #load const
+            if ins.opcode == 100:
+                #we only care about int in index
+                if  ins.argrepr.isdigit():
+                    cur_segments.append(int(ins.argrepr))
+                    #const.append(int(ins.argrepr))
+            #binary power
+            elif ins.opcode == 19:
+                add = cur_segments[-2:]
+                results = add[0]**add[1]
+                cur_segments = cur_segments[:-2]+[results]
+            #binary multiply
+            elif ins.opcode ==20:
+                add = cur_segments[-2:]
+                results = add[0]*add[1]
+                cur_segments = cur_segments[:-2]+[results]
+            #binary mod
+            elif ins.opcode ==22:
+                add = cur_segments[-2:]
+                results = add[0]%add[1]
+                cur_segments = cur_segments[:-2]+[results]
+            #binary add
+            elif ins.opcode ==23:
+                add = cur_segments[-2:]
+                results = add[0]+add[1]
+                cur_segments = cur_segments[:-2]+[results]
+            #binary sub
+            elif ins.opcode ==24:
+                add = cur_segments[-2:]
+                results = add[0]-add[1]
+                cur_segments = cur_segments[:-2]+[results]
+            #binary floor divide
+            elif ins.opcode ==26:
+                add = cur_segments[-2:]
+                results = add[0]//add[1]
+                cur_segments = cur_segments[:-2]+[results]
+            #build index tuple
+            elif ins.opcode == 102:
+                index = tuple(cur_segments)
+                cur_segments = [index]
+            #build index slice
+            elif ins.opcode == 133:
+                index = slice(*cur_segments)
+                cur_segments = [index]
+            #binary subscribe
+            elif ins.opcode == 25:
+                idx = cur_segments[-1]
+                if cur_arr in read.keys():
+                    read[cur_arr].append(idx)
+                else:
+                    read[cur_arr]=[idx]
+                cur_segments = cur_segments[:-1]
+                cur_arr = None
+            #store subs
+            elif ins.opcode == 60:
+                idx = cur_segments[-1]
+                if cur_arr in write.keys():
+                    write[cur_arr].append(idx)
+                else:
+                    write[cur_arr]=[idx]
+                cur_segments = cur_segments[:-1]
+                cur_arr = None
+
+    if not cur_arr == None:
+        read[cur_arr] = []
+    #print(read)
+    #print(write)
+
+    data = []
+    for key,vals in read.items():
+        cur_data = var_maps[key]
+        if len(vals) > 0:
+            for val in vals:
+                data.append(cur_data[val])
+        else:
+            data.append(cur_data)
+    if data == []:
+        return None
+
+    return data
+
+
 def _move_function_local(body):
     """
     A function copy all data to desired device
@@ -430,11 +561,21 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
     def decorator(body):
         nonlocal placement, memory
+
+        inspect_data = detect_data(body)
+
         if data is not None:
             if placement is not None or memory is not None:
                 raise ValueError("The data parameter cannot be combined with placement or memory paramters.")
             placement = data
             memory = array.storage_size(*data)
+        elif inspect_data is not None:
+            warnings.warn("data detected but not declare")
+            if placement is not None or memory is not None:
+                raise ValueError("The data parameter cannot be combined with placement or memory paramters.")
+            placement = inspect_data
+            memory = array.storage_size(*inspect_data)
+
 
         devices = get_placement_for_any(placement)
 

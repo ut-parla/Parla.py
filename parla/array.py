@@ -168,8 +168,8 @@ _Array_Set = []
 
 def get_device_array(source):
     for a in _Array_Set:
-        if (a.default==source).all():
-            return  a
+        if (a.default == source).all():
+            retur a
     new_array = LocalArray(source)
     _Array_Set.append(new_array)
     return new_array
