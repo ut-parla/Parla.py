@@ -47,7 +47,7 @@ async def collect_fox(y, yp):
     for i in range(0, partitions_y):  # rows
         @spawn(C[i])
         def c():
-            copy(y[mapper.slice_x(i, y.shape[0])], yp[i][i])
+            y[mapper.slice_x(i, y.shape[0])] = yp[i][i]
 
     # wait for the collect tasks to complete.
     await C
@@ -98,7 +98,7 @@ async def matvec_fox_partitioned(yp, Ap, xp):
             # A task per partition to copy data from the diagonal to each partition on the same column
             @spawn(B[i, j], placement=mapper.device(i, j))
             def b():
-                copy(xp[i][j], xp[j][j])
+                xp[i][j] =xp[j][j]
 
     # block-wise multiplication
     for i in range(0, partitions_y):
