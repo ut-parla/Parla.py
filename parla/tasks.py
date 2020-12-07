@@ -317,6 +317,7 @@ def detect_data(body):
         elif isinstance(cur_val,int):
             int_names.add(cur_name)
 
+
     idx_maps = {}
     cur_segments= []
     cur_arr = None
@@ -328,14 +329,14 @@ def detect_data(body):
         if ins.opcode == 136 or ins.opcode == 116:
             if ins.argrepr in array_names:
                 if not cur_arr == None:
-                    read[cur_arr] = []
+                    read[cur_arr] = None
                 cur_arr = ins.argrepr
             elif ins.argrepr in int_names:
                 cur_segments.append(var_maps[ins.argrepr])
         #store sequence
         if ins.opcode == 137 or ins.opcode == 97:
             if ins.argrepr in array_names:
-                write[ins.argrepr] = []
+                write[ins.argrepr] = None
                 cur_arr = None
         if cur_arr is not None:
             #load const
@@ -385,7 +386,7 @@ def detect_data(body):
             #binary subscribe
             elif ins.opcode == 25:
                 idx = cur_segments[-1]
-                if cur_arr in read.keys():
+                if cur_arr in read.keys() and not read[cur_arr]==None:
                     read[cur_arr].append(idx)
                 else:
                     read[cur_arr]=[idx]
@@ -402,14 +403,12 @@ def detect_data(body):
                 cur_arr = None
 
     if not cur_arr == None:
-        read[cur_arr] = []
-    #print(read)
-    #print(write)
+        read[cur_arr] = None
 
     data = []
     for key,vals in read.items():
         cur_data = var_maps[key]
-        if len(vals) > 0:
+        if vals is not None and len(vals) > 0:
             for val in vals:
                 data.append(cur_data[val])
         else:
@@ -427,10 +426,13 @@ def _move_function_local(body):
     new_global = {}
     new_closure= []
 
+
+
     if not body.__globals__ == None:
         for key, val in body.__globals__.items():
-            if array.is_array(val):
+            if array.is_array(val) or isinstance(val, list):
                 local_array = array.get_device_array(val)
+                new_global[key]=local_array
             else:
                 new_global[key] = val
 
@@ -438,7 +440,7 @@ def _move_function_local(body):
     if not body.__closure__ == None:
         for x in body.__closure__:
             val = x.cell_contents
-            if array.is_array(val):
+            if array.is_array(val) or isinstance(val, list):
                 local_array = array.get_device_array(val)
                 new_cell = _make_cell(local_array)
             else:
@@ -562,7 +564,8 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     def decorator(body):
         nonlocal placement, memory
 
-        inspect_data = detect_data(body)
+        #inspect_data,_ = detect_data(body)
+        inspect_data = None
 
         if data is not None:
             if placement is not None or memory is not None:

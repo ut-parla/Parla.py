@@ -144,6 +144,8 @@ def storage_size(*arrays):
 class LocalArray(Sequence):
     def __init__(self, default):
         self.default = default
+        if hasattr(default, "shape"):
+            self.shape = default.shape
 
     def __getitem__(self,idx):
         ori = self.default[idx]
@@ -168,8 +170,19 @@ _Array_Set = []
 
 def get_device_array(source):
     for a in _Array_Set:
-        if (a.default == source).all():
-            return a
+        if isinstance(a.default, list) or isinstance(source,list):
+            try:
+                same =  (a.default == source)
+            except ValueError:
+                continue
+        else:
+            same = (a.default == source)
+        if is_array(same):
+            if same.all():
+                return a
+        else:
+            if same:
+                return a
     new_array = LocalArray(source)
     _Array_Set.append(new_array)
     return new_array

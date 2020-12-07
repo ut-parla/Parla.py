@@ -118,7 +118,7 @@ async def matvec_fox_partitioned(yp, Ap, xp):
             for j in range(0, partitions_x):  # columns
                 if i == j:
                     continue
-                acc[:] = acc + mapper.memory(i, i)(yp[i][j])
+                acc = acc + mapper.memory(i, i)(yp[i][j])
 
     # wait for the reduce tasks to complete
     await R
