@@ -107,6 +107,7 @@ async def matvec_fox_partitioned(yp, Ap, xp):
             @spawn(M[i, j], [B[i, j]], placement=mapper.device(i, j))
             def m():
                 # TODO: Once cupy supports the out parameter for matmul, use that here instead.
+                print(xp[i][j])
                 yp[i][j][:] = Ap[i][j] @ xp[i][j]
 
     # reduce along rows
@@ -118,6 +119,7 @@ async def matvec_fox_partitioned(yp, Ap, xp):
             for j in range(0, partitions_x):  # columns
                 if i == j:
                     continue
+                #print(yp[i][j])
                 acc = acc + mapper.memory(i, i)(yp[i][j])
 
     # wait for the reduce tasks to complete
@@ -135,6 +137,7 @@ def main():
 
         # Compute "golden" result
         res = A @ x
+        #print(res)
         print("----", A.shape)
 
         # Compute with Parla

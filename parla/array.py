@@ -1,7 +1,9 @@
 import logging
 from abc import ABCMeta, abstractmethod
 from typing import Dict
+import copy as cp
 from collections.abc import Sequence
+import ast
 
 # FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
 #  Loading numpy locally works for some things, but not for the array._register_array_type call.
@@ -146,16 +148,77 @@ class LocalArray(Sequence):
         self.default = default
         if hasattr(default, "shape"):
             self.shape = default.shape
+        if isinstance(default, list):
+            for i in range(len(default)):
+                if isinstance(default[i], list):
+                    self.default[i]=LocalArray(default[i])
+        #if isinstance(default, list):
+        #    self.device_copy = cp.deepcopy(default)
+        #else:
+        #    self.device_copy = default.tolist()
+        self.device_copy = {}
+        self.local = False
+
 
     def __getitem__(self,idx):
-        ori = self.default[idx]
+        #if self.local == False:
+        if isinstance(idx, slice):
+            idx = str(idx)
+
+        if idx in self.device_copy.keys():
+            ori = self.device_copy[idx]
+            #else:
+            #    if type(idx) == str:
+            #        idx = ast.literal_eval(idx)
+            #    self.copy_to_device()
+            #    ori = self.default[idx]
+        else:
+            ori = self.default[idx]
+        #if isinstance(idx, tuple):
+        #    cur = self.device_copy
+        #    for x in idx:
+        #        cur = cur[x]
+        #else:
+        #    cur = self.device_copy[idx]
+
         if is_array(ori):
-            local_data = clone_here(self.default[idx])
+            local_data = clone_here(ori)
+            if isinstance(idx, slice):
+                idx = str(idx)
+            self.device_copy[idx]=local_data
+            #if isinstance(idx, tuple):
+            #    self.set_tuple(idx,local_data)
+            #else:
+            #    self.device_copy[idx] = local_data
+            #self.local = False
             return local_data
         else:
             return ori
 
+    def copy_to_device(self):
+        for idx in self.device_copy.keys():
+            if type(idx)==str:
+                copy(self.default[ast.literal_eval(idx)], self.device_copy[idx])
+            else:
+                copy(self.default[idx], self.device_copy[idx])
+        self.local = True
+
+    def set_tuple(self,idx, val):
+        cur = self.device_copy
+        for x in range(len(idx)-1):
+            cur = cur[idx[x]]
+        cur[idx[-1]] = val
+
+
     def __setitem__(self,idx, val):
+        #self.local = False
+        #if isinstance(idx, slice):
+        #    idx = str(idx)
+        #self.device_copy[idx] = val
+        #if isinstance(idx, tuple):
+        #    self.set_tuple(idx, val)
+        #else:
+        #    self.device_copy[idx]=val
         copy(self.default[idx], val)
 
     def __len__(self):
