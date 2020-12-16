@@ -294,20 +294,15 @@ def _move_function_local(body):
     A function copy all data to desired device
     """
     new_global = {}
-    new_closure= []
-
-
-
-    if not body.__globals__ == None:
+    if body.__globals__ is not None:
         for key, val in body.__globals__.items():
             if array.is_array(val) or isinstance(val, list):
-                local_array = array.get_device_array(val)
-                new_global[key]=local_array
+                new_global[key] = array.get_device_array(val)
             else:
                 new_global[key] = val
 
-
-    if not body.__closure__ == None:
+    new_closure = []
+    if body.__closure__ is not None:
         for x in body.__closure__:
             val = x.cell_contents
             if array.is_array(val) or isinstance(val, list):
@@ -316,7 +311,6 @@ def _move_function_local(body):
             else:
                 new_cell = x
             new_closure.append(new_cell)
-
 
     new_body = type(body)(
             body.__code__, new_global, body.__name__, body.__defaults__,

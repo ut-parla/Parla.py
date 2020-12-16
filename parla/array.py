@@ -233,19 +233,9 @@ _Array_Set = []
 
 def get_device_array(source):
     for a in _Array_Set:
-        if isinstance(a.default, list) or isinstance(source,list):
-            try:
-                same =  (a.default == source)
-            except ValueError:
-                continue
-        else:
-            same = (a.default == source)
-        if is_array(same):
-            if same.all():
-                return a
-        else:
-            if same:
-                return a
+        if a.default is source:
+            return a
+
     new_array = LocalArray(source)
     _Array_Set.append(new_array)
     return new_array
