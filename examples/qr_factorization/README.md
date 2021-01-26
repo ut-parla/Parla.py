@@ -2,11 +2,18 @@
 **Various implementations of a blocked QR factorization to test the performance of various features.**
 
 ### Blocked QR Factorization
-Given a matrix A , a [QR factorization](https://en.wikipedia.org/wiki/QR_decomposition) is the decomposition
+Given a matrix A, a [QR factorization](https://en.wikipedia.org/wiki/QR_decomposition) is the decomposition
 of the matrix A into the matrix product A = QR where Q
 is comprised entirely of orthogonal unit vectors and R is an
 upper triangular matrix. It's a candidate for testing nested parallelism because blocks can be processed in parallel, and elements within blocks can be processed in parallel. For more information see "[Direct QR factorizations for tall-and-skinny matrices in
 MapReduce architectures](https://arxiv.org/abs/1301.1071)."
+
+### Usage
+For non-Parla-based programs, just use Python, e.g.
+```
+python3 qr-simple-blocked.py
+```
+Most of these scripts simply run 5 iterations of the factorization algorithm on large matrices, outputting time taken and checking the result, so there won't be much output unless you modify the script.
 
 ### Files
 - `README.md`
