@@ -15,13 +15,11 @@ python3 qr-simple-blocked.py
 ```
 Most of these scripts simply run 5 iterations of the factorization algorithm on large matrices, outputting time taken and checking the result, so there won't be much output unless you modify the script.
 
+As of writing this README, the only script that actually uses Parla features right now is qr-vec.py, which has a segmentation fault if too many threads are used.
+
 ### Files
 - `README.md`
 	- This
-- `parla_source.sh`
-	- Run `source parla_source.sh` before trying to use `parla.sh`.
-- `parla.sh`
-	- Used to run Parla-dependent programs in place of calling `python`. Required for files denoted with *.
 - `qr-numpy.py`
 	- Tests NumPy's basic factorization algorithm, `numpy.linalg.qr()`, which has a single level of parallelism and which all the other versions depend on.
 - `qr-dask.py`
