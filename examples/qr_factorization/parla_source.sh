@@ -1,1 +1,0 @@
-export LD_LIBRARY_PATH=/home/will/Parla.py/runtime_libs/build:/home/will/Parla.py/runtime_libs/:/home/will/hacked-libc:/home/will/Parla.py/usingldso:/usr/lib/x86_64-linux-gnu/:/usr/local/cuda-10.2/lib64
