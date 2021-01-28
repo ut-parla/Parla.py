@@ -34,5 +34,5 @@ As of writing this README, the only script that actually uses Parla features rig
 	- Attempt to modify the above version to use shared memory rather than copying; incomplete.
 - `qr-vec.py` *
 	- Uses VECs (Virtual Execution Contexts) in order to achieve nested parallelism using multiple threads in a single virtual address space.
-- `vec-seegfault.py` *
+- `vec-segfault.py` *
 	- Slimmed down version of qr-vec.py for isolating the segmentation fault.
