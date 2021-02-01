@@ -39,6 +39,29 @@ def test_parla_ctx():
         assert task_results == [1]
 
 
+def test_scheduler_hook():
+    task_results = []
+
+    from parla.task_runtime import Scheduler
+    class MyScheduler(Scheduler):
+        def _assignment_policy(self, task: Task):
+            sleep(0.05)
+            task_results.append((task.name, tuple(d.name for d in task.dependees)))
+            return super(MyScheduler, self)._assignment_policy(task)
+
+    with Parla(scheduler_class=MyScheduler):
+        @spawn()
+        def task():
+            sleep(0.05)
+            task_results.append(1)
+        @spawn(None, [task])
+        def task2():
+            sleep(0.05)
+            task_results.append(2)
+
+        sleep_until(lambda: len(task_results) == 4)
+        assert task_results == [("task", ("task2",)), 1, ("task2", ()), 2]
+
 def test_spawn(runtime_sched):
     task_results = []
     @spawn()
@@ -46,6 +69,7 @@ def test_spawn(runtime_sched):
         task_results.append(1)
 
     sleep_until(lambda: len(task_results) == 1)
+    assert task.name == "task"
     assert task_results == [1]
 
 
@@ -90,10 +114,14 @@ def test_await_value(runtime_sched):
         @spawn()
         def subtask():
             return 42
+        assert subtask.name == "subtask"
         v = (await subtask)
+        assert subtask.name == "subtask"
         task_results.append(v)
 
+    assert task.name == "task"
     sleep_until(lambda: len(task_results) == 1)
+    assert task.name == "task"
     assert task_results == [42]
 
 

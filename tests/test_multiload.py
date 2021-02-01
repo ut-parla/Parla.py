@@ -1,5 +1,8 @@
 import types
 
+import pytest
+
+
 def is_submodule(root, module):
     return module.__name__.startswith(root.__name__ + ".") or module.__name__ == root.__name__
 
@@ -23,10 +26,17 @@ def check_module(mod):
                 if key1 != key2:
                     assert module1 is not module2
 
+
 def test_numpy():
     import ctypes
     import sys
-    from parla.multiload import multiload, multiload_contexts as contexts, multiload_thread_locals
+    try:
+        from parla.multiload import multiload, multiload_contexts as contexts, multiload_thread_locals
+    except OSError as e:
+        if "libparla_supervisor.so: cannot open shared object file: No such file or directory" in str(e):
+            pytest.xfail(str(e))
+        else:
+            raise
     assert "numpy" not in sys.modules
     with multiload():
         import numpy
