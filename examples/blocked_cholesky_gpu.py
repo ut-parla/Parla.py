@@ -22,7 +22,9 @@ from cupy.cuda import cublas
 from cupy.cuda import device
 from cupy.linalg import _util
 
-loc = gpu
+from scipy import linalg
+
+loc = cpu
 
 @specialized
 @jit(float64[:,:](float64[:,:]), nopython=True, nogil=True)
@@ -60,7 +62,7 @@ def ltriang_solve(a, b):
     for i in range(a.shape[0]):
         b[i] /= a[i,i]
         b[i+1:] -= a[i+1:,i:i+1] * b[i:i+1]
-    return b
+    return b.T
 
 #comments would repack the data to column-major
 def cupy_trsm_wrapper(a, b):
@@ -68,13 +70,13 @@ def cupy_trsm_wrapper(a, b):
     trsm = cublas.dtrsm
     uplo = cublas.CUBLAS_FILL_MODE_LOWER
 
-    #a = cp.array(a, dtype=np.float64, order='F')
-    #b = cp.array(b, dtype=np.float64, order='F')
-    #trans = cublas.CUBLAS_OP_N
-    #side = cublas.CUBLAS_SIDE_RIGHT
-
+    a = cp.array(a, dtype=np.float64, order='F')
+    b = cp.array(b, dtype=np.float64, order='F')
     trans = cublas.CUBLAS_OP_T
-    side = cublas.CUBLAS_SIDE_LEFT
+    side = cublas.CUBLAS_SIDE_RIGHT
+
+    #trans = cublas.CUBLAS_OP_T
+    #side = cublas.CUBLAS_SIDE_LEFT
 
     diag = cublas.CUBLAS_DIAG_NON_UNIT
     m, n = (b.side, 1) if b.ndim == 1 else b.shape
@@ -90,21 +92,6 @@ def update_kernel(a, b, c):
     c -= a @ b.T
     return c
 
-def cupy_gemm_wrapper(a, b, c):
-    cublas_handle=device.get_cublas_handle()
-    gemm = cublas.dgemm
-    transa = cublas.CUBLAS_OP_N
-    transb = cublas.CUBLAS_OP_T
-    ka, n = (b.side, 1) if a.ndim == 1 else a.shape
-    m, kb = (a.side, 1) if b.ndim == 1 else b.shape
-    mc, nc = (c.side, 1) if c.ndim == 1 else c.shape
-    assert(ka == kb)
-    assert(n == nc)
-    assert(m == mc)
-    k = ka
-    gemm(cublas_handle, transa, transb, m, n, k, 1.0, b.data.ptr, m, a.data.ptr, k, -1.0, c.data.ptr, m)
-    return c
-
 @specialized
 def update(a, b, c):
     c = update_kernel(a, b, c)
@@ -112,8 +99,8 @@ def update(a, b, c):
 
 @update.variant(gpu)
 def update_gpu(a, b, c):
-    #c = update_kernel(a, b, c)
-    c = cupy_gemm_wrapper(a, b, c)
+    c = update_kernel(a, b, c)
+    #c = cupy_gemm_wrapper(a, b, c)
     return c
 
 def cholesky_blocked_inplace(a):
@@ -171,9 +158,12 @@ def cholesky_blocked_inplace(a):
             @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], placement=loc)
             def t4():
                 factor = clone_here(a[j, j])
-                panel = clone_here(a[i, j]) 
-                panel = ltriang_solve(factor, panel)
-                copy(a[i, j], panel)
+                panel = clone_here(a[i, j])
+                #print("Before", panel)
+                out = ltriang_solve(factor, panel)
+                #print("Panel", panel)
+                #print("Out", out)
+                copy(a[i, j], out)
 
     return subcholesky[a.shape[0]-1]
 
@@ -182,9 +172,10 @@ def main():
     async def test_blocked_cholesky():
         # Configure environment
         block_size = 32*5
-        n = block_size*8
+        n = block_size*2
         assert not n % block_size
 
+        np.random.seed(10)
         # Construct input data
         a = np.random.rand(n, n)
         a = a @ a.T
@@ -200,9 +191,14 @@ def main():
         end = time.perf_counter()
         print(end - start, "seconds")
 
+        print("Truth", linalg.cholesky(a).T)
+
         # Check result
-        #computed_L = np.tril(a1)
-        #assert(np.max(np.absolute(a - computed_L @ computed_L.T)) < 1E-8)
+        computed_L = np.tril(a1)
+        print("Soln", computed_L)
+        error = np.max(np.absolute(a-computed_L @ computed_L.T))
+        print("Error", error)
+        assert(error < 1E-8)
 
 if __name__ == '__main__':
     with Parla():
