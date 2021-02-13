@@ -52,7 +52,6 @@ def tsqr_blocked_single(A, block_size):
     # Q2 is currently an (ncols * nblocks) x ncols matrix. Need nblocks of ncols rows each
     Q2 = make_blocked(Q2, A.shape[1])[0]
 
-    nblocks = len(Q1)
     Q = [np.matmul(Q1[i], Q2[i]) for i in range(nblocks)]
     Q = unblock(Q)
     
