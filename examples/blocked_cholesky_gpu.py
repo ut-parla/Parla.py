@@ -24,7 +24,7 @@ from cupy.linalg import _util
 
 from scipy import linalg
 
-loc = cpu
+loc = gpu
 
 @specialized
 @jit(float64[:,:](float64[:,:]), nopython=True, nogil=True)
@@ -45,6 +45,7 @@ def cholesky(a):
 @cholesky.variant(gpu)
 def choleksy_gpu(a):
     a = cp.linalg.cholesky(a)
+    cp.cuda.stream.get_current_stream().synchronize()
     return a
 
 @specialized
@@ -72,6 +73,7 @@ def cupy_trsm_wrapper(a, b):
 
     a = cp.array(a, dtype=np.float64, order='F')
     b = cp.array(b, dtype=np.float64, order='F')
+    print("Running cupy trsm on device: ", a.device)
     trans = cublas.CUBLAS_OP_T
     side = cublas.CUBLAS_SIDE_RIGHT
 
@@ -86,6 +88,7 @@ def cupy_trsm_wrapper(a, b):
 @ltriang_solve.variant(gpu)
 def ltriang_solve_gpu(a, b):
     b = cupy_trsm_wrapper(a, b)
+    cp.cuda.stream.get_current_stream().synchronize()
     return b
 
 def update_kernel(a, b, c):
@@ -100,6 +103,7 @@ def update(a, b, c):
 @update.variant(gpu)
 def update_gpu(a, b, c):
     c = update_kernel(a, b, c)
+    cp.cuda.stream.get_current_stream().synchronize()
     #c = cupy_gemm_wrapper(a, b, c)
     return c
 
@@ -131,7 +135,6 @@ def cholesky_blocked_inplace(a):
                 rhs = clone_here(a[j,k])
 
                 out = update(rhs, rhs, out)
-
                 copy(a[j,j], out)  # Move the result to the global array
 
         # Cholesky on block
@@ -151,7 +154,6 @@ def cholesky_blocked_inplace(a):
                     rhs2 = clone_here(a[j,k])
 
                     out = update(rhs1, rhs2, out)
-
                     copy(a[i,j], out)  # Move the result to the global array
 
             # Triangular solve
@@ -159,10 +161,10 @@ def cholesky_blocked_inplace(a):
             def t4():
                 factor = clone_here(a[j, j])
                 panel = clone_here(a[i, j])
-                #print("Before", panel)
+                print(i, j, "Before", panel, flush=True)
                 out = ltriang_solve(factor, panel)
-                #print("Panel", panel)
-                #print("Out", out)
+                print(i, j, "Panel", panel,flush=True)
+                print(i, j, "Out", out, flush=True)
                 copy(a[i, j], out)
 
     return subcholesky[a.shape[0]-1]
@@ -172,7 +174,7 @@ def main():
     async def test_blocked_cholesky():
         # Configure environment
         block_size = 32*5
-        n = block_size*2
+        n = block_size*16
         assert not n % block_size
 
         np.random.seed(10)
