@@ -10,9 +10,9 @@ from parla.cpu import cpu
 from parla.cuda import gpu
 from parla.tasks import *
 
-ROWS = 240 # Must be >> COLS
-COLS = 10
-BLOCK_SIZE = 30
+ROWS = 24000 # Must be >> COLS
+COLS = 1000
+BLOCK_SIZE = 3000
 
 # Accepts a matrix and returns a list of its blocks and the block count
 # block_size rows are grouped together
@@ -49,8 +49,6 @@ async def tsqr_blocked(A, block_size):
     # Initialize empty lists to store blocks
     Q1_blocked = [None] * nblocks;
     R1_blocked = [None] * nblocks;
-    #Q2_blocked = None
-    Q2_blocked = 1
 
     # Create tasks to perform qr factorization on each block and store them in lists
     T1 = TaskSpace()
@@ -72,7 +70,7 @@ async def tsqr_blocked(A, block_size):
         Q2_blocked = make_blocked(Q2, A.shape[1])[0]
         return Q2_blocked, R
 
-    Q2_blocked, R= await t2
+    Q2_blocked, R = await t2
 
     # Create tasks to perform Q1 @ Q2 matrix multiplication by block
     Q_blocked = [None] * nblocks
