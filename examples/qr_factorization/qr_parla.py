@@ -12,9 +12,9 @@ from parla.array import clone_here
 from parla.function_decorators import specialized
 from parla.tasks import *
 
-ROWS = 4 # Must be >> COLS
-COLS = 2
-BLOCK_SIZE = 2
+ROWS = 2000000 # Must be >> COLS
+COLS = 1000
+BLOCK_SIZE = 400000
 
 # Accepts a matrix and returns a list of its blocks and the block count
 # block_size rows are grouped together
@@ -119,6 +119,7 @@ async def tsqr_blocked(A, block_size):
             Q_blocked[i] = matmul_block(Q1_block_local, Q2_block_local)
             print("t3[", i, "] end", sep='')
 
+    await T3
     Q = unblock(Q_blocked) # This should be zero-copy since Q_blocked was allocated contiguously
     return Q, R
 
@@ -148,7 +149,7 @@ def main():
         Q, R = await tsqr_blocked(A, BLOCK_SIZE)
         end = time.time()
         print(end - start)
-        print(check_result(A, Q, R))
+        #print(check_result(A, Q, R))
     
 if __name__ == "__main__":
     with Parla():
