@@ -5,6 +5,8 @@ import numpy as np
 import cupy as cp
 import time
 
+from numba import jit, float64
+
 from parla import Parla
 from parla.cpu import cpu
 from parla.cuda import gpu
@@ -41,6 +43,7 @@ def unblock(A):
 
 # Not used
 @specialized
+@jit("Tuple((float64[:,:], float64[:,:]))(float64[:,:])", nopython=True, nogil=True) # https://stackoverflow.com/questions/30363253/
 def qr_block(block):
     return np.linalg.qr(block)
 
@@ -53,8 +56,9 @@ def qr_block_gpu(block):
 
 # Not used
 @specialized
+@jit(nopython=True, nogil=True)
 def matmul_block(block_1, block_2):
-    return np.matmul(block_1, block_2)
+    return block_1 @ block_2
 
 @matmul_block.variant(gpu)
 def matmul_block_gpu(block_1, block_2):
