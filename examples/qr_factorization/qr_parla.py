@@ -5,8 +5,6 @@ import numpy as np
 import cupy as cp
 import time
 
-from numba import jit, float64
-
 from parla import Parla
 from parla.cpu import cpu
 from parla.cuda import gpu
@@ -18,32 +16,8 @@ ROWS = 2000000 # Must be >> COLS
 COLS = 1000
 BLOCK_SIZE = 400000
 
-# Accepts a matrix and returns a list of its blocks and the block count
-# block_size rows are grouped together
-# I think this doesn't copy?
-def make_blocked(A, block_size):
-    nrows = A.shape[0]
-    nblocks = (nrows + block_size - 1) // block_size # ceiling division
-
-    block_list = []
-
-    for i in range(0, nblocks):
-        lower = i * block_size; # first row in block, inclusive
-        upper = (i + 1) * block_size # last row in block, exclusive
-        if upper > nrows:
-            upper = nrows
-
-        block_list.append(A[lower:upper])
-
-    return block_list, nblocks
-
-# Get back to original matrix form. Pass in a blocked matrix as a list.
-def unblock(A):
-    return np.concatenate(A)
-
 # Not used
 @specialized
-@jit("Tuple((float64[:,:], float64[:,:]))(float64[:,:])", nopython=True, nogil=True) # https://stackoverflow.com/questions/30363253/
 def qr_block(block):
     return np.linalg.qr(block)
 
@@ -56,7 +30,6 @@ def qr_block_gpu(block):
 
 # Not used
 @specialized
-@jit(nopython=True, nogil=True)
 def matmul_block(block_1, block_2):
     return block_1 @ block_2
 
@@ -74,57 +47,74 @@ async def tsqr_blocked(A, block_size):
     # Check for block_size > ncols
     assert ncols <= block_size, "Block size must be greater than or equal to the number of columns in the input matrix"
 
-    # Break input into blocks (stored as list of ndarrays)
-    A_blocked, nblocks = make_blocked(A, block_size)
+    # Calculate the number of blocks
+    nblocks = (nrows + block_size - 1) // block_size # ceiling division
 
     # Initialize empty lists to store blocks
-    Q1_blocked = [None] * nblocks; # Doesn't need to be contiguous, so basically just pointers
-    R1 = np.empty([nblocks * ncols, ncols]) # Needs to be allocated contiguously for later concatenation
-    R1_blocked = make_blocked(R1, ncols)[0] # R1 has nblocks, each of size ncols * ncols
-    # Q2 is allocated and blocked in t2
-    Q = np.empty([nrows, ncols]) # Needs to be allocated contiguously for later concatenation
-    Q_blocked = make_blocked(Q, block_size)[0] # Q has the same block count and dimensions as A
+    Q1_blocked = [None] * nblocks; # Doesn't need to be contiguous, just views
+    R1 = np.empty([nblocks * ncols, ncols]) # Concatenated view
+    # Q2 is allocated in t2
+    Q = np.empty([nrows, ncols]) # Concatenated view
 
     # Create tasks to perform qr factorization on each block and store them in lists
     T1 = TaskSpace()
     for i in range(nblocks):
-        @spawn(taskid=T1[i], placement=gpu, memory=(3*A_blocked[i].nbytes))
+        # Get block of A
+        A_lower = i * block_size # first row in block, inclusive
+        A_upper = (i + 1) * block_size # last row in block, exclusive
+        A_block = A[A_lower:A_upper]
+
+        # Block view to store Q1 not needed since it's not contiguous
+
+        # Get block view to store R1
+        R1_lower = i * ncols
+        R1_upper = (i + 1) * ncols
+
+        @spawn(taskid=T1[i], placement=gpu, memory=(4*A_block.nbytes)) # 4* for scratch space
         def t1():
-            print("t1[", i, "] start", sep='')
-            block_local = clone_here(A_blocked[i])
-            Q1_blocked[i], R1_blocked[i] = qr_block(block_local)
-            print("t1[", i, "] end", sep='')
+            #print("t1[", i, "] start", sep='')
+            A_block_local = clone_here(A_block)
+            Q1_blocked[i], R1[R1_lower:R1_upper] = qr_block(A_block_local)
+            #print("t1[", i, "] end", sep='')
 
     # Perform intermediate qr factorization on R1 to get Q2 and final R
     @spawn(dependencies=T1)
     def t2():
-        print("t2 start")
-        R1 = unblock(R1_blocked) # This should be zero-copy since R1_blocked was allocated contiguously
+        #print("t2 start")
 
         # R here is the final R result
         Q2, R = np.linalg.qr(R1) # TODO Do this recursively or on the GPU if it's slow?
 
         # Q1 and Q2 must have an equal number of blocks, where Q1 blocks' ncols = Q2 blocks' nrows
         # Q2 is currently an (ncols * nblocks) x ncols matrix. Need nblocks of ncols rows each
-        Q2_blocked = make_blocked(Q2, A.shape[1])[0]
-        return Q2_blocked, R
+        return Q2, R
 
-    Q2_blocked, R = await t2
-    print("t2 end")
+    Q2, R = await t2
+    #print("t2 end")
 
     # Create tasks to perform Q1 @ Q2 matrix multiplication by block
     T3 = TaskSpace()
     for i in range(nblocks):
-        @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=gpu, memory=(3*Q1_blocked[i].nbytes))
+        # Q1 is already in blocks
+
+        # Get block of Q2
+        Q2_lower = i * ncols
+        Q2_upper = (i + 1) * ncols
+        Q2_block = Q2[Q2_lower:Q2_upper]
+
+        # Get block view to store Q
+        Q_lower = i * block_size # first row in block, inclusive
+        Q_upper = (i + 1) * block_size # last row in block, exclusive
+
+        @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=gpu, memory=(4*Q1_blocked[i].nbytes))
         def t3():
-            print("t3[", i, "] start", sep='')
+            #print("t3[", i, "] start", sep='')
             Q1_block_local = clone_here(Q1_blocked[i])
-            Q2_block_local = clone_here(Q2_blocked[i])
-            Q_blocked[i] = matmul_block(Q1_block_local, Q2_block_local)
-            print("t3[", i, "] end", sep='')
+            Q2_block_local = clone_here(Q2_block)
+            Q[Q_lower:Q_upper] = matmul_block(Q1_block_local, Q2_block_local)
+            #print("t3[", i, "] end", sep='')
 
     await T3
-    Q = unblock(Q_blocked) # This should be zero-copy since Q_blocked was allocated contiguously
     return Q, R
 
 def check_result(A, Q, R):
