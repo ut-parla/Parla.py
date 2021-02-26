@@ -2,7 +2,7 @@ import numpy as np
 import cupy as cp
 import time
 
-ROWS = 2000000 # Must be >> COLS
+ROWS = 500000 # Must be >> COLS
 COLS = 1000
 
 def check_result(A, Q, R):
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     # Original matrix
     A = np.random.rand(ROWS, COLS)
     
-    # Numpy version
+    # Cupy version
     start = time.time()
     Q, R = cp.linalg.qr(cp.array(A))
     Q = cp.asnumpy(Q)
