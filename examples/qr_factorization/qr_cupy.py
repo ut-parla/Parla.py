@@ -22,11 +22,12 @@ if __name__ == "__main__":
     # Original matrix
     A = np.random.rand(ROWS, COLS)
     
-    # Cupy version
-    start = time.time()
-    Q, R = cp.linalg.qr(cp.array(A))
-    Q = cp.asnumpy(Q)
-    R = cp.asnumpy(R)
-    end = time.time()
-    print(end - start)
-    #print(check_result(A, Q, R))
+    for i in range(6):
+      # Cupy version
+      start = time.time()
+      Q, R = cp.linalg.qr(cp.array(A))
+      Q = cp.asnumpy(Q)
+      R = cp.asnumpy(R)
+      end = time.time()
+      print(end - start)
+      #print(check_result(A, Q, R))

@@ -22,8 +22,9 @@ if __name__ == "__main__":
     A = np.random.rand(ROWS, COLS)
     
     # Numpy version
-    start = time.time()
-    Q, R = np.linalg.qr(A)
-    end = time.time()
-    print(end - start)
-    #print(check_result(A, Q, R))
+    for i in range(6):
+      start = time.time()
+      Q, R = np.linalg.qr(A)
+      end = time.time()
+      print(end - start)
+      #print(check_result(A, Q, R))

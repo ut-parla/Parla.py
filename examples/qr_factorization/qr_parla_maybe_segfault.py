@@ -14,7 +14,7 @@ from parla.tasks import *
 
 ROWS = 500000 # Must be >> COLS
 COLS = 1000
-BLOCK_SIZE = 31250
+BLOCK_SIZE = 125000
 
 # Timers
 t1_start = 0
