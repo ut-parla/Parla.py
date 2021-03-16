@@ -199,7 +199,8 @@ class Task:
     _state: TaskState
 
     def __init__(self, func, args, dependencies: Collection["Task"], taskid,
-                 req: ResourceRequirements):
+                 req: ResourceRequirements, name: Optional[str] = None):
+        self.name = name
         self._mutex = threading.Lock()
         with self._mutex:
             self.taskid = taskid
@@ -221,6 +222,16 @@ class Task:
             logger.debug("Task %r: Creating", self)
 
             self._check_remaining_dependencies()
+
+    @property
+    def dependees(self) -> Tuple["Task"]:
+        """
+        A tuple of the currently known tasks that depend on self.
+
+        This tuple may be added to at any time during the life of a task (as dependee tasks are created),
+        but tasks are never removed.
+        """
+        return tuple(self._dependees)
 
     def _set_dependencies(self, dependencies):
         self._remaining_dependencies = len(dependencies)
@@ -296,7 +307,7 @@ class Task:
         return (yield TaskAwaitTasks([self], self))
 
     def __repr__(self):
-        return "<Task nrem_deps={} state={} req={req} assigned={assigned}>".format(self._remaining_dependencies, type(self._state).__name__, **self.__dict__)
+        return "<Task {} nrem_deps={} state={} req={req} assigned={assigned}>".format(self.name or "", self._remaining_dependencies, type(self._state).__name__, **self.__dict__)
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
@@ -321,8 +332,8 @@ class InvalidSchedulerAccessException(RuntimeError):
 
 
 class SchedulerContext(metaclass=ABCMeta):
-    def spawn_task(self, function, args, deps, taskid, req):
-        return Task(function, args, deps, taskid, req)
+    def spawn_task(self, function, args, deps, taskid, req, name: Optional[str] = None):
+        return Task(function, args, deps, taskid, req, name)
 
     @abstractmethod
     def enqueue_task(self, task):
@@ -716,6 +727,39 @@ class Scheduler(ControllableThread, SchedulerContext):
                 self._unassigned_resources.deallocate_resources(d, req.resources)
             return False
 
+    def _assignment_policy(self, task: Task):
+        """
+        Attempt to assign resources to `task`.
+
+        If this function returns true, `task.req` should have type EnvironmentRequirements.
+
+        :return: True if the assignment succeeded, False otherwise.
+        """
+        # Build a list of environments with "qualities" assigned based on how well they match a possible
+        # option for the task
+        env_match_quality = defaultdict(lambda: 0)
+        for opt in shuffled(task.req.possibilities):
+            if isinstance(opt, DeviceSetRequirements):
+                for e in self._environments.find_all(placement=opt.devices, tags=opt.tags, exact=False):
+                    intersection = e.placement & opt.devices
+                    match_quality = len(intersection) / len(e.placement)
+                    env_match_quality[e] = max(env_match_quality[e], match_quality)
+            elif isinstance(opt, EnvironmentRequirements):
+                env_match_quality[opt.environment] = max(env_match_quality[opt.environment], 1)
+        environments_to_try = list(env_match_quality.keys())
+        environments_to_try.sort(key=env_match_quality.__getitem__, reverse=True)
+        # print(task, ":", env_match_quality, "  ", environments_to_try)
+
+        # Try the environments in order
+        specific_requirements = None
+        for env in environments_to_try:
+            specific_requirements = EnvironmentRequirements(task.req.resources, env, task.req.tags)
+            if self._try_assignment(specific_requirements):
+                task.req = specific_requirements
+                return True
+
+        return False
+
     def run(self) -> None:
         # noinspection PyBroadException
         try: # Catch all exception to report them usefully
@@ -726,29 +770,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                     break
 
                 if not task.assigned:
-                    # Build a list of environments with "qualities" assigned based on how well they match a possible
-                    # option for the task
-                    env_match_quality = defaultdict(lambda: 0)
-                    for opt in shuffled(task.req.possibilities):
-                        if isinstance(opt, DeviceSetRequirements):
-                            for e in self._environments.find_all(placement=opt.devices, tags=opt.tags, exact=False):
-                                intersection = e.placement & opt.devices
-                                match_quality = len(intersection) / len(e.placement)
-                                env_match_quality[e] = max(env_match_quality[e], match_quality)
-                        elif isinstance(opt, EnvironmentRequirements):
-                            env_match_quality[opt.environment] = max(env_match_quality[opt.environment], 1)
-                    environments_to_try = list(env_match_quality.keys())
-                    environments_to_try.sort(key=env_match_quality.__getitem__, reverse=True)
-                    # print(task, ":", env_match_quality, "  ", environments_to_try)
-
-                    # Try the environments in order
-                    specific_requirements = None
-                    for env in environments_to_try:
-                        specific_requirements = EnvironmentRequirements(task.req.resources, env, task.req.tags)
-                        if self._try_assignment(specific_requirements):
-                            task.assigned = True
-                            task.req = specific_requirements
-                            break
+                    is_assigned = self._assignment_policy(task)
+                    assert isinstance(is_assigned, bool)
+                    task.assigned = is_assigned
 
                 # assert task.req.exact == task.assigned
                 assert not task.assigned or isinstance(task.req, EnvironmentRequirements)

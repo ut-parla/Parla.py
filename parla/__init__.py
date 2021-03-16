@@ -16,15 +16,17 @@ class Parla:
     environments: Collection[TaskEnvironment]
     _sched: task_runtime.Scheduler
 
-    def __init__(self, environments: Collection[TaskEnvironment]=None, **kwds):
+    def __init__(self, environments: Collection[TaskEnvironment]=None, scheduler_class=task_runtime.Scheduler, **kwds):
+        assert issubclass(scheduler_class, task_runtime.Scheduler)
         environments = environments or [TaskEnvironment(placement=[d]) for d in get_all_devices()]
         self.environments = environments
+        self.scheduler_class = scheduler_class
         self.kwds = kwds
 
     def __enter__(self):
         if hasattr(self, "_sched"):
             raise ValueError("Do not use the same Parla object more than once.")
-        self._sched = task_runtime.Scheduler(self.environments, **self.kwds)
+        self._sched = self.scheduler_class(self.environments, **self.kwds)
         return self._sched.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):

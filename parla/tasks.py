@@ -470,7 +470,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
         # Spawn the task via the Parla runtime API
         task = task_runtime.get_scheduler_context().spawn_task(
-            _task_callback, (separated_body,), deps, taskid=taskid, req=req)
+            _task_callback, (separated_body,), deps, taskid=taskid, req=req, name=getattr(body, "__name__", None))
 
         logger.debug("Created: %s %r", taskid, body)
 
