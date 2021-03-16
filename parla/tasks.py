@@ -329,9 +329,6 @@ def _task_callback(task, body) -> TaskState:
     try:
         body = body
 
-        if inspect.isfunction(body):
-            body = _move_function_local(body)
-
         if inspect.iscoroutinefunction(body):
             logger.debug("Constructing coroutine task: %s", task.taskid)
             body = body()
@@ -448,6 +445,9 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
         # Compute the flat dependency set (including unwrapping TaskID objects)
         deps = tasks(*dependencies)._flat_tasks
+
+        if inspect.isfunction(body):
+            body = _move_function_local(body)
 
         if inspect.iscoroutine(body):
             # An already running coroutine does not need changes since we assume

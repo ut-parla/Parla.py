@@ -144,98 +144,70 @@ def storage_size(*arrays):
 
 
 class LocalArray(Sequence):
-    def __init__(self, default):
-        self.default = default
-        if hasattr(default, "shape"):
-            self.shape = default.shape
-        if isinstance(default, list):
-            for i in range(len(default)):
-                if isinstance(default[i], list):
-                    self.default[i]=LocalArray(default[i])
-        #if isinstance(default, list):
-        #    self.device_copy = cp.deepcopy(default)
+    orig: Any
+    device_copy: Dict[tuple, Any]
+
+    def __init__(self, orig):
+        logger.debug("wrapping type {}".format(type(orig)))
+        self.orig = orig
+        if isinstance(orig, list):
+            for i in range(len(orig)):
+                if isinstance(orig[i], list):
+                    self.orig[i] = LocalArray(orig[i])
+        #    self.device_copy = cp.deepcopy(orig)
         #else:
-        #    self.device_copy = default.tolist()
+        #    self.device_copy = orig.tolist()
         self.device_copy = {}
-        self.local = False
 
-
-    def __getitem__(self,idx):
-        #if self.local == False:
-        if isinstance(idx, slice):
-            idx = str(idx)
-
-        if idx in self.device_copy.keys():
-            ori = self.device_copy[idx]
-            #else:
-            #    if type(idx) == str:
-            #        idx = ast.literal_eval(idx)
-            #    self.copy_to_device()
-            #    ori = self.default[idx]
-        else:
-            ori = self.default[idx]
-        #if isinstance(idx, tuple):
-        #    cur = self.device_copy
-        #    for x in idx:
-        #        cur = cur[x]
-        #else:
-        #    cur = self.device_copy[idx]
-
-        if is_array(ori):
-            local_data = clone_here(ori)
-            if isinstance(idx, slice):
-                idx = str(idx)
-            self.device_copy[idx]=local_data
-            #if isinstance(idx, tuple):
-            #    self.set_tuple(idx,local_data)
-            #else:
-            #    self.device_copy[idx] = local_data
-            #self.local = False
-            return local_data
-        else:
-            return ori
-
-    def copy_to_device(self):
-        for idx in self.device_copy.keys():
-            if type(idx)==str:
-                copy(self.default[ast.literal_eval(idx)], self.device_copy[idx])
-            else:
-                copy(self.default[idx], self.device_copy[idx])
-        self.local = True
-
-    def set_tuple(self,idx, val):
-        cur = self.device_copy
-        for x in range(len(idx)-1):
-            cur = cur[idx[x]]
-        cur[idx[-1]] = val
-
-
-    def __setitem__(self,idx, val):
-        #self.local = False
-        #if isinstance(idx, slice):
-        #    idx = str(idx)
-        #self.device_copy[idx] = val
-        #if isinstance(idx, tuple):
-        #    self.set_tuple(idx, val)
-        #else:
-        #    self.device_copy[idx]=val
-        copy(self.default[idx], val)
+        # if hasattr(orig, "shape"):
+        #     self.shape = orig.shape
+        # ...
 
     def __len__(self):
-        return len(self.default)
+        return len(self.orig)
+
+    def __getitem__(self, idx: Union[int, slice, tuple]):
+        # numpy indexing supports a tuple of slice and integers.
+        logger.debug("index type {}".format(type(idx)))
+        # 'slice' is unhashable
+        tuplize: Dict[type, Callable[[Union[int, slice, tuple]], tuple]] = {
+                slice: lambda x: (idx.start, idx.stop, idx.step),
+                int: lambda x: (x,),
+                tuple: lambda x: x,
+                }
+        ikey = tuplize[type(idx)](idx)
+
+        if ikey in self.device_copy:
+            data = self.device_copy[ikey]
+        else:
+            data = self.orig[idx]
+
+        if is_array(data):
+            local_data = clone_here(data)
+            self.device_copy[ikey] = local_data
+            return local_data
+        else:
+            # single element
+            return data
+
+    def __setitem__(self, idx, val):
+        copy(self.orig[idx], val)
 
     def __repr__(self):
-        return "Multi-device-array for {%s}"%(str(self.default))
+        return "Multi-device-array for {%s}"%(str(self.orig))
 
 
-_Array_Set = []
+_local_arrays: Dict[int, LocalArray] = {}
 
 
-def get_device_array(source):
-    for a in _Array_Set:
-        if a.default is source:
-            return a
+def _register_local_array(orig):
+    logger.debug("type to be wrapped: {}".format(type(orig)))
+    loc = LocalArray(orig)
+    _local_arrays[id(orig)] = loc
+    return loc
 
-    new_array = LocalArray(source)
-    _Array_Set.append(new_array)
-    return new_array
+
+def get_device_array(orig):
+    if id(orig) in _local_arrays:
+        return _local_arrays[id(orig)]
+    return _register_local_array(orig)
