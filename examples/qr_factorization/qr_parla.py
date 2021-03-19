@@ -13,10 +13,11 @@ from parla.array import clone_here
 from parla.function_decorators import specialized
 from parla.tasks import *
 
-ROWS = 500 # Must be >> COLS
-COLS = 10
-BLOCK_SIZE = 50
+ROWS = 500000 #Must be >> COLS
+COLS = 1000
+BLOCK_SIZE = 31250
 ITERS = 6 # I later through away the first iteration, so really one less
+THREADS = '16'
 
 # ************** TIMERS **************
 now = time.time
@@ -282,55 +283,56 @@ def main():
             t3_tot_iter = 0
 
             for j in range(NBLOCKS):
-                t1_H2D_iter[i] = None
-                t1_ker_iter[i] = None
-                t1_D2H_iter[i] = None
-                t3_H2D_iter[i] = None
-                t3_ker_iter[i] = None
-                t3_D2H_iter[i] = None
-                t1_is_GPU_iter[i] = False
-                t3_is_GPU_iter[i] = False
+                t1_H2D_iter[j] = None
+                t1_ker_iter[j] = None
+                t1_D2H_iter[j] = None
+                t3_H2D_iter[j] = None
+                t3_ker_iter[j] = None
+                t3_D2H_iter[j] = None
+                t1_is_GPU_iter[j] = False
+                t3_is_GPU_iter[j] = False
 
             # Original matrix
             np.random.seed(i)
             A = np.random.rand(ROWS, COLS)
         
+            # Run and time the algorithm
             tot_start = now()
             Q, R = await tsqr_blocked(A, BLOCK_SIZE)
             tot_end = now()
             tot_times[i] = tot_end - tot_start
 
-            # Figure out how many ran on GPU
+            # Figure out how many tasks ran on GPU
             t1_GPU_tasks[i] = np.count_nonzero(t1_is_GPU_iter)
             t3_GPU_tasks[i] = np.count_nonzero(t3_is_GPU_iter)
 
             # Update all timers
-            try: t1_H2D_times[i] = sum(t1_H2D_iter[i] for i in range(NBLOCKS) if t1_is_GPU_iter[i] == True) / t1_GPU_tasks[i]
+            try: t1_H2D_times[i] = sum(t1_H2D_iter[task] for task in range(NBLOCKS) if t1_is_GPU_iter[task] == True) / t1_GPU_tasks[i]
             except ZeroDivisionError: t1_H2D_times[i] = 0
 
-            try: t1_ker_times_CPU[i] = sum(t1_ker_iter[i] for i in range(NBLOCKS) if t1_is_GPU_iter[i] == False) / (NBLOCKS - t1_GPU_tasks[i])
+            try: t1_ker_times_CPU[i] = sum(t1_ker_iter[task] for task in range(NBLOCKS) if t1_is_GPU_iter[task] == False) / (NBLOCKS - t1_GPU_tasks[i])
             except ZeroDivisionError: t1_ker_times_CPU[i] = 0
 
-            try: t1_ker_times_GPU[i] = sum(t1_ker_iter[i] for i in range(NBLOCKS) if t1_is_GPU_iter[i] == True) / t1_GPU_tasks[i]
+            try: t1_ker_times_GPU[i] = sum(t1_ker_iter[task] for task in range(NBLOCKS) if t1_is_GPU_iter[task] == True) / t1_GPU_tasks[i]
             except ZeroDivisionError: t1_ker_times_GPU[i] = 0
 
-            try: t1_D2H_times[i] = sum(t1_D2H_iter[i] for i in range(NBLOCKS) if t1_is_GPU_iter[i] == True) / t1_GPU_tasks[i]
+            try: t1_D2H_times[i] = sum(t1_D2H_iter[task] for task in range(NBLOCKS) if t1_is_GPU_iter[task] == True) / t1_GPU_tasks[i]
             except ZeroDivisionError: t1_D2H_times[i] = 0
 
             t1_tot_times[i] = t1_tot_iter
             
             t2_tot_times[i] = t2_tot_iter
             
-            try: t3_H2D_times[i] = sum(t3_H2D_iter[i] for i in range(NBLOCKS) if t3_is_GPU_iter[i] == True) / t3_GPU_tasks[i]
+            try: t3_H2D_times[i] = sum(t3_H2D_iter[task] for task in range(NBLOCKS) if t3_is_GPU_iter[task] == True) / t3_GPU_tasks[i]
             except ZeroDivisionError: t3_H2D_times[i] = 0
 
-            try: t3_ker_times_CPU[i] = sum(t3_ker_iter[i] for i in range(NBLOCKS) if t3_is_GPU_iter[i] == False) / (NBLOCKS - t3_GPU_tasks[i])
+            try: t3_ker_times_CPU[i] = sum(t3_ker_iter[task] for task in range(NBLOCKS) if t3_is_GPU_iter[task] == False) / (NBLOCKS - t3_GPU_tasks[i])
             except ZeroDivisionError: t3_ker_times_CPU[i] = 0
 
-            try: t3_ker_times_GPU[i] = sum(t3_ker_iter[i] for i in range(NBLOCKS) if t3_is_GPU_iter[i] == True) / t3_GPU_tasks[i]
+            try: t3_ker_times_GPU[i] = sum(t3_ker_iter[task] for task in range(NBLOCKS) if t3_is_GPU_iter[task] == True) / t3_GPU_tasks[i]
             except ZeroDivisionError: t3_ker_times_GPU[i] = 0
 
-            try: t3_D2H_times[i] = sum(t3_D2H_iter[i] for i in range(NBLOCKS) if t3_is_GPU_iter[i] == True) / t3_GPU_tasks[i]
+            try: t3_D2H_times[i] = sum(t3_D2H_iter[task] for task in range(NBLOCKS) if t3_is_GPU_iter[task] == True) / t3_GPU_tasks[i]
             except ZeroDivisionError: t3_D2H_times[i] = 0
 
             t3_tot_times[i] = t3_tot_iter
@@ -465,5 +467,5 @@ def main():
 
 if __name__ == "__main__":
     with Parla():
-        os.environ['OMP_NUM_THREADS'] = '4'
+        os.environ['OMP_NUM_THREADS'] = THREADS
         main()
