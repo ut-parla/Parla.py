@@ -666,6 +666,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         with self._monitor:
             while self._should_run:
                 self._monitor.wait()
+        for t in self._worker_threads:
+            t.join()
         if self._exceptions:
             # TODO: Should combine all of them into a single exception.
             raise self._exceptions[0]
