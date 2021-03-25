@@ -63,3 +63,6 @@ docker run --gpus all --rm -it utparla/parla
 Depending on your Docker configuration, you may need to run this command as root using `sudo` or some other method.
 Since CUDA is required for all the demos, you must provide some GPUs for the docker container to use.
 For this to work using the command shown, you need to use Docker 19.03 or later.
+
+## Acknowledgements
+This software is based upon work supported by the Department of Energy, National Nuclear Security Administration under Award Number DE-NA0003969.
