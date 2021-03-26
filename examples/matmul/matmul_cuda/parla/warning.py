@@ -1,0 +1,2 @@
+class PerformanceWarning(Warning):
+    pass
