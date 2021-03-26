@@ -199,6 +199,32 @@ class perfStats:
         print("Total:", self.tot_times_avg, "±", self.tot_times_std)
         print()
 
+    # Prints averages and standard deviations in csv format
+    def print_stats_csv(self):
+        print("\"", self.t1_GPU_tasks_avg, "\",", sep='', end='')
+        print("\"", self.t1_GPU_tasks_std, "\",", sep='', end='')
+        print("\"", self.t1_H2D_times_avg, "\",", sep='', end='')
+        print("\"", self.t1_ker_times_CPU_avg, "\",", sep='', end='')
+        print("\"", self.t1_ker_times_GPU_avg, "\",", sep='', end='')
+        print("\"", self.t1_D2H_times_avg, "\",", sep='', end='')
+        print("\"", self.t1_tot_times_avg, "\",", sep='', end='')
+        print("\"", self.t1_tot_times_std, "\",", sep='', end='')
+
+        print("\"", self.t2_tot_times_avg, "\",", sep='', end='')
+        print("\"", self.t2_tot_times_std, "\",", sep='', end='')
+    
+        print("\"", self.t3_GPU_tasks_avg, "\",", sep='', end='')
+        print("\"", self.t3_GPU_tasks_std, "\",", sep='', end='')
+        print("\"", self.t3_H2D_times_avg, "\",", sep='', end='')
+        print("\"", self.t3_ker_times_CPU_avg, "\",", sep='', end='')
+        print("\"", self.t3_ker_times_GPU_avg, "\",", sep='', end='')
+        print("\"", self.t3_D2H_times_avg, "\",", sep='', end='')
+        print("\"", self.t3_tot_times_avg, "\",", sep='', end='')
+        print("\"", self.t3_tot_times_std, "\",", sep='', end='')
+
+        print("\"", self.tot_times_avg, "\",", sep='', end='')
+        print("\"", self.tot_times_std, "\"", sep='')
+
     # Prints stats for every iteration
     def print_stats_verbose(self):
         print("t1 stats per iteration")
@@ -449,7 +475,10 @@ def main():
         # Print out the stats you want
         if PRINT_VERBOSE:
             perf_stats.print_stats_verbose() # Prints per-iteration stats
-        perf_stats.print_stats() # Prints averages and standard deviations
+        if CSV:
+            perf_stats.print_stats_csv() # Prints averages and standard deviations in csv format
+        else:
+            perf_stats.print_stats() # Prints averages and standard deviations
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -462,6 +491,7 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--placement", help="'cpu' or 'gpu' or 'both'", default='gpu')
     parser.add_argument("-K", "--check_result", help="Checks final result on CPU", action="store_true")
     parser.add_argument("-v", "--verbose", help="Prints stats for every iteration", action="store_true")
+    parser.add_argument("--csv", help="Prints stats in csv format", action="store_true")
 
     args = parser.parse_args()
 
@@ -475,12 +505,14 @@ if __name__ == "__main__":
     PLACEMENT = args.placement
     CHECK_RESULT = args.check_result
     PRINT_VERBOSE = args.verbose
+    CSV = args.csv
 
     perf_stats = perfStats(ITERS, NROWS, BLOCK_SIZE)
 
-    print('%**********************************************************************************************%\n')
-    print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' threads=', NTHREADS, \
-        ' ngpus=', NGPUS, ' placement=', PLACEMENT, ' check_result=', CHECK_RESULT, ' verbose=', PRINT_VERBOSE, sep='', end='\n\n')
+    if not CSV:
+        print('%**********************************************************************************************%\n')
+        print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' threads=', NTHREADS, \
+            ' ngpus=', NGPUS, ' placement=', PLACEMENT, ' check_result=', CHECK_RESULT, ' verbose=', PRINT_VERBOSE, ' csv=', CSV, sep='', end='\n\n')
 
     # Set up PLACEMENT variable
     if PLACEMENT == 'cpu':
@@ -496,4 +528,5 @@ if __name__ == "__main__":
         os.environ['OMP_NUM_THREADS'] = NTHREADS
         main()
 
-    print('%**********************************************************************************************%\n')
+    if not CSV:
+        print('%**********************************************************************************************%\n')
