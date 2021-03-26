@@ -460,7 +460,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--threads", help="Sets OMP_NUM_THREADS", default='1')
     parser.add_argument("-g", "--ngpus", help="Sets number of GPUs to run on. If set to more than you have, undefined behavior", type=int, default='2')
     parser.add_argument("-p", "--placement", help="'cpu' or 'gpu' or 'both'", default='gpu')
-    parser.add_argument("-K", "--check_result", help="Sets OMP_NUM_THREADS", action="store_true")
+    parser.add_argument("-K", "--check_result", help="Checks final result on CPU", action="store_true")
     parser.add_argument("-v", "--verbose", help="Prints stats for every iteration", action="store_true")
 
     args = parser.parse_args()
