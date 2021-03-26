@@ -70,6 +70,8 @@ if __name__ == "__main__":
         times_ker = times_ker[1:]
         times_D2H = times_D2H[1:]
 
+    times_total = [times_H2D[i] + times_ker[i] + times_D2H[i] for i in range(ITERS - 1)]
+
     print("Host to Device")
     print(times_H2D)
     print("Average:", np.average(times_H2D))
@@ -87,3 +89,7 @@ if __name__ == "__main__":
     print("Average:", np.average(times_D2H))
     print("Std dev:", np.std(times_D2H))
 
+    print("Total")
+    print(times_total)
+    print("Average:", np.average(times_total))
+    print("Std dev:", np.std(times_total))
