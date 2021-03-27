@@ -11,7 +11,7 @@ from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
 
-from mult.core import gemm
+from mult.core import gemm, handle
 import concurrent.futures 
 
 ngpus = 4
@@ -41,17 +41,25 @@ for i in range(ngpus):
 
 print("NGPU", ngpus)
 
+#gemm(a_part[0], b_part[0], c_part[0], 0)
+#gemm(a_part[2], b_part[2], c_part[2], 2)
+handle(0)
+handle(2)
+handle(3)
+handle(1)
 start = time.perf_counter()
 
 def worker(inp):
     i, a_block, b_block, c_block = inp
-    #print(i, "Shape:", a_block.shape, b_block.shape)
-    start_t = time.time()
-    gemm(a_block, b_block, c_block, i)
-    #print(i, "C:", c_block)
-    #print(i, "Py: ", a_block @ b_block)
-    end_t = time.time()
-    print(i, " : ", end_t - start_t, flush=True)
+    with cp.cuda.Device(i):
+        #print(i, "Shape:", a_block.shape, b_block.shape)
+        start_t = time.time()
+        gemm(a_block, b_block, c_block, i)
+        #print(i, "C:", c_block)
+        #print(i, "Py: ", a_block @ b_block)
+        end_t = time.time()
+        print(i, " : ", end_t - start_t, flush=True)
+        cp.cuda.Device().synchronize()
     return 
 
 start = time.perf_counter()
@@ -61,5 +69,16 @@ with concurrent.futures.ThreadPoolExecutor() as executor:
     results = [f.result() for f in futures]
 
 end = time.perf_counter()
+
+print('-----')
+
+start = time.perf_counter()
+
+with concurrent.futures.ThreadPoolExecutor() as executor:
+    futures = [executor.submit(worker, (i, a_part[i], b_part[i], c_part[i])) for i in range(ngpus) ]
+    results = [f.result() for f in futures]
+
+end = time.perf_counter()
+
 
 print("Total Time:", end - start, flush=True)

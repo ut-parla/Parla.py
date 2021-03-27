@@ -2,6 +2,13 @@
 #include "singleton.h"
 #include "gemm.h"
 
+void make_handle(int device){
+  cudaSetDevice(device);
+  auto const& handle = knnHandle_t::instance();
+  cudaDeviceSynchronize();
+}
+
+
 void internal_gemm(int m, int n, int k, const float* A, const float* B, float* C, int device) {
   cudaSetDevice(device);
   auto const& handle = knnHandle_t::instance();
@@ -12,4 +19,5 @@ void internal_gemm(int m, int n, int k, const float* A, const float* B, float* C
         A, m,
         B, k, &beta,
         C, m);
+  cudaDeviceSynchronize();
 }

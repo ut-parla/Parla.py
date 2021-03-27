@@ -1,5 +1,11 @@
-from core cimport internal_gemm
+from core cimport internal_gemm, make_handle
 cimport cython 
+
+
+def handle(dev):
+    cdef int c_dev = dev
+    with nogil:
+        make_handle(c_dev)
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
