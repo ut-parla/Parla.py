@@ -49,7 +49,8 @@ def cholesky(a):
 @cholesky.variant(gpu)
 def choleksy_gpu(a):
     a = cp.linalg.cholesky(a)
-    cp.cuda.stream.get_current_stream().synchronize()
+    if cp.any(cp.isnan(a)):
+      raise np.linalg.LinAlgError
     return a
 
 @specialized
@@ -76,7 +77,6 @@ def cupy_trsm_wrapper(a, b):
     uplo = cublas.CUBLAS_FILL_MODE_LOWER
     a = cp.array(a, dtype=np.float64, order='F')
     b = cp.array(b, dtype=np.float64, order='F')
-    print("Running cupy trsm on device: ", a.device)
     trans = cublas.CUBLAS_OP_T
     side = cublas.CUBLAS_SIDE_RIGHT
 
@@ -91,7 +91,6 @@ def cupy_trsm_wrapper(a, b):
 @ltriang_solve.variant(gpu)
 def ltriang_solve_gpu(a, b):
     b = cupy_trsm_wrapper(a, b)
-    cp.cuda.stream.get_current_stream().synchronize()
     return b
 
 def update_kernel(a, b, c):
@@ -106,8 +105,6 @@ def update(a, b, c):
 @update.variant(gpu)
 def update_gpu(a, b, c):
     c = update_kernel(a, b, c)
-    cp.cuda.stream.get_current_stream().synchronize()
-    #c = cupy_gemm_wrapper(a, b, c)
     return c
 
 def cholesky_blocked_inplace(a):
@@ -162,10 +159,7 @@ def cholesky_blocked_inplace(a):
             def t4():
                 factor = clone_here(a[j, j])
                 panel = clone_here(a[i, j])
-                print(i, j, "Before", panel, flush=True)
                 out = ltriang_solve(factor, panel)
-                print(i, j, "Panel", panel,flush=True)
-                print(i, j, "Out", out, flush=True)
                 copy(a[i, j], out)
 
     return subcholesky[a.shape[0]-1]

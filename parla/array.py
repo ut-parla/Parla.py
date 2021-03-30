@@ -128,11 +128,9 @@ def clone_here(source, kind=None):
     """
     if is_array(source):
         # TODO: How to correctly handle multiple devices.
-        #return get_current_devices()[0].memory(kind)(source)
-        return cp.asarray(source)
+        return get_current_devices()[0].memory(kind)(source)
     else:
         raise TypeError("Array required, given value of type {}".format(type(source)))
-
 
 def storage_size(*arrays):
     """

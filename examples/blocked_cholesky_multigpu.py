@@ -2,8 +2,8 @@
 A naive implementation of blocked Cholesky using Numba kernels on CPUs.
 """
 
+import logging
 import numpy as np
-#import cupy
 from numba import jit, void, float64
 import math
 import time
@@ -20,19 +20,18 @@ from parla.tasks import *
 import cupy as cp
 from cupy.cuda import cublas
 from cupy.cuda import device
-from cupy.linalg import _util
+#from cupy.linalg import _util
 
 from scipy import linalg
 import sys
+
+logger = logging.getLogger(__name__)
 
 loc = gpu
 
 gpu_arrs = []
 
-EXEC_MULT_GPU = True
-#EXEC_MULT_GPU = False
-
-#Configure environment
+# Configure environment
 block_size = int(sys.argv[1])
 n = block_size*int(sys.argv[2])
 
@@ -67,13 +66,13 @@ def ltriang_solve(a, b):
     raise ValueError("Input array shapes are not compatible.")
   if a.shape[0] != a.shape[1]:
     raise ValueError("Array for back substitution is not square.")
-  #For the implementation here, just assume lower triangular.
+  # For the implementation here, just assume lower triangular.
   for i in range(a.shape[0]):
     b[i] /= a[i,i]
     b[i+1:] -= a[i+1:,i:i+1] * b[i:i+1]
   return b.T
 
-#comments would repack the data to column - major
+# Comments would repack the data to column - major
 def cupy_trsm_wrapper(a, b):
   cublas_handle = device.get_cublas_handle()
   trsm = cublas.dtrsm
@@ -121,7 +120,7 @@ def cholesky_blocked_inplace(a, num_gpus):
   if a.shape[0] != a.shape[1]:
     raise ValueError("Non-square blocks are not supported.")
 
-  #Define task spaces
+  # Define task spaces
   gemm1 = TaskSpace("gemm1")        # Inter-block GEMM
   subcholesky = TaskSpace("subcholesky")  # Cholesky on block
   gemm2 = TaskSpace("gemm2")        # Inter-block GEMM
@@ -129,7 +128,7 @@ def cholesky_blocked_inplace(a, num_gpus):
 
   for j in range(a.shape[0]):
     for k in range(j):
-      #Inter - block GEMM
+      # Inter - block GEMM
       @spawn(gemm1[j, k], [solve[j, k]], placement=[gpu(j%num_gpus)])
       def t1():
         out = get_gpu_memory(j, j, num_gpus)
@@ -137,7 +136,7 @@ def cholesky_blocked_inplace(a, num_gpus):
         out = update(rhs, rhs, out)
         set_gpu_memory_from_gpu(j, j, num_gpus, out)
 
-    #Cholesky on block
+    # Cholesky on block
     @spawn(subcholesky[j], [gemm1[j, 0:j]], placement=[gpu(j%num_gpus)])
     def t2():
       dblock = get_gpu_memory(j, j, num_gpus) 
@@ -146,7 +145,7 @@ def cholesky_blocked_inplace(a, num_gpus):
 
     for i in range(j+1, a.shape[0]):
       for k in range(j):
-        #Inter - block GEMM
+        # Inter - block GEMM
         @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k]], placement=[gpu(i%num_gpus)])
         def t3():
           out = get_gpu_memory(i, j, num_gpus)
@@ -155,7 +154,7 @@ def cholesky_blocked_inplace(a, num_gpus):
           out = update(rhs1, rhs2, out)
           set_gpu_memory_from_gpu(i, j, num_gpus, out)
 
-      #Triangular solve
+      # Triangular solve
       @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], placement=[gpu(i%num_gpus)])
       def t4():
         factor = get_gpu_memory(j, j, num_gpus)
@@ -165,18 +164,9 @@ def cholesky_blocked_inplace(a, num_gpus):
 
   return subcholesky[a.shape[0]-1]
 
-def asarray_sync(src):
-  if src.device != cp.cuda.Device():
-    dst = cp.ndarray(src.shape)
-    dst.data.copy_from_device_async(src.data, src.nbytes, \
-                                    cp.cuda.get_current_stream())
-  else:
-    dst = cp.asarray(src)
-  return dst
-
 def allocate_gpu_memory(i:int, r:int, n:int, b:int):
   with cp.cuda.Device(i):
-    print("\tAllocate device:", i, "...")
+    logger.debug("\tAllocate device:", i, "...")
     prealloced = cp.ndarray([r, n // b, b, b])
     gpu_arrs.append(prealloced)
 
@@ -184,7 +174,7 @@ def get_gpu_memory(i:int, j:int, num_gpus:int):
   dev_id   = i % num_gpus
   local_id = i // num_gpus
   src = gpu_arrs[dev_id][local_id][j]
-  dst = asarray_sync(src)
+  dst = clone_here(src)
   return dst
 
 def set_gpu_memory_from_gpu(i:int, j:int, num_gpus:int, v):
@@ -203,54 +193,54 @@ def main():
   num_gpus = cp.cuda.runtime.getDeviceCount()
   @spawn(placement=cpu)
   async def test_blocked_cholesky():
-    print("Block size=", block_size, " and total array size=", n)
+    logger.debug("Block size=", block_size, " and total array size=", n)
     assert not n % block_size
 
-    print("Allocate memory..")
+    logger.debug("Allocate memory..")
     for d in range(num_gpus):
       row_size = n // (block_size * num_gpus)
       if d < ((n / block_size) % num_gpus):
         row_size += 1
       if row_size > 0:
         allocate_gpu_memory(d, row_size, n, block_size)
-    print("Allocate memory done..")
+    logger.debug("Allocate memory done..")
 
     np.random.seed(10)
 
-    print("Random number generate..")
-    #Construct input data
+    logger.debug("Random number generate..")
+    # Construct input data
     a = np.random.rand(n, n)
     a = a @ a.T
-    print("Random number generate done..")
+    logger.debug("Random number generate done..")
 
-    print("Copy a to a1..")
-    #Copy and layout input
+    logger.debug("Copy a to a1..")
+    # Copy and layout input
     a1 = a.copy()
-    print("Copying done..")
-    print("Shaping starts..")
+    logger.debug("Copying done..")
+    logger.debug("Shaping starts..")
     ap = a1.reshape(n // block_size, block_size, n // block_size, block_size).swapaxes(1,2)
-    print("Shaping done..")
+    logger.debug("Shaping done..")
     set_gpu_memory_from_cpu(ap, num_gpus)
 
     for i in range(len(gpu_arrs)):
-      print("Device ", i, " arrays are on ", gpu_arrs[i].device);
-    print("Calculate starts..")
+      logger.debug("Device ", i, " arrays are on ", gpu_arrs[i].device);
+    logger.debug("Calculate starts..")
     start = time.perf_counter()
 
-    #Call Parla Cholesky result and wait for completion
+    # Call Parla Cholesky result and wait for completion
     await cholesky_blocked_inplace(ap, num_gpus)
 
     end = time.perf_counter()
     print(end - start, "seconds")
-    print("Calculate done..")
+    logger.debug("Calculate done..")
 
     for i in range(len(gpu_arrs)):
-      print("Device ", i, " arrays are on ", gpu_arrs[i].device);
+      logger.debug("Device ", i, " arrays are on ", gpu_arrs[i].device);
 
     for d in range(len(gpu_arrs)):
-      print("Device:", d, " swap array..")
+      logger.debug("Device:", d, " swap array..")
       gpu_arrs[d] = cp.swapaxes(gpu_arrs[d], 2, 1)
-      print("Device:", d, " swap done..")
+      logger.debug("Device:", d, " swap done..")
 
     cpu_arrs = np.empty([n // block_size,
                          block_size,
@@ -263,7 +253,7 @@ def main():
     cpu_arrs = cpu_arrs.reshape(n, n)
     print("Truth", linalg.cholesky(a).T)
 
-    #Check result
+    # Check result
     computed_L = np.tril(cpu_arrs)
     print("Soln", computed_L)
     error = np.max(np.absolute(a-computed_L @ computed_L.T))
