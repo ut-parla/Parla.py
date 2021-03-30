@@ -45,17 +45,20 @@ if __name__ == "__main__":
         # Cupy version
         start = time.time()
         A_GPU = cp.array(A)
+        cp.cuda.stream.get_current_stream().synchronize()
         end = time.time()
         times_H2D[i] = end - start
     
         start = time.time()
         Q, R = cp.linalg.qr(A_GPU)
+        cp.cuda.stream.get_current_stream().synchronize()
         end = time.time()
         times_ker[i] = end - start
 
         start = time.time()
         Q = cp.asnumpy(Q)
         R = cp.asnumpy(R)
+        cp.cuda.stream.get_current_stream().synchronize()
         end = time.time()
         times_D2H[i] = end - start
 
