@@ -219,6 +219,12 @@ class MultiGPUComponentInstance(EnvironmentComponentInstance):
         _gpu_locals._gpus = None
         return False
 
+    def initialize_thread(self) -> None:
+        for gpu in self.gpus:
+            # TODO(ian): Trigger cuBLAS initialization for this GPU in this thread.
+            assert False
+
+
 class MultiGPUComponent(EnvironmentComponentDescriptor):
     """A multi-GPU CUDA component which exposes the GPUs to the task via `get_gpus`.
 
