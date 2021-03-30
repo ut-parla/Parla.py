@@ -352,7 +352,11 @@ async def tsqr_blocked(A, block_size):
         R1_lower = i * ncols
         R1_upper = (i + 1) * ncols
 
-        @spawn(taskid=T1[i], placement=PLACEMENT, memory=(4*A_block.nbytes)) # 4* for scratch space
+        T1_MEMORY = None
+        if PLACEMENT == 'gpu' or PLACEMENT == 'both':
+            T1_MEMORY = 4*A_block.nbyte # 4* for scratch spaces
+
+        @spawn(taskid=T1[i], placement=PLACEMENT, memory=T1_MEMORY)
         def t1():
             #print("t1[", i, "] start on ", get_current_devices(), sep='', flush=True)
 
@@ -404,7 +408,11 @@ async def tsqr_blocked(A, block_size):
         Q_lower = i * block_size # first row in block, inclusive
         Q_upper = (i + 1) * block_size # last row in block, exclusive
 
-        @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=PLACEMENT, memory=(4*Q1_blocked[i].nbytes))
+        T3_MEMORY = None
+        if PLACEMENT == 'gpu' or PLACEMENT == 'both':
+            T3_MEMORY = 4*Q1_blocked[i].nbytes # 4* for scratch space
+
+        @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=PLACEMENT, memory=T3_MEMORY)
         def t3():
             #print("t3[", i, "] start on ", get_current_devices(), sep='', flush=True)
 
