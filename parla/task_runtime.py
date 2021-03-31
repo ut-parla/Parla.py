@@ -434,7 +434,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
         self._status = "Initializing"
 
     @property
-    def scheduler(self):
+    def scheduler(self) -> "Scheduler":
         return self._scheduler
 
     def incr_active_tasks(self):
@@ -511,6 +511,8 @@ class WorkerThread(ControllableThread, SchedulerContext):
     def run(self) -> None:
         try:
             with self:
+                for component in self.scheduler.components:
+                    component.initialize_thread()
                 while self._should_run:
                     self._status = "Getting Task"
                     task: Task = self._pop_task()
@@ -650,6 +652,10 @@ class Scheduler(ControllableThread, SchedulerContext):
         for t in self._worker_threads:
             t.start()
         self.start()
+
+    @property
+    def components(self) -> List["EnvironmentComponentInstance"]:
+        return [i for e in self._environments for i in e.components.values()]
 
     @property
     def scheduler(self):

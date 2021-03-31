@@ -28,7 +28,12 @@ thread_locals = threading.local()
 class DummyComponentInstance(EnvironmentComponentInstance):
     def __init__(self, descriptor: "DummyComponent", env: TaskEnvironment):
         super().__init__(descriptor)
+        self.initialized = False
         self.value = descriptor.value
+
+    def initialize_thread(self) -> None:
+        thread_locals.initialized = True
+        self.initialized = True
 
     def __enter__(self):
         assert not hasattr(thread_locals, "value")
@@ -54,7 +59,6 @@ class DummyComponent(EnvironmentComponentDescriptor):
 
 
 def test_dummy_environment_component():
-    # Dummy environments with no components for testing.
     environments = [TaskEnvironment(placement=[cpu(0)], components=[DummyComponent("test")])]
     with Parla(environments):
         task_results = []
@@ -62,6 +66,20 @@ def test_dummy_environment_component():
         def task():
             assert get_current_devices() == [cpu(0)]
             task_results.append(thread_locals.value)
+
+        sleep_until(lambda: len(task_results) == 1)
+        assert task_results == ["test"]
+
+
+def test_component_initialized():
+    environments = [TaskEnvironment(placement=[cpu(0)], components=[DummyComponent("test")])]
+    with Parla(environments):
+        task_results = []
+        @spawn()
+        def task():
+            assert get_current_devices() == [cpu(0)]
+            task_results.append(thread_locals.value)
+            assert thread_locals.initialized
 
         sleep_until(lambda: len(task_results) == 1)
         assert task_results == ["test"]

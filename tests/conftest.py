@@ -3,8 +3,8 @@ import os
 
 import pytest
 
-from parla import TaskEnvironment
-from parla.task_runtime import Scheduler
+from parla import Parla
+from parla.task_runtime import get_scheduler_context
 
 if os.getenv("LOG_LEVEL") is not None:
     level = os.getenv("LOG_LEVEL")
@@ -18,10 +18,5 @@ else:
 
 @pytest.fixture
 def runtime_sched():
-    from parla.cpu import cpu
-
-    # Dummy environments with no components for testing.
-    environments = [TaskEnvironment(placement=[d], components=[]) for d in cpu.devices]
-
-    with Scheduler(environments, 4) as s:
-        yield s
+    with Parla() as p:
+        yield get_scheduler_context().scheduler

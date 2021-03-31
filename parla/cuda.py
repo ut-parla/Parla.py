@@ -167,6 +167,16 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         self.stream.synchronize()
         return self.gpu.cupy_device.__exit__(exc_type, exc_val, exc_tb)
 
+    def initialize_thread(self) -> None:
+        for gpu in self.gpus:
+            # Trigger cblas/etc. initialization for this GPU in this thread.
+            device = gpu.cupy_device
+            with device:
+                device.cublas_handle
+                device.cusolver_handle
+                device.cusolver_sp_handle
+                device.cusparse_handle
+
 class GPUComponent(EnvironmentComponentDescriptor):
     """A single GPU CUDA component which configures the environment to use the specific GPU using a single
     non-blocking stream
@@ -218,6 +228,17 @@ class MultiGPUComponentInstance(EnvironmentComponentInstance):
         assert _gpu_locals._gpus == self.gpus
         _gpu_locals._gpus = None
         return False
+
+    def initialize_thread(self) -> None:
+        for gpu in self.gpus:
+            # Trigger cuBLAS initialization for this GPU in this thread.
+            device = gpu.cupy_device
+            with device:
+                device.cublas_handle
+                device.cusolver_handle
+                device.cusolver_sp_handle
+                device.cusparse_handle
+
 
 class MultiGPUComponent(EnvironmentComponentDescriptor):
     """A multi-GPU CUDA component which exposes the GPUs to the task via `get_gpus`.
