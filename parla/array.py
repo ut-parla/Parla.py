@@ -5,7 +5,6 @@ from typing import Dict
 # FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
 #  Loading numpy locally works for some things, but not for the array._register_array_type call.
 import numpy as np
-import cupy as cp
 
 from parla.device import Memory
 from parla.tasks import get_current_devices
@@ -131,6 +130,7 @@ def clone_here(source, kind=None):
         return get_current_devices()[0].memory(kind)(source)
     else:
         raise TypeError("Array required, given value of type {}".format(type(source)))
+
 
 def storage_size(*arrays):
     """

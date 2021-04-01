@@ -3,7 +3,6 @@ A naive implementation of blocked Cholesky using Numba kernels on CPUs.
 """
 
 import numpy as np
-#import cupy
 from numba import jit, void, float64
 import math
 import time
@@ -64,13 +63,13 @@ def ltriang_solve(a, b):
         raise ValueError("Input array shapes are not compatible.")
     if a.shape[0] != a.shape[1]:
         raise ValueError("Array for back substitution is not square.")
-    #For the implementation here, just assume lower triangular.
+    # For the implementation here, just assume lower triangular.
     for i in range(a.shape[0]):
         b[i] /= a[i,i]
         b[i+1:] -= a[i+1:,i:i+1] * b[i:i+1]
     return b.T
 
-#comments would repack the data to column - major
+# comments would repack the data to column - major
 def cupy_trsm_wrapper(a, b):
     cublas_handle = device.get_cublas_handle()
     trsm = cublas.dtrsm
@@ -120,7 +119,7 @@ def cholesky_blocked_inplace(a):
     if a.shape[0] != a.shape[1]:
         raise ValueError("Non-square blocks are not supported.")
 
-    #Define task spaces
+    # Define task spaces
     gemm1 = TaskSpace("gemm1")        # Inter-block GEMM
     subcholesky = TaskSpace("subcholesky")  # Cholesky on block
     gemm2 = TaskSpace("gemm2")        # Inter-block GEMM
@@ -128,7 +127,7 @@ def cholesky_blocked_inplace(a):
 
     for j in range(a.shape[0]):
         for k in range(j):
-            #Inter - block GEMM
+            # Inter - block GEMM
             @spawn(gemm1[j, k], [solve[j, k]], placement=loc)
             def t1():
                 out = clone_here(a[j,j])  # Move data to the current device
@@ -136,7 +135,7 @@ def cholesky_blocked_inplace(a):
                 out = update(rhs, rhs, out)
                 copy(a[j,j], out)  # Move the result to the global array
 
-        #Cholesky on block
+        # Cholesky on block
         @spawn(subcholesky[j], [gemm1[j, 0:j]], placement=loc)
         def t2():
             dblock = clone_here(a[j, j])
@@ -145,7 +144,7 @@ def cholesky_blocked_inplace(a):
 
         for i in range(j+1, a.shape[0]):
             for k in range(j):
-                #Inter - block GEMM
+                # Inter - block GEMM
                 @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k]], placement=loc)
                 def t3():
                     out = clone_here(a[i,j])  # Move data to the current device
@@ -154,7 +153,7 @@ def cholesky_blocked_inplace(a):
                     out = update(rhs1, rhs2, out)
                     copy(a[i,j], out)  # Move the result to the global array
 
-            #Triangular solve
+            # Triangular solve
             @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], placement=loc)
             def t4():
                 factor = clone_here(a[j, j])
@@ -170,16 +169,16 @@ def main():
         assert not n % block_size
 
         np.random.seed(10)
-        #Construct input data
+        # Construct input data
         a = np.random.rand(n, n)
         a = a @ a.T
 
-        #Copy and layout input
+        # Copy and layout input
         a1 = a.copy()
         ap = a1.reshape(n // block_size, block_size, n // block_size, block_size).swapaxes(1,2)
         start = time.perf_counter()
 
-        #Call Parla Cholesky result and wait for completion
+        # Call Parla Cholesky result and wait for completion
         await cholesky_blocked_inplace(ap)
 
         end = time.perf_counter()
@@ -187,7 +186,7 @@ def main():
 
         print("Truth", linalg.cholesky(a).T)
 
-        #Check result
+        # Check result
         computed_L = np.tril(a1)
         print("Soln", computed_L)
         error = np.max(np.absolute(a-computed_L @ computed_L.T))

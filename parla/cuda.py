@@ -63,8 +63,10 @@ class _GPUMemory(Memory):
         #      It causes data race and CUDA context is incorrectly set.
         #      For now, this remove assumes that one device is always
         #      assigned to one task.
+        # FIXME This code breaks the semantics since a different device
+        #       could copy data on the current device to a remote device.
         #with self.device._device_context():
-        if type(target) is numpy.ndarray:
+        if isinstance(target, numpy.ndarray):
             logger.debug("Moving data: CPU => %r", cupy.cuda.Device())
             return cupy.asarray(target)
         elif type(target) is cupy.ndarray and \
