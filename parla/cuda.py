@@ -11,6 +11,8 @@ from . import device
 from .device import *
 from .environments import EnvironmentComponentInstance, TaskEnvironment, EnvironmentComponentDescriptor
 
+import numpy
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -50,13 +52,30 @@ class _GPUMemory(Memory):
     def np(self):
         return _DeviceCUPy(self.device)
 
+    def asarray_async(self, src):
+      dst = cupy.ndarray(src.shape)
+      dst.data.copy_from_device_async(src.data, src.nbytes,
+                                      cupy.cuda.get_current_stream())
+      return dst
+
     def __call__(self, target):
-        with self.device._device_context():
-            if cupy.cuda.Device() != getattr(target, "device", None):
-                logger.debug("Moving data: %r => %r", getattr(target, "device", None), cupy.cuda.Device())
-                return cupy.asarray(target)
-            else:
-                return target
+        # TODO Several threads could share the same device object.
+        #      It causes data race and CUDA context is incorrectly set.
+        #      For now, this remove assumes that one device is always
+        #      assigned to one task.
+        # FIXME This code breaks the semantics since a different device
+        #       could copy data on the current device to a remote device.
+        #with self.device._device_context():
+        if isinstance(target, numpy.ndarray):
+            logger.debug("Moving data: CPU => %r", cupy.cuda.Device())
+            return cupy.asarray(target)
+        elif type(target) is cupy.ndarray and \
+             cupy.cuda.Device() != getattr(target, "device", None):
+            logger.debug("Moving data: %r => %r",
+                         getattr(target, "device", None), cupy.cuda.Device())
+            return self.asarray_async(target)
+        else:
+            return target
 
 
 class _GPUDevice(Device):
