@@ -3,7 +3,7 @@ Parla `TaskEnvironments` represent execution environments that a task can run in
 Each environment is assigned resources that tasks in that environment will use.
 """
 
-from abc import abstractmethod
+from abc import ABCMeta, abstractmethod
 from typing import Collection, Union, Any, List, ContextManager, Dict, Callable, Iterator, FrozenSet, Tuple, \
     Iterable
 
@@ -11,7 +11,7 @@ from .device import Architecture, Device
 
 __all__ = ["TaskEnvironment"]
 
-class EnvironmentComponentInstance(ContextManager):
+class EnvironmentComponentInstance(ContextManager, metaclass=ABCMeta):
     """
     A component of a TaskEnvironment which provides some services to tasks.
 
@@ -33,7 +33,14 @@ class EnvironmentComponentInstance(ContextManager):
     def __init__(self, descriptor: "EnvironmentComponentDescriptor"):
         self.descriptor = descriptor
 
-class EnvironmentComponentDescriptor(Callable[[], EnvironmentComponentInstance]):
+    @abstractmethod
+    def initialize_thread(self) -> None:
+        """
+        Initialize the current thread for this component.
+        """
+        raise NotImplementedError()
+
+class EnvironmentComponentDescriptor(Callable[[], EnvironmentComponentInstance], metaclass=ABCMeta):
     """
     A descriptor for an EnvironmentComponent.
 
