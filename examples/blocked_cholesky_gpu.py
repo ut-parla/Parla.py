@@ -8,13 +8,13 @@ import math
 import time
 
 from parla import Parla, get_all_devices
-from parla.array import copy, clone_here
 
 from parla.cuda import gpu
 from parla.cpu import cpu
 
 from parla.function_decorators import specialized
 from parla.tasks import *
+from parla.ldevice import LDeviceGridBlocked
 
 import cupy as cp
 from cupy.cuda import cublas
@@ -24,8 +24,8 @@ from cupy.linalg import _util
 from scipy import linalg
 import sys
 
-block_size = int(sys.argv[1])
-n = block_size*int(sys.argv[2])
+block_size = int(sys.argv[1]) if len(sys.argv) > 1 else 32*5
+n = block_size*int(sys.argv[2]) if len(sys.argv) > 2 else block_size*16
 
 loc = gpu
 
@@ -38,15 +38,15 @@ def cholesky(a):
     if a.shape[0] != a.shape[1]:
         raise ValueError("A square array is required.")
     for j in range(a.shape[0]):
-        a[j,j] = math.sqrt(a[j,j] - (a[j,:j] * a[j,:j]).sum())
+        a[j, j] = math.sqrt(a[j, j] - (a[j, :j] * a[j, :j]).sum())
         for i in range(j+1, a.shape[0]):
-            a[i,j] -= (a[i,:j] * a[j,:j]).sum()
-            a[i,j] /= a[j,j]
+            a[i, j] -= (a[i, :j] * a[j, :j]).sum()
+            a[i, j] /= a[j, j]
     return a
 
 
 @cholesky.variant(gpu)
-def choleksy_gpu(a):
+def cholesky_gpu(a):
     a = cp.linalg.cholesky(a)
     if cp.any(cp.isnan(a)):
       raise np.linalg.LinAlgError
@@ -65,8 +65,8 @@ def ltriang_solve(a, b):
         raise ValueError("Array for back substitution is not square.")
     # For the implementation here, just assume lower triangular.
     for i in range(a.shape[0]):
-        b[i] /= a[i,i]
-        b[i+1:] -= a[i+1:,i:i+1] * b[i:i+1]
+        b[i] /= a[i, i]
+        b[i+1:] -= a[i+1:, i:i+1] * b[i:i+1]
     return b.T
 
 # comments would repack the data to column - major
@@ -114,9 +114,10 @@ def cholesky_blocked_inplace(a):
     the block (row first, then column). The third and fourth index
     select the entry within the given block.
     """
-    if a.shape[0] * a.shape[2] != a.shape[1] * a.shape[3]:
+    # TODO (bozhi): these should be guaranteed by the partitioner
+    if len(a) * a[0][0].shape[0] != len(a[0]) * a[0][0].shape[1]:
         raise ValueError("A square matrix is required.")
-    if a.shape[0] != a.shape[1]:
+    if len(a) != len(a[0]):
         raise ValueError("Non-square blocks are not supported.")
 
     # Define task spaces
@@ -125,43 +126,43 @@ def cholesky_blocked_inplace(a):
     gemm2 = TaskSpace("gemm2")        # Inter-block GEMM
     solve = TaskSpace("solve")        # Triangular solve
 
-    for j in range(a.shape[0]):
+    for j in range(len(a)):
         for k in range(j):
             # Inter - block GEMM
             @spawn(gemm1[j, k], [solve[j, k]], placement=loc)
             def t1():
-                out = clone_here(a[j,j])  # Move data to the current device
-                rhs = clone_here(a[j,k])
+                out = a[j, j]
+                rhs = a[j, k]
                 out = update(rhs, rhs, out)
-                copy(a[j,j], out)  # Move the result to the global array
+                a[j, j] = out
 
         # Cholesky on block
         @spawn(subcholesky[j], [gemm1[j, 0:j]], placement=loc)
         def t2():
-            dblock = clone_here(a[j, j])
+            dblock = a[j, j]
             dblock = cholesky(dblock)
-            copy(a[j, j], dblock)
+            a[j, j] = dblock
 
-        for i in range(j+1, a.shape[0]):
+        for i in range(j+1, len(a)):
             for k in range(j):
                 # Inter - block GEMM
                 @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k]], placement=loc)
                 def t3():
-                    out = clone_here(a[i,j])  # Move data to the current device
-                    rhs1 = clone_here(a[i,k])
-                    rhs2 = clone_here(a[j,k])
+                    out = a[i, j]
+                    rhs1 = a[i, k]
+                    rhs2 = a[j, k]
                     out = update(rhs1, rhs2, out)
-                    copy(a[i,j], out)  # Move the result to the global array
+                    a[i, j] = out
 
             # Triangular solve
             @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], placement=loc)
             def t4():
-                factor = clone_here(a[j, j])
-                panel = clone_here(a[i, j])
+                factor = a[j, j]
+                panel = a[i, j]
                 out = ltriang_solve(factor, panel)
-                copy(a[i, j], out)
+                a[i, j] = out
 
-    return subcholesky[a.shape[0]-1]
+    return subcholesky[len(a)-1]
 
 def main():
     @spawn(placement=cpu)
@@ -175,7 +176,8 @@ def main():
 
         # Copy and layout input
         a1 = a.copy()
-        ap = a1.reshape(n // block_size, block_size, n // block_size, block_size).swapaxes(1,2)
+        mapper = LDeviceGridBlocked(n // block_size, n // block_size, devices=get_current_devices())
+        ap = mapper.partition_tensor(a1)
         start = time.perf_counter()
 
         # Call Parla Cholesky result and wait for completion

@@ -9,10 +9,12 @@ import inspect
 from abc import abstractmethod, ABCMeta
 from functools import reduce
 from math import floor, ceil
-from typing import List, Tuple, Collection, Mapping
+from typing import List, Tuple, Iterable, Collection, Mapping
 from warnings import warn
 
 from parla.device import get_all_devices, Device, Memory, MemoryKind
+from parla.tasks import get_placement_for_any # TODO (bozhi): move get_placement_for_xxx to parla.device?
+from parla.array import is_array, copy, clone_here
 from parla.warning import PerformanceWarning
 
 
@@ -35,12 +37,11 @@ class LDeviceCollection(metaclass=ABCMeta):
     """
     A collection of logical devices mapped to physical devices.
     """
-    def __init__(self, devices = None):
+    def __init__(self, devices = None): # TODO (bozhi): `placement` might be a better kw (consistent w/ spawn)
         """
         :param devices: The physical devices to use or None to use all physical devices.
         """
-        if devices is None:
-            devices = get_all_devices()
+        devices = get_placement_for_any(devices)
         self._devices = tuple(devices)
 
     @property
@@ -126,8 +127,8 @@ class LDeviceSequence(LDeviceCollection):
         :return: A Python list of objects returned by `data` and copied to the appropriate device.
         """
         data = _wrapper_for_partition_function(data)
-        return [data(i, memory=self.memory(i, kind=memory_kind), device=self.device(i))
-                for i in range(self.n_ldevices)]
+        return Coordinator([data(i, memory=self.memory(i, kind=memory_kind), device=self.device(i))
+                for i in range(self.n_ldevices)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
         """
@@ -209,8 +210,8 @@ class LDeviceGrid(LDeviceCollection):
         :return: A Python list of lists of objects returned by `data` and copied to the appropriate device.
         """
         data = _wrapper_for_partition_function(data)
-        return [[data(i, j, memory=self.memory(i, j, kind=memory_kind), device=self.device(i, j))
-                 for j in range(self.n_ldevices_y)] for i in range(self.n_ldevices_x)]
+        return Coordinator([[data(i, j, memory=self.memory(i, j, kind=memory_kind), device=self.device(i, j))
+                 for j in range(self.n_ldevices_y)] for i in range(self.n_ldevices_x)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
         """
@@ -341,3 +342,58 @@ def _wrapper_for_partition_function(data):
         def wrapper(*args, memory, device):
             return memory(data(*args))
     return wrapper
+
+
+class Coordinator():
+    def __init__(self, latest_view: List):
+        self._latest_view = latest_view
+
+    def __getitem__(self, index):
+        if not isinstance(index, tuple):
+            index = (index,)
+        ret = []
+
+        def traverse(data, prefix, index):
+            if len(index) > 0:
+                i, *rest = index
+                if isinstance(i, slice):
+                    for v in range(i.start or 0, i.stop, i.step or 1):
+                        traverse(data[v], prefix + (v,), rest)
+                elif isinstance(i, Iterable):
+                    for v in i:
+                        traverse(data[v], prefix + (v,), rest)
+                else:
+                    assert isinstance(i, int)
+                    traverse(data[i], prefix + (i,), rest)
+            else:
+                ret.append(clone_here(data) if is_array(data) else data)
+
+        traverse(self._latest_view, (), index)
+        if len(ret) == 1:
+            return ret[0]
+        return ret
+
+    def __setitem__(self, index, value):
+        if not isinstance(index, tuple):
+            index = (index,)
+        ret = []
+
+        def traverse(data, prefix, index):
+            if len(index) > 0:
+                i, *rest = index
+                if isinstance(i, slice):
+                    for v in range(i.start or 0, i.stop, i.step or 1):
+                        traverse(data[v], prefix + (v,), rest)
+                elif isinstance(i, Iterable):
+                    for v in i:
+                        traverse(data[v], prefix + (v,), rest)
+                else:
+                    assert isinstance(i, int)
+                    traverse(data[i], prefix + (i,), rest)
+            else:
+                copy(data, value)
+
+        traverse(self._latest_view, (), index)
+
+    def __len__(self):
+        return len(self._latest_view)
