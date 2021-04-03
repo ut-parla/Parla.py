@@ -176,7 +176,7 @@ def main():
 
         # Copy and layout input
         a1 = a.copy()
-        mapper = LDeviceGridBlocked(n // block_size, n // block_size, devices=get_current_devices())
+        mapper = LDeviceGridBlocked(n // block_size, n // block_size, placement=get_current_devices())
         ap = mapper.partition_tensor(a1)
         start = time.perf_counter()
 
