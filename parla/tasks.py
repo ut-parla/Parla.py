@@ -230,7 +230,11 @@ class CompletedTaskSpace(TaskSet):
         return tasks()
 
 
-def get_placement_for_value(p: Union[Architecture, Device, Task, TaskID, Any]) -> List[Device]:
+# TODO (bozhi): We may need a centralized typing module to reduce types being imported everywhere.
+PlacementSource = Union[Architecture, Device, Task, TaskID, Any]
+
+# TODO (bozhi): We may need a `placement` module to hold these `get_placement_for_xxx` interfaces, which makes more sense than the `tasks` module here. Check imports when doing so.
+def get_placement_for_value(p: PlacementSource) -> List[Device]:
     if hasattr(p, "__parla_placement__"):
         # this handles Architecture, ResourceRequirements, and other types with __parla_placement__
         return list(p.__parla_placement__())
@@ -249,13 +253,13 @@ def get_placement_for_value(p: Union[Architecture, Device, Task, TaskID, Any]) -
         raise TypeError(type(p))
 
 
-def get_placement_for_set(placement: Collection[Union[Architecture, Device, Task, TaskID, Any]]) -> FrozenSet[Device]:
+def get_placement_for_set(placement: Collection[PlacementSource]) -> FrozenSet[Device]:
     if not isinstance(placement, Collection):
         raise TypeError(type(placement))
     return frozenset(d for p in placement for d in get_placement_for_value(p))
 
 
-def get_placement_for_any(placement: Union[Collection[Union[Architecture, Device, Task, "TaskID", Any]], Any, None]) \
+def get_placement_for_any(placement: Union[Collection[PlacementSource], Any, None]) \
         -> FrozenSet[Device]:
     if placement is not None:
         ps = placement if isinstance(placement, Iterable) and not array.is_array(placement) else [placement]
@@ -380,7 +384,7 @@ def _make_cell(val):
 def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
           memory: int = None,
           vcus: float = None,
-          placement: Union[Collection[Union[Architecture, Device, Task, TaskID, Any]], Any] = None,
+          placement: Union[Collection[PlacementSource], Any, None] = None,
           ndevices: int = 1,
           tags: Collection[Any] = (),
           data: Collection[Any] = None
@@ -483,6 +487,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     return decorator
 
 
+# TODO (bozhi): Why not put it in task_runtime? Remember to update __all__ and clean up imports to do so.
 def get_current_devices() -> List[Device]:
     """
     :return: A list of `devices<parla.device.Device>` assigned to the current task. This will have one element unless `ndevices` was \

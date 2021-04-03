@@ -9,11 +9,11 @@ import inspect
 from abc import abstractmethod, ABCMeta
 from functools import reduce
 from math import floor, ceil
-from typing import List, Tuple, Iterable, Collection, Mapping
+from typing import List, Tuple, Iterable, Collection, Mapping, Union, Any
 from warnings import warn
 
 from parla.device import get_all_devices, Device, Memory, MemoryKind
-from parla.tasks import get_placement_for_any # TODO (bozhi): move get_placement_for_xxx to parla.device?
+from parla.tasks import PlacementSource, get_placement_for_any
 from parla.array import is_array, copy, clone_here
 from parla.warning import PerformanceWarning
 
@@ -37,11 +37,11 @@ class LDeviceCollection(metaclass=ABCMeta):
     """
     A collection of logical devices mapped to physical devices.
     """
-    def __init__(self, devices = None): # TODO (bozhi): `placement` might be a better kw (consistent w/ spawn)
+    def __init__(self, placement = None):
         """
         :param devices: The physical devices to use or None to use all physical devices.
         """
-        devices = get_placement_for_any(devices)
+        devices = get_placement_for_any(placement)
         self._devices = tuple(devices)
 
     @property
@@ -90,12 +90,12 @@ class LDeviceSequence(LDeviceCollection):
     """
     A 1-d collection of logical devices.
     """
-    def __init__(self, n_ldevices, devices=None):
+    def __init__(self, n_ldevices, placement = None):
         """
         :param n_ldevices: The number of logical devices in this collection.
         :param devices: The physical devices to use or None to use all physical devices.
         """
-        super().__init__(devices)
+        super().__init__(placement)
         self._n_ldevices = n_ldevices
         if self.n_ldevices < len(self.devices):
             warn(PerformanceWarning(
@@ -170,13 +170,13 @@ class LDeviceGrid(LDeviceCollection):
     n_ldevices_x: int
     n_ldevices_y: int
 
-    def __init__(self, n_ldevices_x, n_ldevices_y, devices=None):
+    def __init__(self, n_ldevices_x, n_ldevices_y, placement = None):
         """
         :param n_ldevices_x: The number of logical devices along the 1st dimension of this grid.
         :param n_ldevices_y: The number of logical devices along the 2nd dimension of this grid.
         :param devices: The physical devices to use or None to use all physical devices.
         """
-        super().__init__(devices)
+        super().__init__(placement)
         self.n_ldevices_x = n_ldevices_x
         self.n_ldevices_y = n_ldevices_y
         if self.n_ldevices < len(self.devices):
@@ -250,8 +250,8 @@ class LDeviceSequenceBlocked(LDeviceSequence):
     """
     A 1-d collection of logical devices which are assigned to physical devices in contiguous blocks.
     """
-    def __init__(self, n_ldevices: int, devices: Collection[Device] = None):
-        super().__init__(n_ldevices, devices)
+    def __init__(self, n_ldevices: int, placement: Union[Collection[PlacementSource], Any, None] = None):
+        super().__init__(n_ldevices, placement)
         self._divisor = self.n_ldevices / self.n_devices
         assert floor(self._divisor * self.n_devices) == self.n_ldevices
 
@@ -271,8 +271,8 @@ class LDeviceGridBlocked(LDeviceGrid):
     """
     A 2-d collection of logical devices which are assigned to physical devices in contiguous blocks in both dimensions.
     """
-    def __init__(self, n_ldevices_x: int, n_ldevices_y: int, devices: Collection[Device] = None):
-        super().__init__(n_ldevices_x, n_ldevices_y, devices)
+    def __init__(self, n_ldevices_x: int, n_ldevices_y: int, placement: Union[Collection[PlacementSource], Any, None] = None):
+        super().__init__(n_ldevices_x, n_ldevices_y, placement)
         self._n, self._m = _split_number(self.n_devices)
         assert self._n * self._m == self.n_devices
         if self.n_ldevices_x < self._n or self.n_ldevices_y < self._m:
@@ -299,8 +299,8 @@ class LDeviceGridRaveled(LDeviceGrid):
     A 2-d collection of logical devices which are assigned to physical devices as if `LDeviceSequenceBlocked` were
     applied to a "ravelled" version of the grid of logical devices.
     """
-    def __init__(self, n_ldevices_x: int, n_ldevices_y: int, devices: Collection[Device] = None):
-        super().__init__(n_ldevices_x, n_ldevices_y, devices)
+    def __init__(self, n_ldevices_x: int, n_ldevices_y: int, placement: Union[Collection[PlacementSource], Any, None] = None):
+        super().__init__(n_ldevices_x, n_ldevices_y, placement)
         self._divisor = self.n_ldevices / self.n_devices
 
     def device(self, i, j):
