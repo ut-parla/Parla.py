@@ -127,7 +127,7 @@ class LDeviceSequence(LDeviceCollection):
         :return: A Python list of objects returned by `data` and copied to the appropriate device.
         """
         data = _wrapper_for_partition_function(data)
-        return Coordinator([data(i, memory=self.memory(i, kind=memory_kind), device=self.device(i))
+        return PartitionedNDArray([data(i, memory=self.memory(i, kind=memory_kind), device=self.device(i))
                 for i in range(self.n_ldevices)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
@@ -210,7 +210,7 @@ class LDeviceGrid(LDeviceCollection):
         :return: A Python list of lists of objects returned by `data` and copied to the appropriate device.
         """
         data = _wrapper_for_partition_function(data)
-        return Coordinator([[data(i, j, memory=self.memory(i, j, kind=memory_kind), device=self.device(i, j))
+        return PartitionedNDArray([[data(i, j, memory=self.memory(i, j, kind=memory_kind), device=self.device(i, j))
                  for j in range(self.n_ldevices_y)] for i in range(self.n_ldevices_x)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
@@ -344,7 +344,7 @@ def _wrapper_for_partition_function(data):
     return wrapper
 
 
-class Coordinator():
+class PartitionedNDArray():
     def __init__(self, latest_view: List):
         self._latest_view = latest_view
 
