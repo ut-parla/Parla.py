@@ -17,6 +17,7 @@ from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, 
 
 from parla.device import Device, Architecture, get_all_devices
 from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task
+from parla.utils import traverse
 
 try:
     from parla import task_runtime, array
@@ -190,22 +191,8 @@ class TaskSpace(TaskSet):
         if not isinstance(index, tuple):
             index = (index,)
         ret = []
-
-        def traverse(prefix, index):
-            if len(index) > 0:
-                i, *rest = index
-                if isinstance(i, slice):
-                    for v in range(i.start or 0, i.stop, i.step or 1):
-                        traverse(prefix + (v,), rest)
-                elif isinstance(i, Iterable):
-                    for v in i:
-                        traverse(prefix + (v,), rest)
-                else:
-                    traverse(prefix + (i,), rest)
-            else:
-                ret.append(self._data.setdefault(prefix, TaskID(self._name, prefix)))
-
-        traverse((), index)
+        traverse((), index, lambda x, i: x + (i,),
+                lambda x: ret.append(self._data.setdefault(x, TaskID(self._name, x))))
         # print(index, ret)
         if len(ret) == 1:
             return ret[0]

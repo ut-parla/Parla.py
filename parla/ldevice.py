@@ -16,6 +16,7 @@ from parla.device import get_all_devices, Device, Memory, MemoryKind
 from parla.tasks import PlacementSource, get_placement_for_any
 from parla.array import is_array, copy, clone_here
 from parla.warning import PerformanceWarning
+from parla.utils import traverse
 
 
 def _factors(n: int) -> List[int]:
@@ -352,23 +353,8 @@ class PartitionedNDArray():
         if not isinstance(index, tuple):
             index = (index,)
         ret = []
-
-        def traverse(data, prefix, index):
-            if len(index) > 0:
-                i, *rest = index
-                if isinstance(i, slice):
-                    for v in range(i.start or 0, i.stop, i.step or 1):
-                        traverse(data[v], prefix + (v,), rest)
-                elif isinstance(i, Iterable):
-                    for v in i:
-                        traverse(data[v], prefix + (v,), rest)
-                else:
-                    assert isinstance(i, int)
-                    traverse(data[i], prefix + (i,), rest)
-            else:
-                ret.append(clone_here(data) if is_array(data) else data)
-
-        traverse(self._latest_view, (), index)
+        traverse(self._latest_view, index, step=lambda I, i: I[i],
+                stop=lambda x: ret.append(clone_here(x) if is_array(x) else x))
         if len(ret) == 1:
             return ret[0]
         return ret
@@ -376,24 +362,8 @@ class PartitionedNDArray():
     def __setitem__(self, index, value):
         if not isinstance(index, tuple):
             index = (index,)
-        ret = []
-
-        def traverse(data, prefix, index):
-            if len(index) > 0:
-                i, *rest = index
-                if isinstance(i, slice):
-                    for v in range(i.start or 0, i.stop, i.step or 1):
-                        traverse(data[v], prefix + (v,), rest)
-                elif isinstance(i, Iterable):
-                    for v in i:
-                        traverse(data[v], prefix + (v,), rest)
-                else:
-                    assert isinstance(i, int)
-                    traverse(data[i], prefix + (i,), rest)
-            else:
-                copy(data, value)
-
-        traverse(self._latest_view, (), index)
+        traverse(self._latest_view, index, step=lambda I, i: I[i],
+                stop=lambda x: copy(x, value))
 
     def __len__(self):
         return len(self._latest_view)
