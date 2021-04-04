@@ -54,7 +54,7 @@ class _CPUDevice(Device):
 
     @property
     def default_components(self) -> Collection["EnvironmentComponentDescriptor"]:
-        return []
+        return [UnboundCPUComponent()]
 
     def memory(self, kind: MemoryKind = None):
         return _CPUMemory(self, kind)
@@ -98,7 +98,6 @@ class _CPUCoresArchitecture(Architecture):
 
 
 class UnboundCPUComponentInstance(EnvironmentComponentInstance):
-
     def __init__(self, descriptor, env):
         super().__init__(descriptor)
         cpus = [d for d in env.placement if isinstance(d, _CPUDevice)]
@@ -110,6 +109,9 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         return
+
+    def initialize_thread(self) -> None:
+        pass
 
 
 class UnboundCPUComponent(EnvironmentComponentDescriptor):

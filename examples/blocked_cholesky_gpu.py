@@ -3,7 +3,6 @@ A naive implementation of blocked Cholesky using Numba kernels on CPUs.
 """
 
 import numpy as np
-# import cupy
 from numba import jit, void, float64
 import math
 import time
@@ -23,6 +22,10 @@ from cupy.cuda import device
 from cupy.linalg import _util
 
 from scipy import linalg
+import sys
+
+block_size = int(sys.argv[1])
+n = block_size*int(sys.argv[2])
 
 loc = gpu
 
@@ -45,7 +48,8 @@ def cholesky(a):
 @cholesky.variant(gpu)
 def choleksy_gpu(a):
     a = cp.linalg.cholesky(a)
-    cp.cuda.stream.get_current_stream().synchronize()
+    if cp.any(cp.isnan(a)):
+      raise np.linalg.LinAlgError
     return a
 
 @specialized
@@ -65,15 +69,13 @@ def ltriang_solve(a, b):
         b[i+1:] -= a[i+1:,i:i+1] * b[i:i+1]
     return b.T
 
-#comments would repack the data to column-major
+# comments would repack the data to column - major
 def cupy_trsm_wrapper(a, b):
     cublas_handle = device.get_cublas_handle()
     trsm = cublas.dtrsm
     uplo = cublas.CUBLAS_FILL_MODE_LOWER
-
     a = cp.array(a, dtype=np.float64, order='F')
     b = cp.array(b, dtype=np.float64, order='F')
-    print("Running cupy trsm on device: ", a.device)
     trans = cublas.CUBLAS_OP_T
     side = cublas.CUBLAS_SIDE_RIGHT
 
@@ -88,7 +90,6 @@ def cupy_trsm_wrapper(a, b):
 @ltriang_solve.variant(gpu)
 def ltriang_solve_gpu(a, b):
     b = cupy_trsm_wrapper(a, b)
-    cp.cuda.stream.get_current_stream().synchronize()
     return b
 
 def update_kernel(a, b, c):
@@ -103,8 +104,6 @@ def update(a, b, c):
 @update.variant(gpu)
 def update_gpu(a, b, c):
     c = update_kernel(a, b, c)
-    cp.cuda.stream.get_current_stream().synchronize()
-    #c = cupy_gemm_wrapper(a, b, c)
     return c
 
 def cholesky_blocked_inplace(a):
@@ -128,12 +127,11 @@ def cholesky_blocked_inplace(a):
 
     for j in range(a.shape[0]):
         for k in range(j):
-            # Inter-block GEMM
+            # Inter - block GEMM
             @spawn(gemm1[j, k], [solve[j, k]], placement=loc)
             def t1():
                 out = clone_here(a[j,j])  # Move data to the current device
                 rhs = clone_here(a[j,k])
-
                 out = update(rhs, rhs, out)
                 copy(a[j,j], out)  # Move the result to the global array
 
@@ -146,13 +144,12 @@ def cholesky_blocked_inplace(a):
 
         for i in range(j+1, a.shape[0]):
             for k in range(j):
-                # Inter-block GEMM
+                # Inter - block GEMM
                 @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k]], placement=loc)
                 def t3():
                     out = clone_here(a[i,j])  # Move data to the current device
                     rhs1 = clone_here(a[i,k])
                     rhs2 = clone_here(a[j,k])
-
                     out = update(rhs1, rhs2, out)
                     copy(a[i,j], out)  # Move the result to the global array
 
@@ -161,10 +158,7 @@ def cholesky_blocked_inplace(a):
             def t4():
                 factor = clone_here(a[j, j])
                 panel = clone_here(a[i, j])
-                print(i, j, "Before", panel, flush=True)
                 out = ltriang_solve(factor, panel)
-                print(i, j, "Panel", panel,flush=True)
-                print(i, j, "Out", out, flush=True)
                 copy(a[i, j], out)
 
     return subcholesky[a.shape[0]-1]
@@ -172,9 +166,6 @@ def cholesky_blocked_inplace(a):
 def main():
     @spawn(placement=cpu)
     async def test_blocked_cholesky():
-        # Configure environment
-        block_size = 32*5
-        n = block_size*16
         assert not n % block_size
 
         np.random.seed(10)

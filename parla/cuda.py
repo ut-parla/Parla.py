@@ -11,6 +11,8 @@ from . import device
 from .device import *
 from .environments import EnvironmentComponentInstance, TaskEnvironment, EnvironmentComponentDescriptor
 
+import numpy
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -50,13 +52,30 @@ class _GPUMemory(Memory):
     def np(self):
         return _DeviceCUPy(self.device)
 
+    def asarray_async(self, src):
+      dst = cupy.ndarray(src.shape)
+      dst.data.copy_from_device_async(src.data, src.nbytes,
+                                      cupy.cuda.get_current_stream())
+      return dst
+
     def __call__(self, target):
-        with self.device._device_context():
-            if cupy.cuda.Device() != getattr(target, "device", None):
-                logger.debug("Moving data: %r => %r", getattr(target, "device", None), cupy.cuda.Device())
-                return cupy.asarray(target)
-            else:
-                return target
+        # TODO Several threads could share the same device object.
+        #      It causes data race and CUDA context is incorrectly set.
+        #      For now, this remove assumes that one device is always
+        #      assigned to one task.
+        # FIXME This code breaks the semantics since a different device
+        #       could copy data on the current device to a remote device.
+        #with self.device._device_context():
+        if isinstance(target, numpy.ndarray):
+            logger.debug("Moving data: CPU => %r", cupy.cuda.Device())
+            return cupy.asarray(target)
+        elif type(target) is cupy.ndarray and \
+             cupy.cuda.Device() != getattr(target, "device", None):
+            logger.debug("Moving data: %r => %r",
+                         getattr(target, "device", None), cupy.cuda.Device())
+            return self.asarray_async(target)
+        else:
+            return target
 
 
 class _GPUDevice(Device):
@@ -167,6 +186,16 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         self.stream.synchronize()
         return self.gpu.cupy_device.__exit__(exc_type, exc_val, exc_tb)
 
+    def initialize_thread(self) -> None:
+        for gpu in self.gpus:
+            # Trigger cblas/etc. initialization for this GPU in this thread.
+            device = gpu.cupy_device
+            with device:
+                device.cublas_handle
+                device.cusolver_handle
+                device.cusolver_sp_handle
+                device.cusparse_handle
+
 class GPUComponent(EnvironmentComponentDescriptor):
     """A single GPU CUDA component which configures the environment to use the specific GPU using a single
     non-blocking stream
@@ -218,6 +247,17 @@ class MultiGPUComponentInstance(EnvironmentComponentInstance):
         assert _gpu_locals._gpus == self.gpus
         _gpu_locals._gpus = None
         return False
+
+    def initialize_thread(self) -> None:
+        for gpu in self.gpus:
+            # Trigger cuBLAS initialization for this GPU in this thread.
+            device = gpu.cupy_device
+            with device:
+                device.cublas_handle
+                device.cusolver_handle
+                device.cusolver_sp_handle
+                device.cusparse_handle
+
 
 class MultiGPUComponent(EnvironmentComponentDescriptor):
     """A multi-GPU CUDA component which exposes the GPUs to the task via `get_gpus`.
