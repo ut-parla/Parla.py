@@ -1,15 +1,16 @@
 #!/bin/bash
 #SBATCH -J qr_fac_parla     # job name
-#SBATCH -o experiment.out
-#SBATCH -N 1                # total number of node
+#SBATCH -o experiment.out   # log file
+#SBATCH -N 1                # total number of nodes
 #SBATCH -n 16               # total number of mpi tasks requested
-#SBATCH -p rtx              # queue (partition) — normal, development, etc.
-#SBATCH -t 03:00:00         # run time (hh:mm:ss) - 1.5 hours
+#SBATCH -p rtx              # queue (partition)
+#SBATCH -t 03:00:00         # run time (hh:mm:ss)
 
 echo -e "\n========================= SLURM JOB START =========================\n"
 
 module load cuda
 
+# Load my conda environment
 __conda_setup="$('/home1/07999/stephens/miniconda3/bin/conda' 'shell.bash' 'hook' 2> /dev/null)"
 if [ $? -eq 0 ]; then
     eval "$__conda_setup"
