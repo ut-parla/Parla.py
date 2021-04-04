@@ -34,6 +34,7 @@ gpu_arrs = []
 # Configure environment
 block_size = int(sys.argv[1])
 n = block_size*int(sys.argv[2])
+num_tests = int(sys.argv[3])
 
 @specialized
 @jit(float64[:,:](float64[:,:]), nopython=True, nogil=True)
@@ -170,6 +171,13 @@ def allocate_gpu_memory(i:int, r:int, n:int, b:int):
     prealloced = cp.ndarray([r, n // b, b, b])
     gpu_arrs.append(prealloced)
 
+def initialize_gpu_memory(num_gpus:int):
+  if len(gpu_arrs) == num_gpus:
+    for i in range(num_gpus):
+      with cp.cuda.Device(i):
+        gpu_arrs[i] = []
+
+
 def get_gpu_memory(i:int, j:int, num_gpus:int):
   dev_id   = i % num_gpus
   local_id = i // num_gpus
@@ -197,68 +205,76 @@ def main():
     assert not n % block_size
 
     logger.debug("Allocate memory..")
-    for d in range(num_gpus):
-      row_size = n // (block_size * num_gpus)
-      if d < ((n / block_size) % num_gpus):
-        row_size += 1
-      if row_size > 0:
-        allocate_gpu_memory(d, row_size, n, block_size)
-    logger.debug("Allocate memory done..")
+    for i in range(num_tests):
+      global gpu_arrs
+      gpu_arrs = []
+      for d in range(num_gpus):
+        row_size = n // (block_size * num_gpus)
+        if d < ((n / block_size) % num_gpus):
+          row_size += 1
+        if row_size > 0:
+          allocate_gpu_memory(d, row_size, n, block_size)
+      logger.debug("Allocate memory done..")
 
-    np.random.seed(10)
+      np.random.seed(10)
 
-    logger.debug("Random number generate..")
-    # Construct input data
-    a = np.random.rand(n, n)
-    a = a @ a.T
-    logger.debug("Random number generate done..")
+      logger.debug("Random number generate..")
+      # Construct input data
+      a = np.random.rand(n, n)
+      a = a @ a.T
+      logger.debug("Random number generate done..")
 
-    logger.debug("Copy a to a1..")
-    # Copy and layout input
-    a1 = a.copy()
-    logger.debug("Copying done..")
-    logger.debug("Shaping starts..")
-    ap = a1.reshape(n // block_size, block_size, n // block_size, block_size).swapaxes(1,2)
-    logger.debug("Shaping done..")
-    set_gpu_memory_from_cpu(ap, num_gpus)
+      logger.debug("Copy a to a1..")
+      # Copy and layout input
+      a1 = a.copy()
+      logger.debug("Copying done..")
+      logger.debug("Shaping starts..")
+      ap = a1.reshape(n // block_size, block_size, n // block_size, block_size).swapaxes(1,2)
+      logger.debug("Shaping done..")
+      set_gpu_memory_from_cpu(ap, num_gpus)
 
-    for i in range(len(gpu_arrs)):
-      logger.debug("Device ", i, " arrays are on ", gpu_arrs[i].device);
-    logger.debug("Calculate starts..")
-    start = time.perf_counter()
+      for i in range(len(gpu_arrs)):
+        logger.debug("Device ", i, " arrays are on ", gpu_arrs[i].device);
 
-    # Call Parla Cholesky result and wait for completion
-    await cholesky_blocked_inplace(ap, num_gpus)
+      logger.debug("Calculate starts..")
+      start = time.perf_counter()
 
-    end = time.perf_counter()
-    print(end - start, "seconds")
-    logger.debug("Calculate done..")
+      # Call Parla Cholesky result and wait for completion
+      await cholesky_blocked_inplace(ap, num_gpus)
 
-    for i in range(len(gpu_arrs)):
-      logger.debug("Device ", i, " arrays are on ", gpu_arrs[i].device);
+      end = time.perf_counter()
+      print(end - start, "seconds")
+      logger.debug("Calculate done..")
 
-    for d in range(len(gpu_arrs)):
-      logger.debug("Device:", d, " swap array..")
-      gpu_arrs[d] = cp.swapaxes(gpu_arrs[d], 2, 1)
-      logger.debug("Device:", d, " swap done..")
+      for i in range(len(gpu_arrs)):
+        logger.debug("Device ", i, " arrays are on ", gpu_arrs[i].device);
 
-    cpu_arrs = np.empty([n // block_size,
-                         block_size,
-                         n // block_size,
-                         block_size], dtype=float)
-    for r_num in range(n // block_size):
-      dev_id   = r_num % num_gpus
-      local_id = r_num // num_gpus
-      cpu_arrs[r_num] = cp.asnumpy(gpu_arrs[dev_id][local_id])
-    cpu_arrs = cpu_arrs.reshape(n, n)
-    print("Truth", linalg.cholesky(a).T)
+      for d in range(len(gpu_arrs)):
+        logger.debug("Device:", d, " swap array..")
+        gpu_arrs[d] = cp.swapaxes(gpu_arrs[d], 2, 1)
+        logger.debug("Device:", d, " swap done..")
 
-    # Check result
-    computed_L = np.tril(cpu_arrs)
-    print("Soln", computed_L)
-    error = np.max(np.absolute(a-computed_L @ computed_L.T))
-    print("Error", error)
-    assert(error < 1E-8)
+      cpu_arrs = np.empty([n // block_size,
+                           block_size,
+                           n // block_size,
+                           block_size], dtype=float)
+      for r_num in range(n // block_size):
+        dev_id   = r_num % num_gpus
+        local_id = r_num // num_gpus
+        cpu_arrs[r_num] = cp.asnumpy(gpu_arrs[dev_id][local_id])
+      cpu_arrs = cpu_arrs.reshape(n, n)
+      print("Truth", linalg.cholesky(a).T)
+
+      # Check result
+      computed_L = np.tril(cpu_arrs)
+      print("Soln", computed_L)
+      error = np.max(np.absolute(a-computed_L @ computed_L.T))
+      print("Error", error)
+      assert(error < 1E-8)
+      del gpu_arrs
+      del a
+      del a1
+      del ap
 
 if __name__ == '__main__':
     with Parla():
