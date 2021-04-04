@@ -72,8 +72,9 @@ if __name__ == "__main__":
         times_H2D = times_H2D[1:]
         times_ker = times_ker[1:]
         times_D2H = times_D2H[1:]
-
-    times_total = [times_H2D[i] + times_ker[i] + times_D2H[i] for i in range(ITERS - 1)]
+        times_total = [times_H2D[i] + times_ker[i] + times_D2H[i] for i in range(ITERS - 1)]
+    else:
+        times_total = [times_H2D[i] + times_ker[i] + times_D2H[i] for i in range(ITERS)]
 
     print("Host to Device")
     print(times_H2D)
