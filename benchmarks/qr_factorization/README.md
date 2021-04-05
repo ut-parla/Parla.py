@@ -62,5 +62,5 @@ qr_parla.py -r 500000 -c 1000 -b 125000 -i 1 -g 4 -p gpu # Factorize a 500k by 1
 	- Uses VECs (Virtual Execution Contexts) in order to achieve nested parallelism using multiple threads in a single virtual address space.
 - `vec-segfault.py` \*
 	- Slimmed down version of qr-vec.py for isolating a segmentation fault that has yet to be fixed.  
-	- 
+
 \* Note that VECs have their own special installation process and don't work with vanilla Parla.
