@@ -66,16 +66,17 @@ class _GPUMemory(Memory):
         # FIXME This code breaks the semantics since a different device
         #       could copy data on the current device to a remote device.
         #with self.device._device_context():
-        if isinstance(target, numpy.ndarray):
-            logger.debug("Moving data: CPU => %r", cupy.cuda.Device())
-            return cupy.asarray(target)
-        elif type(target) is cupy.ndarray and \
-             cupy.cuda.Device() != getattr(target, "device", None):
-            logger.debug("Moving data: %r => %r",
-                         getattr(target, "device", None), cupy.cuda.Device())
-            return self.asarray_async(target)
-        else:
-            return target
+        with cupy.cuda.Device(self.device.index):
+            if isinstance(target, numpy.ndarray):
+                logger.debug("Moving data: CPU => %r", cupy.cuda.Device())
+                return cupy.asarray(target)
+            elif isinstance(target, cupy.ndarray) and \
+                 cupy.cuda.Device() != getattr(target, "device", None):
+                logger.debug("Moving data: %r => %r",
+                             getattr(target, "device", None), cupy.cuda.Device())
+                return self.asarray_async(target)
+            else:
+                return target
 
 
 class _GPUDevice(Device):
@@ -85,8 +86,7 @@ class _GPUDevice(Device):
         dev = cupy.cuda.Device(self.index)
         free, total = dev.mem_info
         attrs = dev.attributes
-        return dict(threads=attrs["MultiProcessorCount"] * attrs["MaxThreadsPerMultiProcessor"], memory=total,
-                    cvus=attrs["MultiProcessorCount"])
+        return dict(threads=attrs["MultiProcessorCount"] * attrs["MaxThreadsPerMultiProcessor"], memory=total, vcus=1)
 
     @property
     def default_components(self) -> Collection["EnvironmentComponentDescriptor"]:
@@ -98,7 +98,6 @@ class _GPUDevice(Device):
             yield
 
     @property
-    @lru_cache(None)
     def cupy_device(self):
         return cupy.cuda.Device(self.index)
 
@@ -164,8 +163,43 @@ if cupy:
 
 # Integration with parla.environments
 
+class _GPUStacksLocal(threading.local):
+    _stream_stack: List[cupy.cuda.Stream]
+    _device_stack: List[cupy.cuda.Device]
+
+    def __init__(self):
+        super(_GPUStacksLocal, self).__init__()
+        self._stream_stack = []
+        self._device_stack = []
+
+    def push_stream(self, stream):
+        self._stream_stack.append(stream)
+
+    def pop_stream(self) -> cupy.cuda.Stream:
+        return self._stream_stack.pop()
+
+    def push_device(self, dev):
+        self._device_stack.append(dev)
+
+    def pop_device(self) -> cupy.cuda.Device:
+        return self._device_stack.pop()
+
+    @property
+    def stream(self):
+        if self._stream_stack:
+            return self._stream_stack[-1]
+        else:
+            return None
+    @property
+    def device(self):
+        if self._device_stack:
+            return self._device_stack[-1]
+        else:
+            return None
+
+
 class GPUComponentInstance(EnvironmentComponentInstance):
-    stream: cupy.cuda.Stream
+    _stack: _GPUStacksLocal
     gpus: List[_GPUDevice]
 
     def __init__(self, descriptor: "GPUComponent", env: TaskEnvironment):
@@ -173,24 +207,43 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         self.gpus = [d for d in env.placement if isinstance(d, _GPUDevice)]
         assert len(self.gpus) == 1
         self.gpu = self.gpus[0]
+        # Use a stack per thread per GPU component just in case.
+        self._stack = _GPUStacksLocal()
+
+    def _make_stream(self):
         with self.gpu.cupy_device:
-            self.stream = cupy.cuda.Stream(null=False, non_blocking=True)
+            return cupy.cuda.Stream(null=False, non_blocking=True)
 
     def __enter__(self):
-        self.gpu.cupy_device.__enter__()
-        self.stream.__enter__()
+        _gpu_locals._gpus = self.gpus
+        dev = self.gpu.cupy_device
+        dev.__enter__()
+        self._stack.push_device(dev)
+        stream = self._make_stream()
+        stream.__enter__()
+        self._stack.push_stream(stream)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.stream.__exit__(exc_type, exc_val, exc_tb)
-        self.stream.synchronize()
-        return self.gpu.cupy_device.__exit__(exc_type, exc_val, exc_tb)
+        dev = self._stack.device
+        stream = self._stack.stream
+        try:
+            stream.synchronize()
+            stream.__exit__(exc_type, exc_val, exc_tb)
+            _gpu_locals._gpus = None
+            ret = dev.__exit__(exc_type, exc_val, exc_tb)
+        finally:
+            self._stack.pop_stream()
+            self._stack.pop_device()
+        return ret
 
     def initialize_thread(self) -> None:
         for gpu in self.gpus:
             # Trigger cblas/etc. initialization for this GPU in this thread.
             device = gpu.cupy_device
             with device:
+                a = cupy.asarray([2.])
+                cupy.asnumpy(cupy.sqrt(a))
                 device.cublas_handle
                 device.cusolver_handle
                 device.cusolver_sp_handle
@@ -253,6 +306,8 @@ class MultiGPUComponentInstance(EnvironmentComponentInstance):
             # Trigger cuBLAS initialization for this GPU in this thread.
             device = gpu.cupy_device
             with device:
+                a = cupy.asarray([2.])
+                cupy.asnumpy(cupy.sqrt(a))
                 device.cublas_handle
                 device.cusolver_handle
                 device.cusolver_sp_handle
