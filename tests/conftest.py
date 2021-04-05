@@ -18,5 +18,9 @@ else:
 
 @pytest.fixture
 def runtime_sched():
+    try:
+        from parla.cuda import gpu
+    except:
+        pass
     with Parla() as p:
         yield get_scheduler_context().scheduler
