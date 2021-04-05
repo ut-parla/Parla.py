@@ -85,8 +85,7 @@ class _GPUDevice(Device):
         dev = cupy.cuda.Device(self.index)
         free, total = dev.mem_info
         attrs = dev.attributes
-        return dict(threads=attrs["MultiProcessorCount"] * attrs["MaxThreadsPerMultiProcessor"], memory=total,
-                    cvus=attrs["MultiProcessorCount"])
+        return dict(threads=attrs["MultiProcessorCount"] * attrs["MaxThreadsPerMultiProcessor"], memory=total, vcus=1)
 
     @property
     def default_components(self) -> Collection["EnvironmentComponentDescriptor"]:
