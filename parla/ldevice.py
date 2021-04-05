@@ -40,7 +40,7 @@ class LDeviceCollection(metaclass=ABCMeta):
     """
     def __init__(self, placement = None):
         """
-        :param devices: The physical devices to use or None to use all physical devices.
+        :param placement: The physical devices to use or None to use all physical devices.
         """
         devices = get_placement_for_any(placement)
         self._devices = tuple(devices)
@@ -94,7 +94,7 @@ class LDeviceSequence(LDeviceCollection):
     def __init__(self, n_ldevices, placement = None):
         """
         :param n_ldevices: The number of logical devices in this collection.
-        :param devices: The physical devices to use or None to use all physical devices.
+        :param placement: The physical devices to use or None to use all physical devices.
         """
         super().__init__(placement)
         self._n_ldevices = n_ldevices
@@ -125,10 +125,10 @@ class LDeviceSequence(LDeviceCollection):
             get the data for that logical device. The function may also take parameters named `device` and/or `memory`,
             in which case the device and/or memory associated with the logical device is passed along with the index.
         :param memory_kind: The kind of memory in which to place the data.
-        :return: A Python list of objects returned by `data` and copied to the appropriate device.
+        :return: A :class:`PartitionedTensor` instance of objects returned by `data` and copied to the appropriate device.
         """
         data = _wrapper_for_partition_function(data)
-        return PartitionedNDArray([data(i, memory=self.memory(i, kind=memory_kind), device=self.device(i))
+        return PartitionedTensor([data(i, memory=self.memory(i, kind=memory_kind), device=self.device(i))
                 for i in range(self.n_ldevices)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
@@ -138,7 +138,7 @@ class LDeviceSequence(LDeviceCollection):
         :param data: A numpy-compatible tensor.
         :param overlap: The number of elements by which partitions should overlap.
         :param memory_kind: The kind of memory in which to store the partitions.
-        :return: A Python list of the partition tensors.
+        :return: A :class:`PartitionedTensor` instance of the partition tensors.
         """
         (n, *rest) = data.shape
         return self.partition(lambda i: data[self.slice(i, n, overlap=overlap), ...],
@@ -175,7 +175,7 @@ class LDeviceGrid(LDeviceCollection):
         """
         :param n_ldevices_x: The number of logical devices along the 1st dimension of this grid.
         :param n_ldevices_y: The number of logical devices along the 2nd dimension of this grid.
-        :param devices: The physical devices to use or None to use all physical devices.
+        :param placement: The physical devices to use or None to use all physical devices.
         """
         super().__init__(placement)
         self.n_ldevices_x = n_ldevices_x
@@ -208,10 +208,10 @@ class LDeviceGrid(LDeviceCollection):
             get the data for that logical device. The function may also take parameters named `device` and/or `memory`,
             in which case the device and/or memory associated with the logical device is passed along with the indices.
         :param memory_kind: The kind of memory in which to place the data.
-        :return: A Python list of lists of objects returned by `data` and copied to the appropriate device.
+        :return: A :class:`PartitionedTensor` instance of lists of objects returned by `data` and copied to the appropriate device.
         """
         data = _wrapper_for_partition_function(data)
-        return PartitionedNDArray([[data(i, j, memory=self.memory(i, j, kind=memory_kind), device=self.device(i, j))
+        return PartitionedTensor([[data(i, j, memory=self.memory(i, j, kind=memory_kind), device=self.device(i, j))
                  for j in range(self.n_ldevices_y)] for i in range(self.n_ldevices_x)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
@@ -221,7 +221,7 @@ class LDeviceGrid(LDeviceCollection):
         :param data: A numpy-compatible tensor.
         :param overlap: The number of elements by which partitions should overlap.
         :param memory_kind: The kind of memory in which to store the partitions.
-        :return: A Python list of lists of the partition tensors.
+        :return: A :class:`PartitionedTensor` instance of lists of the partition tensors.
         """
         (n_x, n_y, *rest) = data.shape
         return self.partition(lambda i, j: data[self.slice_x(i, n_x, overlap=overlap),
@@ -345,11 +345,25 @@ def _wrapper_for_partition_function(data):
     return wrapper
 
 
-class PartitionedNDArray():
+IndexType = Union[slice, int, Iterable[int], Tuple[Union[slice, Iterable[int], int]]]
+
+
+class PartitionedTensor():
+    """
+    A wrapper of a partitioned tensor.
+    """
     def __init__(self, latest_view: List):
         self._latest_view = latest_view
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: IndexType): # -> Union[Array, List[Array]]
+        """
+        Read partitions and make sure they are on the current device.
+
+        :param index: index of the target partition(s).
+
+        .. todo:
+            Multiple partitions are currently returned as a Python list of partitions (ndarrays).
+        """
         if not isinstance(index, tuple):
             index = (index,)
         ret = []
@@ -359,7 +373,15 @@ class PartitionedNDArray():
             return ret[0]
         return ret
 
-    def __setitem__(self, index, value):
+    def __setitem__(self, index: IndexType, value):
+        """
+        Assign :param:`value` to a partition which may not on the current device.
+
+        :param index: index of the target partition(s)
+
+        .. todo:
+            Assignment of different values to multiple partitions (ndarrays) are currently NOT supported. The :param:`value` is assigned as a whole to each of the target partition(s).
+        """
         if not isinstance(index, tuple):
             index = (index,)
         parse_index(self._latest_view, index, step=lambda I, i: I[i],
