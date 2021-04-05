@@ -22,6 +22,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--cols", help="Number of columns for input matrix", type=int, default=100)
     parser.add_argument("-b", "--block_size", help="Block size to break up input matrix; must be >= cols", type=int, default=500)
     parser.add_argument("-i", "--iterations", help="Number of iterations to run experiment. If > 1, first is ignored as warmup.", type=int, default=1)
+    parser.add_argument("-w", "--warmup", help="Number of warmup runs to perform before iterations.", type=int, default=0)
     parser.add_argument("-K", "--check_result", help="Checks final result on CPU", action="store_true")
 
     args = parser.parse_args()
@@ -31,14 +32,13 @@ if __name__ == "__main__":
     NCOLS = args.cols
     BLOCK_SIZE = args.block_size
     ITERS = args.iterations
+    WARMUP = args.warmup
     CHECK_RESULT = args.check_result
 
     print('%**********************************************************************************************%\n')
-    print('Config: rows=', NROWS, ' cols=', NCOLS, ' iterations=', ITERS, ' check_result=', CHECK_RESULT, sep='', end='\n\n')
-    times = [None] * ITERS
+    print('Config: rows=', NROWS, ' cols=', NCOLS, ' iterations=', ITERS, ' warmup=', WARMUP, ' check_result=', CHECK_RESULT, sep='', end='\n\n')
 
-    # Dask version
-    for i in range(ITERS):
+    for i in range(WARMUP + ITERS):
         # Original matrix
         A = da.random.random((NROWS, NCOLS), chunks=(BLOCK_SIZE, NCOLS))
         A.persist()
@@ -47,17 +47,11 @@ if __name__ == "__main__":
         Q, R = da.linalg.qr(A)
         dask.compute(Q, R)
         end = time()
-        times[i] = end - start
+        if (i >= WARMUP):
+            print(end - start)
 
         if CHECK_RESULT:
             if check_result(A, Q, R):
                 print("\nCorrect result!\n")
             else:
                 print("%***** ERROR: Incorrect final result!!! *****%")
-
-    if ITERS > 1:
-        times = times[1:]
-
-    print(times)
-    print("Average:", np.average(times))
-    print("Std dev:", np.std(times))
