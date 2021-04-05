@@ -9,11 +9,14 @@ import inspect
 from abc import abstractmethod, ABCMeta
 from functools import reduce
 from math import floor, ceil
-from typing import List, Tuple, Collection, Mapping
+from typing import List, Tuple, Iterable, Collection, Mapping, Union, Any
 from warnings import warn
 
 from parla.device import get_all_devices, Device, Memory, MemoryKind
+from parla.tasks import PlacementSource, get_placement_for_any
+from parla.array import is_array, copy, clone_here
 from parla.warning import PerformanceWarning
+from parla.utils import parse_index
 
 
 def _factors(n: int) -> List[int]:
@@ -35,12 +38,11 @@ class LDeviceCollection(metaclass=ABCMeta):
     """
     A collection of logical devices mapped to physical devices.
     """
-    def __init__(self, devices = None):
+    def __init__(self, placement = None):
         """
-        :param devices: The physical devices to use or None to use all physical devices.
+        :param placement: The physical devices to use or None to use all physical devices.
         """
-        if devices is None:
-            devices = get_all_devices()
+        devices = get_placement_for_any(placement)
         self._devices = tuple(devices)
 
     @property
@@ -89,12 +91,12 @@ class LDeviceSequence(LDeviceCollection):
     """
     A 1-d collection of logical devices.
     """
-    def __init__(self, n_ldevices, devices=None):
+    def __init__(self, n_ldevices, placement = None):
         """
         :param n_ldevices: The number of logical devices in this collection.
-        :param devices: The physical devices to use or None to use all physical devices.
+        :param placement: The physical devices to use or None to use all physical devices.
         """
-        super().__init__(devices)
+        super().__init__(placement)
         self._n_ldevices = n_ldevices
         if self.n_ldevices < len(self.devices):
             warn(PerformanceWarning(
@@ -123,11 +125,11 @@ class LDeviceSequence(LDeviceCollection):
             get the data for that logical device. The function may also take parameters named `device` and/or `memory`,
             in which case the device and/or memory associated with the logical device is passed along with the index.
         :param memory_kind: The kind of memory in which to place the data.
-        :return: A Python list of objects returned by `data` and copied to the appropriate device.
+        :return: A :class:`PartitionedTensor` instance of objects returned by `data` and copied to the appropriate device.
         """
         data = _wrapper_for_partition_function(data)
-        return [data(i, memory=self.memory(i, kind=memory_kind), device=self.device(i))
-                for i in range(self.n_ldevices)]
+        return PartitionedTensor([data(i, memory=self.memory(i, kind=memory_kind), device=self.device(i))
+                for i in range(self.n_ldevices)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
         """
@@ -136,7 +138,7 @@ class LDeviceSequence(LDeviceCollection):
         :param data: A numpy-compatible tensor.
         :param overlap: The number of elements by which partitions should overlap.
         :param memory_kind: The kind of memory in which to store the partitions.
-        :return: A Python list of the partition tensors.
+        :return: A :class:`PartitionedTensor` instance of the partition tensors.
         """
         (n, *rest) = data.shape
         return self.partition(lambda i: data[self.slice(i, n, overlap=overlap), ...],
@@ -169,13 +171,13 @@ class LDeviceGrid(LDeviceCollection):
     n_ldevices_x: int
     n_ldevices_y: int
 
-    def __init__(self, n_ldevices_x, n_ldevices_y, devices=None):
+    def __init__(self, n_ldevices_x, n_ldevices_y, placement = None):
         """
         :param n_ldevices_x: The number of logical devices along the 1st dimension of this grid.
         :param n_ldevices_y: The number of logical devices along the 2nd dimension of this grid.
-        :param devices: The physical devices to use or None to use all physical devices.
+        :param placement: The physical devices to use or None to use all physical devices.
         """
-        super().__init__(devices)
+        super().__init__(placement)
         self.n_ldevices_x = n_ldevices_x
         self.n_ldevices_y = n_ldevices_y
         if self.n_ldevices < len(self.devices):
@@ -206,11 +208,11 @@ class LDeviceGrid(LDeviceCollection):
             get the data for that logical device. The function may also take parameters named `device` and/or `memory`,
             in which case the device and/or memory associated with the logical device is passed along with the indices.
         :param memory_kind: The kind of memory in which to place the data.
-        :return: A Python list of lists of objects returned by `data` and copied to the appropriate device.
+        :return: A :class:`PartitionedTensor` instance of lists of objects returned by `data` and copied to the appropriate device.
         """
         data = _wrapper_for_partition_function(data)
-        return [[data(i, j, memory=self.memory(i, j, kind=memory_kind), device=self.device(i, j))
-                 for j in range(self.n_ldevices_y)] for i in range(self.n_ldevices_x)]
+        return PartitionedTensor([[data(i, j, memory=self.memory(i, j, kind=memory_kind), device=self.device(i, j))
+                 for j in range(self.n_ldevices_y)] for i in range(self.n_ldevices_x)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
         """
@@ -219,7 +221,7 @@ class LDeviceGrid(LDeviceCollection):
         :param data: A numpy-compatible tensor.
         :param overlap: The number of elements by which partitions should overlap.
         :param memory_kind: The kind of memory in which to store the partitions.
-        :return: A Python list of lists of the partition tensors.
+        :return: A :class:`PartitionedTensor` instance of lists of the partition tensors.
         """
         (n_x, n_y, *rest) = data.shape
         return self.partition(lambda i, j: data[self.slice_x(i, n_x, overlap=overlap),
@@ -249,8 +251,8 @@ class LDeviceSequenceBlocked(LDeviceSequence):
     """
     A 1-d collection of logical devices which are assigned to physical devices in contiguous blocks.
     """
-    def __init__(self, n_ldevices: int, devices: Collection[Device] = None):
-        super().__init__(n_ldevices, devices)
+    def __init__(self, n_ldevices: int, placement: Union[Collection[PlacementSource], Any, None] = None):
+        super().__init__(n_ldevices, placement)
         self._divisor = self.n_ldevices / self.n_devices
         assert floor(self._divisor * self.n_devices) == self.n_ldevices
 
@@ -270,8 +272,8 @@ class LDeviceGridBlocked(LDeviceGrid):
     """
     A 2-d collection of logical devices which are assigned to physical devices in contiguous blocks in both dimensions.
     """
-    def __init__(self, n_ldevices_x: int, n_ldevices_y: int, devices: Collection[Device] = None):
-        super().__init__(n_ldevices_x, n_ldevices_y, devices)
+    def __init__(self, n_ldevices_x: int, n_ldevices_y: int, placement: Union[Collection[PlacementSource], Any, None] = None):
+        super().__init__(n_ldevices_x, n_ldevices_y, placement)
         self._n, self._m = _split_number(self.n_devices)
         assert self._n * self._m == self.n_devices
         if self.n_ldevices_x < self._n or self.n_ldevices_y < self._m:
@@ -298,8 +300,8 @@ class LDeviceGridRaveled(LDeviceGrid):
     A 2-d collection of logical devices which are assigned to physical devices as if `LDeviceSequenceBlocked` were
     applied to a "ravelled" version of the grid of logical devices.
     """
-    def __init__(self, n_ldevices_x: int, n_ldevices_y: int, devices: Collection[Device] = None):
-        super().__init__(n_ldevices_x, n_ldevices_y, devices)
+    def __init__(self, n_ldevices_x: int, n_ldevices_y: int, placement: Union[Collection[PlacementSource], Any, None] = None):
+        super().__init__(n_ldevices_x, n_ldevices_y, placement)
         self._divisor = self.n_ldevices / self.n_devices
 
     def device(self, i, j):
@@ -341,3 +343,49 @@ def _wrapper_for_partition_function(data):
         def wrapper(*args, memory, device):
             return memory(data(*args))
     return wrapper
+
+
+IndexType = Union[slice, int, Iterable[int], Tuple[Union[slice, Iterable[int], int]]]
+
+
+class PartitionedTensor():
+    """
+    A wrapper of a partitioned tensor.
+    """
+    def __init__(self, latest_view: List):
+        self._latest_view = latest_view
+
+    def __getitem__(self, index: IndexType): # -> Union[Array, List[Array]]
+        """
+        Read partitions and make sure they are on the current device.
+
+        :param index: index of the target partition(s).
+
+        .. todo:
+            Multiple partitions are currently returned as a Python list of partitions (ndarrays).
+        """
+        if not isinstance(index, tuple):
+            index = (index,)
+        ret = []
+        parse_index(self._latest_view, index, step=lambda I, i: I[i],
+                stop=lambda x: ret.append(clone_here(x) if is_array(x) else x))
+        if len(ret) == 1:
+            return ret[0]
+        return ret
+
+    def __setitem__(self, index: IndexType, value):
+        """
+        Assign :param:`value` to a partition which may not on the current device.
+
+        :param index: index of the target partition(s)
+
+        .. todo:
+            Assignment of different values to multiple partitions (ndarrays) are currently NOT supported. The :param:`value` is assigned as a whole to each of the target partition(s).
+        """
+        if not isinstance(index, tuple):
+            index = (index,)
+        parse_index(self._latest_view, index, step=lambda I, i: I[i],
+                stop=lambda x: copy(x, value))
+
+    def __len__(self):
+        return len(self._latest_view)
