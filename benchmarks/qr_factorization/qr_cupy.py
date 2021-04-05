@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import cupy as cp
-import time
+from time import time
 
 def check_result(A, Q, R):
     # Check product
@@ -43,23 +43,23 @@ if __name__ == "__main__":
         A = np.random.rand(NROWS, NCOLS)
     
         # Cupy version
-        start = time.time()
+        start = time()
         A_GPU = cp.array(A)
         cp.cuda.stream.get_current_stream().synchronize()
-        end = time.time()
+        end = time()
         times_H2D[i] = end - start
     
-        start = time.time()
+        start = time()
         Q, R = cp.linalg.qr(A_GPU)
         cp.cuda.stream.get_current_stream().synchronize()
-        end = time.time()
+        end = time()
         times_ker[i] = end - start
 
-        start = time.time()
+        start = time()
         Q = cp.asnumpy(Q)
         R = cp.asnumpy(R)
         cp.cuda.stream.get_current_stream().synchronize()
-        end = time.time()
+        end = time()
         times_D2H[i] = end - start
 
         if CHECK_RESULT:

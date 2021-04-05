@@ -1,6 +1,6 @@
 import argparse
 import numpy as np
-import time
+from time import time
 
 def check_result(A, Q, R):
     # Check product
@@ -39,9 +39,9 @@ if __name__ == "__main__":
         # Original matrix
         A = np.random.rand(NROWS, NCOLS)
 
-        start = time.time()
+        start = time()
         Q, R = np.linalg.qr(A)
-        end = time.time()
+        end = time()
         times[i] = end - start
 
         if CHECK_RESULT:

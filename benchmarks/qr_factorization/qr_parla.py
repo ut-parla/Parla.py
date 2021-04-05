@@ -4,7 +4,7 @@ import sys
 import argparse
 import numpy as np
 import cupy as cp
-from time import time as now
+from time import time
 import os
 
 from parla import Parla
@@ -256,9 +256,9 @@ class perfStats:
 # CPU QR factorization kernel
 @specialized
 def qr_block(block, taskid):
-    t1_ker_iter_start = now()
+    t1_ker_iter_start = time()
     Q, R = np.linalg.qr(block)
-    t1_ker_iter_end = now()
+    t1_ker_iter_end = time()
     perf_stats.t1_ker_iter[taskid] = t1_ker_iter_end - t1_ker_iter_start
     return Q, R
 
@@ -268,16 +268,16 @@ def qr_block_gpu(block, taskid):
     perf_stats.t1_is_GPU_iter[taskid] = True
 
     # Run the kernel
-    t1_ker_iter_start = now()
+    t1_ker_iter_start = time()
     gpu_Q, gpu_R = cp.linalg.qr(block)
-    t1_ker_iter_end = now()
+    t1_ker_iter_end = time()
     perf_stats.t1_ker_iter[taskid] = t1_ker_iter_end - t1_ker_iter_start
 
     # Transfer the data
-    t1_D2H_iter_start = now()
+    t1_D2H_iter_start = time()
     cpu_Q = cp.asnumpy(gpu_Q)
     cpu_R = cp.asnumpy(gpu_R)
-    t1_D2H_iter_end = now()
+    t1_D2H_iter_end = time()
     perf_stats.t1_D2H_iter[taskid] = t1_D2H_iter_end - t1_D2H_iter_start
 
     return cpu_Q, cpu_R
@@ -285,9 +285,9 @@ def qr_block_gpu(block, taskid):
 # CPU matmul kernel
 @specialized
 def matmul_block(block_1, block_2, taskid):
-    t3_ker_iter_start = now()
+    t3_ker_iter_start = time()
     Q = block_1 @ block_2
-    t3_ker_iter_end = now()
+    t3_ker_iter_end = time()
     perf_stats.t3_ker_iter[taskid] = t3_ker_iter_end - t3_ker_iter_start
     return Q
 
@@ -297,15 +297,15 @@ def matmul_block_gpu(block_1, block_2, taskid):
     perf_stats.t3_is_GPU_iter[taskid] = True
 
     # Run the kernel
-    t3_ker_iter_start = now()
+    t3_ker_iter_start = time()
     gpu_Q = cp.matmul(block_1, block_2)
-    t3_ker_iter_end = now()
+    t3_ker_iter_end = time()
     perf_stats.t3_ker_iter[taskid] = t3_ker_iter_end - t3_ker_iter_start
 
     # Transfer the data
-    t3_D2H_iter_start = now()
+    t3_D2H_iter_start = time()
     cpu_Q = cp.asnumpy(gpu_Q)
-    t3_D2H_iter_end = now()
+    t3_D2H_iter_end = time()
     perf_stats.t3_D2H_iter[taskid] = t3_D2H_iter_end - t3_D2H_iter_start
 
     return cpu_Q
@@ -329,7 +329,7 @@ async def tsqr_blocked(A, block_size):
     Q = np.empty([nrows, ncols]) # Concatenated view
 
     # Create tasks to perform qr factorization on each block and store them in lists
-    t1_tot_iter_start = now()
+    t1_tot_iter_start = time()
     T1 = TaskSpace()
     for i in range(nblocks):
         # Get block of A
@@ -352,9 +352,9 @@ async def tsqr_blocked(A, block_size):
             #print("t1[", i, "] start on ", get_current_devices(), sep='', flush=True)
 
             # Copy the data to the processor
-            t1_H2D_iter_start = now()
+            t1_H2D_iter_start = time()
             A_block_local = clone_here(A_block)
-            t1_H2D_iter_end = now()
+            t1_H2D_iter_end = time()
             perf_stats.t1_H2D_iter[i] = t1_H2D_iter_end - t1_H2D_iter_start
 
             # Run the kernel. (Data is copied back within this call; timing annotations are added there)
@@ -363,28 +363,29 @@ async def tsqr_blocked(A, block_size):
             #print("t1[", i, "] end on ", get_current_devices(),  sep='', flush=True)
 
     await t1
-    t1_tot_iter_end = now()
+    t1_tot_iter_end = time()
     perf_stats.t1_tot_iter = t1_tot_iter_end - t1_tot_iter_start
 
     # Perform intermediate qr factorization on R1 to get Q2 and final R
-    t2_tot_iter_start = now()
+    t2_tot_iter_start = time()
     @spawn(dependencies=T1, placement=cpu)
     def t2():
         #print("\nt2 start", flush=True)
 
         # R here is the final R result
-        Q2, R = np.linalg.qr(R1) # TODO Do this recursively or on the GPU if it's slow?
+        # This step could be done recursively, but for small column counts that's not necessary
+        Q2, R = np.linalg.qr(R1)
 
         # Q1 and Q2 must have an equal number of blocks, where Q1 blocks' ncols = Q2 blocks' nrows
         # Q2 is currently an (ncols * nblocks) x ncols matrix. Need nblocks of ncols rows each
         return Q2, R
 
     Q2, R = await t2
-    t2_tot_iter_end = now()
+    t2_tot_iter_end = time()
     perf_stats.t2_tot_iter = t2_tot_iter_end - t2_tot_iter_start
     #print("t2 end\n", flush=True)
 
-    t3_tot_iter_start = now()
+    t3_tot_iter_start = time()
     # Create tasks to perform Q1 @ Q2 matrix multiplication by block
     T3 = TaskSpace()
     for i in range(nblocks):
@@ -408,10 +409,10 @@ async def tsqr_blocked(A, block_size):
             #print("t3[", i, "] start on ", get_current_devices(), sep='', flush=True)
 
             # Copy the data to the processor
-            t3_H2D_iter_start = now()
+            t3_H2D_iter_start = time()
             Q1_block_local = clone_here(Q1_blocked[i])
             Q2_block_local = clone_here(Q2_block)
-            t3_H2D_iter_end = now()
+            t3_H2D_iter_end = time()
             perf_stats.t3_H2D_iter[i] = t3_H2D_iter_end - t3_H2D_iter_start
 
             # Run the kernel. (Data is copied back within this call; timing annotations are added there)
@@ -420,7 +421,7 @@ async def tsqr_blocked(A, block_size):
             #print("t3[", i, "] end on ", get_current_devices(), sep='', flush=True)
 
     await T3
-    t3_tot_iter_end = now()
+    t3_tot_iter_end = time()
     perf_stats.t3_tot_iter = t3_tot_iter_end - t3_tot_iter_start
     return Q, R
 
@@ -449,9 +450,9 @@ def main():
             A = np.random.rand(NROWS, NCOLS)
         
             # Run and time the algorithm
-            tot_start = now()
+            tot_start = time()
             Q, R = await tsqr_blocked(A, BLOCK_SIZE)
-            tot_end = now()
+            tot_end = time()
             perf_stats.tot_times[i] = tot_end - tot_start
 
             # Combine task timings into totals for this iteration
