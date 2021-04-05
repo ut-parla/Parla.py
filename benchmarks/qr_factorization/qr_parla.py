@@ -354,7 +354,7 @@ async def tsqr_blocked(A, block_size):
 
         T1_MEMORY = None
         if PLACEMENT_STRING == 'gpu' or PLACEMENT_STRING == 'both':
-            T1_MEMORY = 4*A_block.nbytes # 4* for scratch spaces
+            T1_MEMORY = int(4.2*A_block.nbytes) # Estimate based on empirical evidence
 
         @spawn(taskid=T1[i], placement=PLACEMENT, memory=T1_MEMORY)
         def t1():
@@ -410,7 +410,7 @@ async def tsqr_blocked(A, block_size):
 
         T3_MEMORY = None
         if PLACEMENT_STRING == 'gpu' or PLACEMENT_STRING == 'both':
-            T3_MEMORY = 4*Q1_blocked[i].nbytes # 4* for scratch space
+            T3_MEMORY = 4*Q1_blocked[i].nbytes # # This is a guess
 
         @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=PLACEMENT, memory=T3_MEMORY)
         def t3():
