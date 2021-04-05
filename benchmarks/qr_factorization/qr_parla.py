@@ -10,7 +10,7 @@ import os
 from parla import Parla
 from parla.cpu import cpu
 from parla.cuda import gpu
-#from parla.array import clone_here # TODO uncomment when clone_here() gets fixed
+from parla.array import clone_here
 from parla.function_decorators import specialized
 from parla.tasks import *
 
@@ -309,15 +309,6 @@ def matmul_block_gpu(block_1, block_2, taskid):
     perf_stats.t3_D2H_iter[taskid] = t3_D2H_iter_end - t3_D2H_iter_start
 
     return cpu_Q
-
-# TODO Delete these when clone_here() gets fixed
-@specialized
-def clone_here(data):
-    return data
-
-@clone_here.variant(gpu)
-def clone_here_gpu(data):
-    return cp.asarray(data)
 
 # A: 2D numpy matrix
 # block_size: Positive integer
