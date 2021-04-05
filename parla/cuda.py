@@ -66,16 +66,17 @@ class _GPUMemory(Memory):
         # FIXME This code breaks the semantics since a different device
         #       could copy data on the current device to a remote device.
         #with self.device._device_context():
-        if isinstance(target, numpy.ndarray):
-            logger.debug("Moving data: CPU => %r", cupy.cuda.Device())
-            return cupy.asarray(target)
-        elif type(target) is cupy.ndarray and \
-             cupy.cuda.Device() != getattr(target, "device", None):
-            logger.debug("Moving data: %r => %r",
-                         getattr(target, "device", None), cupy.cuda.Device())
-            return self.asarray_async(target)
-        else:
-            return target
+        with cupy.cuda.Device(self.device.index):
+            if isinstance(target, numpy.ndarray):
+                logger.debug("Moving data: CPU => %r", cupy.cuda.Device())
+                return cupy.asarray(target)
+            elif isinstance(target, cupy.ndarray) and \
+                 cupy.cuda.Device() != getattr(target, "device", None):
+                logger.debug("Moving data: %r => %r",
+                             getattr(target, "device", None), cupy.cuda.Device())
+                return self.asarray_async(target)
+            else:
+                return target
 
 
 class _GPUDevice(Device):
