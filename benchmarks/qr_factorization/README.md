@@ -50,6 +50,8 @@ qr_parla.py -r 500000 -c 1000 -b 125000 -i 1 -g 4 -p gpu # Factorize a 500k by 1
 	- Tests Dask's blocked version for CPUs, `dask.linalg.qr()`
 
 #### Other Files
+- `testing_dgeqrf_mgpu.cpp` and `orig.testing_dgeqrf_mgpu.cpp`
+	- I needed some place to store my Magma testing files, so they're here. The first is my version, the second is the original version.
 - `qr_simple_blocked.py`
 	- Original proof of concept for blocked implementation. Doesn't actually parallelize over blocks. Not used for testing.
 - `qr_parla_maybe_segfault.py`
