@@ -353,8 +353,8 @@ async def tsqr_blocked(A, block_size):
         R1_upper = (i + 1) * ncols
 
         T1_MEMORY = None
-        if PLACEMENT == 'gpu' or PLACEMENT == 'both':
-            T1_MEMORY = 4*A_block.nbyte # 4* for scratch spaces
+        if PLACEMENT_STRING == 'gpu' or PLACEMENT_STRING == 'both':
+            T1_MEMORY = 4*A_block.nbytes # 4* for scratch spaces
 
         @spawn(taskid=T1[i], placement=PLACEMENT, memory=T1_MEMORY)
         def t1():
@@ -409,7 +409,7 @@ async def tsqr_blocked(A, block_size):
         Q_upper = (i + 1) * block_size # last row in block, exclusive
 
         T3_MEMORY = None
-        if PLACEMENT == 'gpu' or PLACEMENT == 'both':
+        if PLACEMENT_STRING == 'gpu' or PLACEMENT_STRING == 'both':
             T3_MEMORY = 4*Q1_blocked[i].nbytes # 4* for scratch space
 
         @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=PLACEMENT, memory=T3_MEMORY)
@@ -510,7 +510,7 @@ if __name__ == "__main__":
     ITERS = args.iterations
     NTHREADS = args.threads
     NGPUS = args.ngpus
-    PLACEMENT = args.placement
+    PLACEMENT_STRING = args.placement
     CHECK_RESULT = args.check_result
     PRINT_VERBOSE = args.verbose
     CSV = args.csv
@@ -520,14 +520,15 @@ if __name__ == "__main__":
     if not CSV:
         print('%**********************************************************************************************%\n')
         print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' threads=', NTHREADS, \
-            ' ngpus=', NGPUS, ' placement=', PLACEMENT, ' check_result=', CHECK_RESULT, ' verbose=', PRINT_VERBOSE, ' csv=', CSV, sep='', end='\n\n')
+            ' ngpus=', NGPUS, ' placement=', PLACEMENT_STRING, ' check_result=', CHECK_RESULT, ' verbose=', PRINT_VERBOSE, ' csv=', CSV, \
+            sep='', end='\n\n')
 
     # Set up PLACEMENT variable
-    if PLACEMENT == 'cpu':
+    if PLACEMENT_STRING == 'cpu':
         PLACEMENT = cpu
-    elif PLACEMENT == 'gpu':
+    elif PLACEMENT_STRING == 'gpu':
         PLACEMENT = [gpu(i) for i in range(NGPUS)]
-    elif PLACEMENT == 'both':
+    elif PLACEMENT_STRING == 'both':
         PLACEMENT = [cpu] + [gpu(i) for i in range(NGPUS)]
     else:
         print("Invalid value for placement. Must be 'cpu' or 'gpu' or 'both'")
