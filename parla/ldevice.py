@@ -16,7 +16,7 @@ from parla.device import get_all_devices, Device, Memory, MemoryKind
 from parla.tasks import PlacementSource, get_placement_for_any
 from parla.array import is_array, copy, clone_here
 from parla.warning import PerformanceWarning
-from parla.utils import traverse
+from parla.utils import parse_index
 
 
 def _factors(n: int) -> List[int]:
@@ -353,7 +353,7 @@ class PartitionedNDArray():
         if not isinstance(index, tuple):
             index = (index,)
         ret = []
-        traverse(self._latest_view, index, step=lambda I, i: I[i],
+        parse_index(self._latest_view, index, step=lambda I, i: I[i],
                 stop=lambda x: ret.append(clone_here(x) if is_array(x) else x))
         if len(ret) == 1:
             return ret[0]
@@ -362,7 +362,7 @@ class PartitionedNDArray():
     def __setitem__(self, index, value):
         if not isinstance(index, tuple):
             index = (index,)
-        traverse(self._latest_view, index, step=lambda I, i: I[i],
+        parse_index(self._latest_view, index, step=lambda I, i: I[i],
                 stop=lambda x: copy(x, value))
 
     def __len__(self):

@@ -17,7 +17,7 @@ from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, 
 
 from parla.device import Device, Architecture, get_all_devices
 from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task
-from parla.utils import traverse
+from parla.utils import parse_index
 
 try:
     from parla import task_runtime, array
@@ -191,7 +191,7 @@ class TaskSpace(TaskSet):
         if not isinstance(index, tuple):
             index = (index,)
         ret = []
-        traverse((), index, lambda x, i: x + (i,),
+        parse_index((), index, lambda x, i: x + (i,),
                 lambda x: ret.append(self._data.setdefault(x, TaskID(self._name, x))))
         # print(index, ret)
         if len(ret) == 1:
