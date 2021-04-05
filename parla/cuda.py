@@ -191,6 +191,8 @@ class GPUComponentInstance(EnvironmentComponentInstance):
             # Trigger cblas/etc. initialization for this GPU in this thread.
             device = gpu.cupy_device
             with device:
+                a = cupy.asarray([2.])
+                cupy.asnumpy(cupy.sqrt(a))
                 device.cublas_handle
                 device.cusolver_handle
                 device.cusolver_sp_handle
@@ -253,6 +255,8 @@ class MultiGPUComponentInstance(EnvironmentComponentInstance):
             # Trigger cuBLAS initialization for this GPU in this thread.
             device = gpu.cupy_device
             with device:
+                a = cupy.asarray([2.])
+                cupy.asnumpy(cupy.sqrt(a))
                 device.cublas_handle
                 device.cusolver_handle
                 device.cusolver_sp_handle
