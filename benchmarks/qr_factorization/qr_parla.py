@@ -128,7 +128,9 @@ class perfStats:
         print()
 
     # Prints averages and standard deviations in csv format
-    def print_stats_csv(self):
+    def print_stats_csv(self, iteration):
+        print("\"", iteration, "\",", sep='', end='')
+
         print("\"", self.t1_GPU_task_count, "\",", sep='', end='')
         print("\"", self.t1_H2D, "\",", sep='', end='')
         print("\"", self.t1_ker_CPU, "\",", sep='', end='')
@@ -353,10 +355,11 @@ def main():
             perf_stats.consolidate_stats()
 
             if (i >= WARMUP):
+                iter = i - WARMUP
                 if CSV:
-                    perf_stats.print_stats_csv()
+                    perf_stats.print_stats_csv(iter)
                 else:
-                    perf_stats.print_stats(i - WARMUP)
+                    perf_stats.print_stats(iter)
             
             # Check the results
             if CHECK_RESULT:
