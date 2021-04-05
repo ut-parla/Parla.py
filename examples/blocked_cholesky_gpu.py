@@ -128,7 +128,7 @@ def cholesky_blocked_inplace(a):
 
     for j in range(len(a)):
         for k in range(j):
-            # Inter - block GEMM
+            # Inter-block GEMM
             @spawn(gemm1[j, k], [solve[j, k]], placement=loc)
             def t1():
                 out = a[j, j]
@@ -145,7 +145,7 @@ def cholesky_blocked_inplace(a):
 
         for i in range(j+1, len(a)):
             for k in range(j):
-                # Inter - block GEMM
+                # Inter-block GEMM
                 @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k]], placement=loc)
                 def t3():
                     out = a[i, j]
@@ -191,7 +191,7 @@ def main():
         # Check result
         computed_L = np.tril(a1)
         print("Soln", computed_L)
-        error = np.max(np.absolute(a-computed_L @ computed_L.T))
+        error = np.max(np.absolute(a - computed_L @ computed_L.T))
         print("Error", error)
         assert(error < 1E-8)
 

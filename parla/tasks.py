@@ -280,39 +280,6 @@ class _TaskLocals(threading.local):
 _task_locals = _TaskLocals()
 
 
-# def _move_function_local(body):
-#     """
-#     A function copy all data to desired device
-#     """
-#     new_global = {}
-#     if body.__globals__ is not None:
-#         for key, val in body.__globals__.items():
-#             if array.is_array(val) or isinstance(val, list):
-#                 new_global[key] = array.get_device_array(val)
-#             else:
-#                 new_global[key] = val
-# 
-#     new_closure = []
-#     if body.__closure__ is not None:
-#         for x in body.__closure__:
-#             val = x.cell_contents
-#             if array.is_array(val) or isinstance(val, list):
-#                 local_array = array.get_device_array(val)
-#                 new_cell = _make_cell(local_array)
-#             else:
-#                 new_cell = x
-#             new_closure.append(new_cell)
-# 
-#     new_body = type(body)(
-#             body.__code__, new_global, body.__name__, body.__defaults__,
-#             closure=tuple(new_closure))
-#     new_body.__annotations__ = body.__annotations__
-#     new_body.__doc__ = body.__doc__
-#     new_body.__kwdefaults__ = body.__kwdefaults__
-#     new_body.__module__ = body.__module__
-#     return new_body
-# 
-# 
 def _task_callback(task, body) -> TaskState:
     """
     A function which forwards to a python function in the appropriate device context.
@@ -436,9 +403,6 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
         # Compute the flat dependency set (including unwrapping TaskID objects)
         deps = tasks(*dependencies)._flat_tasks
-
-        # if inspect.isfunction(body):
-        #     body = _move_function_local(body)
 
         if inspect.iscoroutine(body):
             # An already running coroutine does not need changes since we assume

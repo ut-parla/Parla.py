@@ -1,7 +1,6 @@
 import logging
 from abc import ABCMeta, abstractmethod
-from typing import Dict # , Union, Any
-from collections.abc import Sequence
+from typing import Dict
 
 # FIXME: This load of numpy causes problems if numpy is multiloaded. So this breaks using VECs with parla tasks.
 #  Loading numpy locally works for some things, but not for the array._register_array_type call.
@@ -138,73 +137,3 @@ def storage_size(*arrays):
     :return: the total size of the arrays passed as arguments.
     """
     return sum(a.size * a.itemsize for a in arrays)
-# 
-# 
-# class LocalArray(Sequence):
-#     orig: Any
-#     device_copy: Dict[tuple, Any]
-# 
-#     def __init__(self, orig):
-#         logger.debug("wrapping type {}".format(type(orig)))
-#         self.orig = orig
-#         if isinstance(orig, list):
-#             for i in range(len(orig)):
-#                 if isinstance(orig[i], list):
-#                     self.orig[i] = LocalArray(orig[i])
-#         #    self.device_copy = cp.deepcopy(orig)
-#         #else:
-#         #    self.device_copy = orig.tolist()
-#         self.device_copy = {}
-# 
-#         # if hasattr(orig, "shape"):
-#         #     self.shape = orig.shape
-#         # ...
-# 
-#     def __len__(self):
-#         return len(self.orig)
-# 
-#     def __getitem__(self, idx: Union[int, slice, tuple]):
-#         # numpy indexing supports a tuple of slice and integers.
-#         logger.debug("index type {}".format(type(idx)))
-#         # 'slice' is unhashable
-#         tuplize: Dict[type, Callable[[Union[int, slice, tuple]], tuple]] = {
-#                 slice: lambda x: (idx.start, idx.stop, idx.step),
-#                 int: lambda x: (x,),
-#                 tuple: lambda x: x,
-#                 }
-#         ikey = tuplize[type(idx)](idx)
-# 
-#         if ikey in self.device_copy:
-#             data = self.device_copy[ikey]
-#         else:
-#             data = self.orig[idx]
-# 
-#         if is_array(data):
-#             local_data = clone_here(data)
-#             self.device_copy[ikey] = local_data
-#             return local_data
-#         else:
-#             # single element
-#             return data
-# 
-#     def __setitem__(self, idx, val):
-#         copy(self.orig[idx], val)
-# 
-#     def __repr__(self):
-#         return "Multi-device-array for {%s}"%(str(self.orig))
-# 
-# 
-# _local_arrays: Dict[int, LocalArray] = {}
-# 
-# 
-# def _register_local_array(orig):
-#     logger.debug("type to be wrapped: {}".format(type(orig)))
-#     loc = LocalArray(orig)
-#     _local_arrays[id(orig)] = loc
-#     return loc
-# 
-# 
-# def get_device_array(orig):
-#     if id(orig) in _local_arrays:
-#         return _local_arrays[id(orig)]
-#     return _register_local_array(orig)
