@@ -66,7 +66,7 @@ def main():
     a1 = a0.copy()
 
     # An object that distributes arrays across all the given devices.
-    mapper = LDeviceSequenceBlocked(divisions, devices=get_all_devices())
+    mapper = LDeviceSequenceBlocked(divisions, placement=get_all_devices())
 
     # Partition a0 and a1.
     # Here we just partition the rows across the different devices.
