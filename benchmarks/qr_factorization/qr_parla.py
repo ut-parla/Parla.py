@@ -217,7 +217,7 @@ async def tsqr_blocked(A, block_size):
 
     # Calculate the number of blocks
     nblocks = (nrows + block_size - 1) // block_size # ceiling division
-    mapper = LDeviceSequenceBlocked(nblocks, placement=get_current_devices())
+    mapper = LDeviceSequenceBlocked(nblocks, placement=A)
     A_blocked = mapper.partition_tensor(A) # Partition A into blocks
 
     # Initialize and partition empty array to store blocks (same partitioning scheme, share the mapper)
