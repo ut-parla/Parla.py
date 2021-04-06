@@ -392,11 +392,10 @@ if __name__ == "__main__":
 
     perf_stats = perfStats(ITERS, NROWS, BLOCK_SIZE)
 
-    if not CSV:
-        print('%**********************************************************************************************%\n')
-        print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' warmup=', WARMUP, \
-            ' threads=', NTHREADS, ' ngpus=', NGPUS, ' placement=', PLACEMENT_STRING, ' check_result=', CHECK_RESULT, ' csv=', CSV, \
-            sep='', end='\n\n')
+    print('%**********************************************************************************************%\n')
+    print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' warmup=', WARMUP, \
+        ' threads=', NTHREADS, ' ngpus=', NGPUS, ' placement=', PLACEMENT_STRING, ' check_result=', CHECK_RESULT, ' csv=', CSV, \
+        sep='', end='\n\n')
 
     # Set up PLACEMENT variable
     if PLACEMENT_STRING == 'cpu':
@@ -412,5 +411,4 @@ if __name__ == "__main__":
         os.environ['OMP_NUM_THREADS'] = NTHREADS
         main()
 
-    if not CSV:
-        print('%**********************************************************************************************%\n')
+    print('%**********************************************************************************************%\n')
