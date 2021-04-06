@@ -93,12 +93,12 @@ int main( int argc, char** argv )
             /* ====================================================================
                Performs operation using MAGMA
                =================================================================== */
-            printf("M = %lld   N = %lld\n", (long long) M, (long long) N );
+            //printf("M = %lld   N = %lld\n", (long long) M, (long long) N );
 
             H2D_time = magma_wtime();
             magma_dsetmatrix_1D_col_bcyclic( ngpu, M, N, nb, h_R, lda, d_lA, ldda, queues );
             H2D_time = magma_wtime() - H2D_time;
-            printf("H2D = %f\n", H2D_time);
+            printf("\"%f\",", H2D_time); // H2D
 
             gpu_time = magma_wtime();
             magma_dgeqrf2_mgpu( ngpu, M, N, d_lA, ldda, tau, &info );
@@ -107,12 +107,12 @@ int main( int argc, char** argv )
                 printf("magma_dgeqrf2_mgpu returned error %lld: %s.\n",
                        (long long) info, magma_strerror( info ));
             }
-            printf("Kernel = %f\n", gpu_time);
+            printf("\"%f\",", gpu_time); // Kernel
             
             D2H_time = magma_wtime();
             magma_dgetmatrix_1D_col_bcyclic( ngpu, M, N, nb, d_lA, ldda, h_R, lda, queues );
             D2H_time = magma_wtime() - D2H_time;
-            printf("D2H = %f\n\n", D2H_time);
+            printf("\"%f\"\n", D2H_time); // D2H
             
             magma_free_cpu( tau    );
             magma_free_cpu( h_A    );

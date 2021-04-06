@@ -25,45 +25,53 @@ unset __conda_setup
 
 conda activate parla
 
+echo -n '"iteration",' >> experiment.csv 
+echo -n '"t1 GPU tasks","t1 H2D sum","t1 CPU ker sum","t1 GPU ker sum","t1 D2H sum","t1 total",' >> experiment.csv 
+echo -n '"t2 total",' >> experiment.csv 
+echo -n '"t3 GPU tasks","t3 H2D sum","t3 CPU ker sum","t3 GPU ker sum","t3 D2H sum","t3 total",' >> experiment.csv 
+echo    '"iteration total"' >> experiment.csv 
+
 set -v
 
-# CPU runs
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p cpu  -r  500000 -b 125000      >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p cpu  -r  500000 -b  31250      >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p cpu  -r 2000000 -b 500000      >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p cpu  -r 2000000 -b 125000      >> experiment.csv
+# CPU 400k runs
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p cpu  -r  400000 -b 100000      >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p cpu  -r  400000 -b  25000      >> experiment.csv
 
-# GPU 500k runs
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r  500000 -b 125000 -g 1 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r  500000 -b 125000 -g 2 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r  500000 -b 125000 -g 4 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r  500000 -b  31250 -g 1 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r  500000 -b  31250 -g 2 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r  500000 -b  31250 -g 4 >> experiment.csv
+# CPU 1.6M runs
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p cpu  -r 1600000 -b 400000      >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p cpu  -r 1600000 -b 100000      >> experiment.csv
 
-# GPU 2M runs
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r 2000000 -b 500000 -g 1 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r 2000000 -b 500000 -g 2 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r 2000000 -b 500000 -g 4 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r 2000000 -b 125000 -g 1 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r 2000000 -b 125000 -g 2 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p gpu  -r 2000000 -b 125000 -g 4 >> experiment.csv
+# GPU 400k runs
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r  400000 -b 100000 -g 1 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r  400000 -b 100000 -g 2 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r  400000 -b 100000 -g 4 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r  400000 -b  25000 -g 1 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r  400000 -b  25000 -g 2 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r  400000 -b  25000 -g 4 >> experiment.csv
 
-# CPU + GPU 500k runs
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r  500000 -b 125000 -g 1 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r  500000 -b 125000 -g 2 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r  500000 -b 125000 -g 4 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r  500000 -b  31250 -g 1 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r  500000 -b  31250 -g 2 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r  500000 -b  31250 -g 4 >> experiment.csv
+# GPU 1.6M runs
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r 1600000 -b 400000 -g 1 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r 1600000 -b 400000 -g 2 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r 1600000 -b 400000 -g 4 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r 1600000 -b 100000 -g 1 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r 1600000 -b 100000 -g 2 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p gpu  -r 1600000 -b 100000 -g 4 >> experiment.csv
 
-# CPU + GPU 2M runs
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r 2000000 -b 500000 -g 1 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r 2000000 -b 500000 -g 2 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r 2000000 -b 500000 -g 4 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r 2000000 -b 125000 -g 1 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r 2000000 -b 125000 -g 2 >> experiment.csv
-python qr_parla.py -c 1000 -i 6 -t 16 --csv -p both -r 2000000 -b 125000 -g 4 >> experiment.csv
+# CPU + GPU 400k runs
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r  400000 -b 100000 -g 1 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r  400000 -b 100000 -g 2 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r  400000 -b 100000 -g 4 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r  400000 -b  25000 -g 1 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r  400000 -b  25000 -g 2 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r  400000 -b  25000 -g 4 >> experiment.csv
+
+# CPU + GPU 1.6M runs
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r 1600000 -b 400000 -g 1 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r 1600000 -b 400000 -g 2 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r 1600000 -b 400000 -g 4 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r 1600000 -b 100000 -g 1 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r 1600000 -b 100000 -g 2 >> experiment.csv
+python qr_parla.py -c 1000 -i 5 -w 2 -t 16 --csv -p both -r 1600000 -b 100000 -g 4 >> experiment.csv
 
 set +v
 

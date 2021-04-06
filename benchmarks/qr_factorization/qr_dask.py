@@ -36,7 +36,8 @@ if __name__ == "__main__":
     CHECK_RESULT = args.check_result
 
     print('%**********************************************************************************************%\n')
-    print('Config: rows=', NROWS, ' cols=', NCOLS, ' iterations=', ITERS, ' warmup=', WARMUP, ' check_result=', CHECK_RESULT, sep='', end='\n\n')
+    print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, \
+          ' iterations=', ITERS, ' warmup=', WARMUP, ' check_result=', CHECK_RESULT, sep='', end='\n\n')
 
     for i in range(WARMUP + ITERS):
         # Original matrix
