@@ -10,9 +10,9 @@ import os
 from parla import Parla
 from parla.cpu import cpu
 from parla.cuda import gpu
-from parla.array import clone_here
 from parla.function_decorators import specialized
 from parla.tasks import *
+from parla.ldevice import LDeviceSequenceBlocked
 
 # Huge class just for taking tons of timing statistics.
 class perfStats:
@@ -217,9 +217,11 @@ async def tsqr_blocked(A, block_size):
 
     # Calculate the number of blocks
     nblocks = (nrows + block_size - 1) // block_size # ceiling division
+    mapper = LDeviceSequenceBlocked(nblocks, placement=get_current_devices())
+    A_blocked = mapper.partition_tensor(A) # Partition A into blocks
 
-    # Initialize empty lists to store blocks
-    Q1_blocked = [None] * nblocks; # Doesn't need to be contiguous, just views
+    # Initialize and partition empty array to store blocks (same partitioning scheme, share the mapper)
+    Q1_blocked = mapper.partition_tensor(np.empty_like(A))
     R1 = np.empty([nblocks * ncols, ncols]) # Concatenated view
     # Q2 is allocated in t2
     Q = np.empty([nrows, ncols]) # Concatenated view
@@ -228,11 +230,6 @@ async def tsqr_blocked(A, block_size):
     t1_tot_start = time()
     T1 = TaskSpace()
     for i in range(nblocks):
-        # Get block of A
-        A_lower = i * block_size # first row in block, inclusive
-        A_upper = (i + 1) * block_size # last row in block, exclusive
-        A_block = A[A_lower:A_upper]
-
         # Block view to store Q1 not needed since it's not contiguous
 
         # Get block view to store R1
@@ -241,7 +238,7 @@ async def tsqr_blocked(A, block_size):
 
         T1_MEMORY = None
         if PLACEMENT_STRING == 'gpu' or PLACEMENT_STRING == 'both':
-            T1_MEMORY = int(4.2*A_block.nbytes) # Estimate based on empirical evidence
+            T1_MEMORY = int(4.2*A_blocked[i:i+1].nbytes) # Estimate based on empirical evidence
 
         @spawn(taskid=T1[i], placement=PLACEMENT, memory=T1_MEMORY)
         def t1():
@@ -249,7 +246,7 @@ async def tsqr_blocked(A, block_size):
 
             # Copy the data to the processor
             t1_H2D_start = time()
-            A_block_local = clone_here(A_block)
+            A_block_local = A_blocked[i:i+1]
             t1_H2D_end = time()
             perf_stats.t1_H2D_tasks[i] = t1_H2D_end - t1_H2D_start
 
@@ -281,16 +278,13 @@ async def tsqr_blocked(A, block_size):
     perf_stats.t2_tot = t2_tot_end - t2_tot_start
     #print("t2 end\n", flush=True)
 
+    # Partition Q2 (same partitioning scheme, share the mapper)
+    Q2_blocked = mapper.partition_tensor(Q2)
     t3_tot_start = time()
     # Create tasks to perform Q1 @ Q2 matrix multiplication by block
     T3 = TaskSpace()
     for i in range(nblocks):
         # Q1 is already in blocks
-
-        # Get block of Q2
-        Q2_lower = i * ncols
-        Q2_upper = (i + 1) * ncols
-        Q2_block = Q2[Q2_lower:Q2_upper]
 
         # Get block view to store Q
         Q_lower = i * block_size # first row in block, inclusive
@@ -306,8 +300,8 @@ async def tsqr_blocked(A, block_size):
 
             # Copy the data to the processor
             t3_H2D_start = time()
-            Q1_block_local = clone_here(Q1_blocked[i])
-            Q2_block_local = clone_here(Q2_block)
+            Q1_block_local = Q1_blocked[i]
+            Q2_block_local = Q2_blocked[i:i+1]
             t3_H2D_end = time()
             perf_stats.t3_H2D_tasks[i] = t3_H2D_end - t3_H2D_start
 
