@@ -53,10 +53,13 @@ class _GPUMemory(Memory):
         return _DeviceCUPy(self.device)
 
     def asarray_async(self, src):
-      dst = cupy.ndarray(src.shape)
-      dst.data.copy_from_device_async(src.data, src.nbytes,
-                                      cupy.cuda.get_current_stream())
-      return dst
+        if isinstance(src, cupy.ndarray) and src.device.id == self.device.index:
+            return src
+        if not (src.flags['C_CONTIGUOUS'] or src.flags['F_CONTIGUOUS']):
+            raise NotImplementedError('Only contiguous arrays are currently supported for gpu-gpu transfers.')
+        dst = cupy.empty_like(src)
+        dst.data.copy_from_device_async(src.data, src.nbytes)
+        return dst
 
     def __call__(self, target):
         # TODO Several threads could share the same device object.
