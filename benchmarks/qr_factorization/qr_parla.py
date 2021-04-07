@@ -10,6 +10,7 @@ import os
 from parla import Parla
 from parla.cpu import cpu
 from parla.cuda import gpu
+from parla.array import clone_here
 from parla.function_decorators import specialized
 from parla.tasks import *
 from parla.ldevice import LDeviceSequenceBlocked
@@ -27,7 +28,9 @@ class perfStats:
         self.t1_tot = 0
         self.t1_is_GPU_tasks = [False] * self.NTASKS
 
-        self.t2_tot = 0 # t2 is already reduced and only has 1 task and only runs on the CPU
+        self.t2_D2D = 0 # Specifically for puregpu
+        self.t2_ker = 0 # Specifically for puregpu
+        self.t2_tot = 0
 
         self.t3_H2D_tasks = [0] * self.NTASKS
         self.t3_ker_tasks = [0] * self.NTASKS
@@ -73,6 +76,9 @@ class perfStats:
         self.t1_D2H = 0
         self.t1_GPU_task_count = 0
 
+        self.t2_D2D = 0
+        self.t2_ker= 0
+
         self.t3_H2D = 0
         self.t3_ker_CPU = 0
         self.t3_ker_GPU = 0
@@ -93,7 +99,7 @@ class perfStats:
         self.t1_ker_CPU = self.sum_tasks(self.t1_ker_tasks, self.t1_is_GPU_tasks, False)
         self.t1_ker_GPU = self.sum_tasks(self.t1_ker_tasks, self.t1_is_GPU_tasks, True)
         self.t1_D2H = self.sum_tasks(self.t1_D2H_tasks, self.t1_is_GPU_tasks, True)
-        
+
         self.t3_H2D = self.sum_tasks(self.t3_H2D_tasks, self.t3_is_GPU_tasks, True)
         self.t3_ker_CPU = self.sum_tasks(self.t3_ker_tasks, self.t3_is_GPU_tasks, False)
         self.t3_ker_GPU = self.sum_tasks(self.t3_ker_tasks, self.t3_is_GPU_tasks, True)
@@ -112,6 +118,9 @@ class perfStats:
         print()
 
         print("t2")
+        if PLACEMENT_STRING == 'puregpu':
+            print("D2D:", self.t2_D2D)
+            print("Kernel:", self.t2_ker)
         print("Total:", self.t2_tot)
         print()
     
@@ -138,6 +147,9 @@ class perfStats:
         print("\"", self.t1_D2H, "\",", sep='', end='')
         print("\"", self.t1_tot, "\",", sep='', end='')
 
+        if PLACEMENT_STRING == 'puregpu':
+            print("\"", self.t2_D2D, "\",", sep='', end='')
+            print("\"", self.t2_ker, "\",", sep='', end='')
         print("\"", self.t2_tot, "\",", sep='', end='')
     
         print("\"", self.t3_GPU_task_count, "\",", sep='', end='')
@@ -176,7 +188,7 @@ def qr_block_gpu(block, taskid):
     t1_D2H_end = time()
     perf_stats.t1_D2H_tasks[taskid] = t1_D2H_end - t1_D2H_start
 
-    return cpu_Q, cpu_R
+    return gpu_Q, gpu_R
 
 # CPU matmul kernel
 @specialized
@@ -222,7 +234,7 @@ async def tsqr_blocked(A, block_size):
 
     # Initialize and partition empty array to store blocks (same partitioning scheme, share the mapper)
     Q1_blocked = mapper.partition_tensor(np.empty_like(A))
-    R1 = np.empty([nblocks * ncols, ncols]) # Concatenated view
+    R1 = cp.empty([nblocks * ncols, ncols]) # Concatenated view
     # Q2 is allocated in t2
     Q = np.empty([nrows, ncols]) # Concatenated view
 
@@ -315,6 +327,98 @@ async def tsqr_blocked(A, block_size):
     perf_stats.t3_tot = t3_tot_end - t3_tot_start
     return Q, R
 
+# A: View of matrices on GPU
+# block_size: Positive integer
+async def tsqr_blocked_puregpu(A, block_size):
+    Q1 = [None] * NGPUS
+    R1 = [None] * NGPUS
+
+    # Create tasks to perform qr factorization on each block and store them in lists
+    t1_tot_start = time()
+    T1 = TaskSpace()
+    for i in range(NGPUS):
+        @spawn(taskid=T1[i], placement=A[i])
+        def t1():
+            #print("t1[", i, "] start on ", get_current_devices(), sep='', flush=True)
+
+            perf_stats.t1_is_GPU_tasks[i] = True
+            t1_ker_start = time()
+            Q1[i], R1[i] = cp.linalg.qr(A[i])
+            R1[i] = R1[i].flatten()
+            t1_ker_end = time()
+            perf_stats.t1_ker_tasks[i] = t1_ker_end - t1_ker_start
+            A[i] = None # Free up memory
+
+            #print("t1[", i, "] end on ", get_current_devices(),  sep='', flush=True)
+
+    await t1
+    t1_tot_end = time()
+    perf_stats.t1_tot = t1_tot_end - t1_tot_start
+
+    # Perform intermediate qr factorization on R1 to get Q2 and final R
+    t2_tot_start = time()
+    @spawn(dependencies=T1, placement=gpu)
+    def t2():
+        #print("\nt2 start", flush=True)
+
+        # Gather to this device
+        t2_D2D_start = time()
+        R1_reduced = np.empty(shape=(0, NCOLS))
+        for dev in range(NGPUS):
+            next = clone_here(R1[dev])
+            next = next.reshape(NCOLS, NCOLS)
+            R1_reduced = cp.vstack((R1_reduced, next))
+            R1[dev] = None # Free up memory
+        t2_D2D_end = time()
+        perf_stats.t2_D2D = t2_D2D_end - t2_D2D_start
+
+        # R here is the final R result
+        t2_ker_start = time()
+        Q2, R = cp.linalg.qr(R1_reduced)
+        Q2 = Q2.flatten()
+        t2_ker_end = time()
+        perf_stats.t2_ker = t2_ker_end - t2_ker_start
+
+        return Q2, R
+
+    Q2, R = await t2
+    t2_tot_end = time()
+    perf_stats.t2_tot = t2_tot_end - t2_tot_start
+    #print("t2 end\n", flush=True)
+
+    Q = [None] * NGPUS
+    t3_tot_start = time()
+    # Create tasks to perform Q1 @ Q2 matrix multiplication by block
+    T3 = TaskSpace()
+    for i in range(NGPUS):
+        @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=Q1[i])
+        def t3():
+            #print("t3[", i, "] start on ", get_current_devices(), sep='', flush=True)
+
+            # Copy the data to the processor
+            # Q1 and Q2 must have an equal number of blocks, where Q1 blocks' ncols = Q2 blocks' nrows
+            # Q2 is currently an (ncols * nblocks) x ncols matrix. Need nblocks of ncols rows each
+            t3_H2D_start = time()
+            slice_start = i * NCOLS * NCOLS
+            slice_end = slice_start + NCOLS * NCOLS
+            Q2_local = clone_here(Q2[slice_start:slice_end])
+            Q2_local = Q2_local.reshape(NCOLS, NCOLS)
+            t3_H2D_end = time()
+            perf_stats.t3_H2D_tasks[i] = t3_H2D_end - t3_H2D_start
+
+            # Run the kernel. (Data is copied back within this call; timing annotations are added there)
+            t3_ker_start = time()
+            Q[i] = cp.matmul(Q1[i], Q2_local)
+            t3_ker_end = time()
+            perf_stats.t3_ker_tasks[i] = t3_ker_end - t3_ker_start
+
+            #print("t3[", i, "] end on ", get_current_devices(), sep='', flush=True)
+
+    await T3
+    t3_tot_end = time()
+    perf_stats.t3_tot = t3_tot_end - t3_tot_start
+    return Q, R
+
 def check_result(A, Q, R):
     # Check product
     is_correct_prod = np.allclose(np.matmul(Q, R), A)
@@ -330,7 +434,7 @@ def check_result(A, Q, R):
 
 def main():
     @spawn()
-    async def test_tsqr_blocked():
+    async def test_tsqr_blocked(placement=cpu):
         for i in range(WARMUP + ITERS):
             # Reset all iteration-specific timers and counters
             perf_stats.reset()
@@ -338,11 +442,41 @@ def main():
             # Original matrix
             np.random.seed(i)
             A = np.random.rand(NROWS, NCOLS)
-        
-            # Run and time the algorithm
-            tot_start = time()
-            Q, R = await tsqr_blocked(A, BLOCK_SIZE)
-            tot_end = time()
+
+            if PLACEMENT_STRING == 'puregpu':
+                if (NROWS % NGPUS != 0):
+                    print("%***** ERROR: Pure GPU version requires NROWS % NGPUS == 0 *****%")
+                    exit()
+
+                # Partition matrix on GPUs
+                A_dev = [None] * NGPUS
+                for dev in range(NGPUS):
+                    @spawn(placement=gpu(dev))
+                    def copy_task():
+                        slice_start = dev * BLOCK_SIZE
+                        slice_end = slice_start + BLOCK_SIZE
+                        A_dev[dev] = clone_here(A[slice_start:slice_end])
+                    await copy_task
+                
+                tot_start = time()
+                Q_dev, R_dev = await tsqr_blocked_puregpu(A_dev, BLOCK_SIZE)
+                tot_end = time()
+
+                # Copy the data back
+                if CHECK_RESULT:
+                    Q = np.empty(shape=(0, NCOLS))
+                    for dev in range(NGPUS):
+                        with cp.cuda.Device(dev):
+                            Q = np.vstack((Q, cp.asnumpy(Q_dev[dev])))
+
+                    R = cp.asnumpy(R_dev)
+
+            else: # Normal version
+                # Run and time the algorithm
+                tot_start = time()
+                Q, R = await tsqr_blocked(A, BLOCK_SIZE)
+                tot_end = time()
+
             perf_stats.tot_time = tot_end - tot_start
 
             # Combine task timings into totals for this iteration
@@ -372,7 +506,7 @@ if __name__ == "__main__":
     parser.add_argument("-w", "--warmup", help="Number of warmup runs to perform before iterations.", type=int, default=0)
     parser.add_argument("-t", "--threads", help="Sets OMP_NUM_THREADS", default='16')
     parser.add_argument("-g", "--ngpus", help="Sets number of GPUs to run on. If set to more than you have, undefined behavior", type=int, default='4')
-    parser.add_argument("-p", "--placement", help="'cpu' or 'gpu' or 'both'", default='gpu')
+    parser.add_argument("-p", "--placement", help="'cpu' or 'gpu' or 'both' or 'puregpu'", default='gpu')
     parser.add_argument("-K", "--check_result", help="Checks final result on CPU", action="store_true")
     parser.add_argument("--csv", help="Prints stats in csv format", action="store_true")
 
@@ -390,13 +524,6 @@ if __name__ == "__main__":
     CHECK_RESULT = args.check_result
     CSV = args.csv
 
-    perf_stats = perfStats(ITERS, NROWS, BLOCK_SIZE)
-
-    print('%**********************************************************************************************%\n')
-    print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' warmup=', WARMUP, \
-        ' threads=', NTHREADS, ' ngpus=', NGPUS, ' placement=', PLACEMENT_STRING, ' check_result=', CHECK_RESULT, ' csv=', CSV, \
-        sep='', end='\n\n')
-
     # Set up PLACEMENT variable
     if PLACEMENT_STRING == 'cpu':
         PLACEMENT = cpu
@@ -404,8 +531,20 @@ if __name__ == "__main__":
         PLACEMENT = [gpu(i) for i in range(NGPUS)]
     elif PLACEMENT_STRING == 'both':
         PLACEMENT = [cpu] + [gpu(i) for i in range(NGPUS)]
+    elif PLACEMENT_STRING == 'puregpu':
+        PLACEMENT = [gpu(i) for i in range(NGPUS)]
+        BLOCK_SIZE = int(NROWS / NGPUS)
     else:
-        print("Invalid value for placement. Must be 'cpu' or 'gpu' or 'both'")
+        print("Invalid value for placement. Must be 'cpu' or 'gpu' or 'both' or 'puregpu'")
+
+    perf_stats = perfStats(ITERS, NROWS, BLOCK_SIZE)
+
+    print('%**********************************************************************************************%\n')
+    print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' warmup=', WARMUP, \
+        ' threads=', NTHREADS, ' ngpus=', NGPUS, ' placement=', PLACEMENT_STRING, ' check_result=', CHECK_RESULT, ' csv=', CSV, sep='')
+
+    if PLACEMENT_STRING == 'puregpu':
+        print('puregpu version chosen: block size automatically set to NROWS / NGPUS\n')
 
     with Parla():
         os.environ['OMP_NUM_THREADS'] = NTHREADS
