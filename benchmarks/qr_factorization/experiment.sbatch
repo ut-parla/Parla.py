@@ -25,6 +25,8 @@ unset __conda_setup
 
 conda activate parla
 
+export OMP_NUM_THREADS=16
+
 echo -n '"iteration",' >> experiment.csv 
 echo -n '"t1 GPU tasks","t1 H2D sum","t1 CPU ker sum","t1 GPU ker sum","t1 D2H sum","t1 total",' >> experiment.csv 
 echo -n '"t2 total",' >> experiment.csv 
