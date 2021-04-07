@@ -188,7 +188,7 @@ def qr_block_gpu(block, taskid):
     t1_D2H_end = time()
     perf_stats.t1_D2H_tasks[taskid] = t1_D2H_end - t1_D2H_start
 
-    return gpu_Q, gpu_R
+    return cpu_Q, cpu_R
 
 # CPU matmul kernel
 @specialized
@@ -234,7 +234,7 @@ async def tsqr_blocked(A, block_size):
 
     # Initialize and partition empty array to store blocks (same partitioning scheme, share the mapper)
     Q1_blocked = mapper.partition_tensor(np.empty_like(A))
-    R1 = cp.empty([nblocks * ncols, ncols]) # Concatenated view
+    R1 = np.empty([nblocks * ncols, ncols]) # Concatenated view
     # Q2 is allocated in t2
     Q = np.empty([nrows, ncols]) # Concatenated view
 
