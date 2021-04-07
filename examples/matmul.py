@@ -14,7 +14,7 @@ from parla.cpu import cpu
 from parla.cuda import gpu
 from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
-from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
+from parla.tasks import spawn, TaskSpace, CompletedTaskSpace, reserve_persistent_memory
 
 def main():
     ngpus = int(sys.argv[1])
@@ -44,32 +44,34 @@ def main():
             c_part.append(cp.empty((c_dim, n), np.float32, order = 'F'))
 
     previous = None
-    for repetition in range(repetitions):
-        # Now compute a @ b.T and write the output to c
-        deps = [previous] if previous is not None else []
-        @spawn(placement = cpu, dependencies = deps)
-        async def run_matmul():
-            print("start")
-            start = time.perf_counter()
-            matmul = TaskSpace("matmul")
-            for i in range(blocks):
-                for j in range(blocks):
-                    a_block = a_part[i]
-                    b_block = b_part[j]
-                    c_block = c_part[i][:, j * block_size : (j + 1) * block_size]
-                    @spawn(matmul[i, j], placement = c_block)
-                    def matmul_task():
-                        old_device = cp.cuda.Device()
-                        #b_block_local = clone_here(b_block)
-                        b_block_local = cp.asarray(b_block, order = 'F')
-                        # cupy doesn't support the out argument for matmul yet so we have to copy.
-                        # cp.matmul(a_block, b_block_local.T, out = c_block)
-                        #print(i, j, old_device, cp.cuda.Device(), c_block.device, a_block.device, b_block_local.device, b_block.device)
-                        c_block[:] = a_block @ b_block_local.T
-            await matmul
-            stop = time.perf_counter()
-            print(stop - start)
-        previous = run_matmul
+    with reserve_persistent_memory([a_part, b_part, c_part]):
+        for repetition in range(repetitions):
+            # Now compute a @ b.T and write the output to c
+            deps = [previous] if previous is not None else []
+            @spawn(placement = cpu, dependencies = deps)
+            async def run_matmul():
+                start = time.perf_counter()
+                matmul = TaskSpace("matmul")
+                for i in range(blocks):
+                    for j in range(blocks):
+                        a_block = a_part[i]
+                        b_block = b_part[j]
+                        c_block = c_part[i][:, j * block_size : (j + 1) * block_size]
+                        memsize = c_block.nbytes
+                        if i != j:
+                            memsize += b_block.nbytes
+                        @spawn(matmul[i, j], placement = c_block, memory = memsize)
+                        def matmul_task():
+                            old_device = cp.cuda.Device()
+                            b_block_local = clone_here(b_block)
+                            # cupy doesn't support the out argument for matmul yet so we have to copy.
+                            # cp.matmul(a_block, b_block_local.T, out = c_block)
+                            #print(i, j, old_device, cp.cuda.Device(), c_block.device, a_block.device, b_block_local.device, b_block.device)
+                            c_block[:] = a_block @ b_block_local.T
+                await matmul
+                stop = time.perf_counter()
+                print(stop - start)
+            previous = run_matmul
 
 if __name__ == "__main__":
     with Parla():
