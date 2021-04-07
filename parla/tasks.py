@@ -448,7 +448,7 @@ def get_current_devices() -> List[Device]:
 
 
 @contextmanager
-def _reserve_persistent(memsize, device):
+def _reserve_persistent_memory(memsize, device):
     resource_pool = get_scheduler_context().scheduler._available_resources
     resource_pool.allocate_resources(device, {'memory' : memsize}, blocking = True)
     try:
@@ -456,7 +456,7 @@ def _reserve_persistent(memsize, device):
     finally:
         resource_pool.deallocate_resources(device, {'memory' : memsize})
 
-
+# TODO: Move this to parla.device and import it from there. It's generally useful.
 def _get_parla_device(device):
     if isinstance(device, Device):
         return device
@@ -486,6 +486,16 @@ def reserve_persistent_memory(amount, device = None):
       be supplied if any element of the list is not an array. This may be a list of \
       devices if amount is a list of array objects.
     """
+    # TODO: This function should be split up into simpler subunits.
+    # How exactly that should be done isn't settled yet, but there's
+    # some discussion on this at
+    # https://github.com/ut-parla/Parla.py/pull/40#discussion_r608857593
+    # https://github.com/ut-parla/Parla.py/pull/40#discussion_r608853345
+    # TODO: reduce nesting by separating out the try/except idioms for
+    # checking if something supports the buffer protocol and checking
+    # whether or not something is iterable into separate functions.
+    # TODO: Generalize the naming/interface here to allow reserving
+    # resources other than memory.
     from . import cpu
     if isinstance(amount, int):
         memsize = amount
@@ -493,7 +503,10 @@ def reserve_persistent_memory(amount, device = None):
         import cupy
         # cupy has the info we need and views are cheap,
         # so get a view then read off the size/device info.
-        view = cupy.array(amount)
+        view = cupy.array(amount, copy = False)
+        # TODO: there's actually a storage_size helper routine in
+        # parla.array. We should use it here and move the logic
+        # about buffer protocols there.
         memsize = view.nbytes
         if device is None:
             device = view.device
@@ -533,6 +546,7 @@ def reserve_persistent_memory(amount, device = None):
                             try:
                                 iter(arr)
                             except TypeError as exc:
+                                # TODO: Just use parla.array.get_memory(a).device instead of this manual mess.
                                 raise ValueError("Implicit location specification only supported for GPU arrays.") from exc
                             else:
                                 stack.enter_context(reserve_persistent_memory(arr))
@@ -545,6 +559,7 @@ def reserve_persistent_memory(amount, device = None):
                 device_must_be_iterable = True
             if device_must_be_iterable:
                 with ExitStack() as stack:
+                    # TODO: do we actually want to support this implicit zip?
                     for arr, dev in zip(amount, device):
                         stack.enter_context(reserve_persistent_memory(arr, dev))
                     yield
@@ -561,7 +576,7 @@ def reserve_persistent_memory(amount, device = None):
     device = _get_parla_device(device)
     if isinstance(device, cpu._CPUDevice):
         raise ValueError("Reserving space for persistent data in main memory is not yet supported.")
-    with _reserve_persistent(memsize, device):
+    with _reserve_persistent_memory(memsize, device):
         yield
 
 
