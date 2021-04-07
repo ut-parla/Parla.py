@@ -63,8 +63,7 @@ def main():
                         @spawn(matmul[i, j], placement = c_block, memory = memsize)
                         def matmul_task():
                             old_device = cp.cuda.Device()
-                            #b_block_local = clone_here(b_block)
-                            b_block_local = cp.asarray(b_block, order = 'F')
+                            b_block_local = clone_here(b_block)
                             # cupy doesn't support the out argument for matmul yet so we have to copy.
                             # cp.matmul(a_block, b_block_local.T, out = c_block)
                             #print(i, j, old_device, cp.cuda.Device(), c_block.device, a_block.device, b_block_local.device, b_block.device)
