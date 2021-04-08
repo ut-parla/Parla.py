@@ -35,7 +35,6 @@ def main():
                 np.random.seed(0)
                 a_cpu = np.random.rand(n, n).astype(np.float32)
                 a_part = mapper.partition_tensor(a_cpu)
-                print("launch")
                 start = time.perf_counter()
                 # A place to store tasks in order to refer
                 # to them later for dependencies.
@@ -47,11 +46,11 @@ def main():
                     def run_exp():
                         # Call cupy for exponentiation.
                         # More complicated kernels can use numba.
-                        local_start = time.perf_counter()
+                        #local_start = time.perf_counter()
                         cp.exp(a_part[i], out = a_part[i])
                         cp.cuda.get_current_stream().synchronize()
-                        local_stop = time.perf_counter()
-                        print("local:", local_stop - local_start)
+                        #local_stop = time.perf_counter()
+                        #print("local:", local_stop - local_start)
                 # Wait for the exp tasks to complete
                 # before measuring the end time.
                 await exp_runs
