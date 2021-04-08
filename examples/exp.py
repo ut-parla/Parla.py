@@ -20,7 +20,7 @@ def main():
     runs = int(sys.argv[2])
     devices = gpu.devices[:ngpus]
     # 1D partition over available devices
-    mapper = LDeviceSequenceBlocked(ngpus, devices = devices)
+    mapper = LDeviceSequenceBlocked(ngpus, placement = devices)
 
     # Generate an nxn array of random data and
     # partition it over the devices in use.
