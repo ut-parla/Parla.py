@@ -10,10 +10,9 @@ import os
 from parla import Parla
 from parla.cpu import cpu
 from parla.cuda import gpu
-from parla.array import clone_here
 from parla.function_decorators import specialized
 from parla.tasks import *
-from parla.ldevice import LDeviceSequenceBlocked
+from parla.ldevice import LDeviceSequenceBlocked, PartitionedTensor
 
 # Huge class just for taking tons of timing statistics.
 class perfStats:
@@ -331,13 +330,13 @@ async def tsqr_blocked(A, block_size):
 # block_size: Positive integer
 async def tsqr_blocked_puregpu(A, block_size):
     Q1 = [None] * NGPUS
-    R1 = [None] * NGPUS
+    R1 = PartitionedTensor([None] * NGPUS) # CAVEAT: PartitionedTensor with None holes can be fragile! Be cautious!
 
     # Create tasks to perform qr factorization on each block and store them in lists
     t1_tot_start = time()
     T1 = TaskSpace()
     for i in range(NGPUS):
-        @spawn(taskid=T1[i], placement=A[i])
+        @spawn(taskid=T1[i], placement=A.base[i]) # NB: A[i] dumbly moves the block here!
         def t1():
             #print("t1[", i, "] start on ", get_current_devices(), sep='', flush=True)
 
@@ -365,7 +364,7 @@ async def tsqr_blocked_puregpu(A, block_size):
         t2_D2D_start = time()
         R1_reduced = np.empty(shape=(0, NCOLS))
         for dev in range(NGPUS):
-            next = clone_here(R1[dev])
+            next = R1[dev]
             next = next.reshape(NCOLS, NCOLS)
             R1_reduced = cp.vstack((R1_reduced, next))
             R1[dev] = None # Free up memory
@@ -386,6 +385,8 @@ async def tsqr_blocked_puregpu(A, block_size):
     perf_stats.t2_tot = t2_tot_end - t2_tot_start
     #print("t2 end\n", flush=True)
 
+    mapper = LDeviceSequenceBlocked(NGPUS, placement=Q2)
+    Q2p = mapper.partition_tensor(Q2)
     Q = [None] * NGPUS
     t3_tot_start = time()
     # Create tasks to perform Q1 @ Q2 matrix multiplication by block
@@ -400,9 +401,7 @@ async def tsqr_blocked_puregpu(A, block_size):
             # Q1 and Q2 must have an equal number of blocks, where Q1 blocks' ncols = Q2 blocks' nrows
             # Q2 is currently an (ncols * nblocks) x ncols matrix. Need nblocks of ncols rows each
             t3_H2D_start = time()
-            slice_start = i * NCOLS * NCOLS
-            slice_end = slice_start + NCOLS * NCOLS
-            Q2_local = clone_here(Q2[slice_start:slice_end])
+            Q2_local = Q2p[i]
             Q2_local = Q2_local.reshape(NCOLS, NCOLS)
             t3_H2D_end = time()
             perf_stats.t3_H2D_tasks[i] = t3_H2D_end - t3_H2D_start
@@ -446,18 +445,11 @@ def main():
 
             if PLACEMENT_STRING == 'puregpu':
                 if (NROWS % NGPUS != 0):
-                    print("%***** ERROR: Pure GPU version requires NROWS % NGPUS == 0 *****%")
-                    exit()
+                    raise ValueError("Pure GPU version requires NROWS %% NGPUS == 0 (currently %i %% %i)" % (NROWS, NGPUS))
 
                 # Partition matrix on GPUs
-                A_dev = [None] * NGPUS
-                for dev in range(NGPUS):
-                    @spawn(placement=gpu(dev))
-                    def copy_task():
-                        slice_start = dev * BLOCK_SIZE
-                        slice_end = slice_start + BLOCK_SIZE
-                        A_dev[dev] = clone_here(A[slice_start:slice_end])
-                    await copy_task
+                mapper = LDeviceSequenceBlocked(NGPUS, placement=[gpu(dev) for dev in range(NGPUS)])
+                A_dev = mapper.partition_tensor(A)
                 
                 tot_start = time()
                 Q_dev, R_dev = await tsqr_blocked_puregpu(A_dev, BLOCK_SIZE)

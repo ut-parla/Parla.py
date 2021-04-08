@@ -355,6 +355,20 @@ class PartitionedTensor():
     def __init__(self, latest_view: List):
         self._latest_view = latest_view
 
+    @property
+    def base(self):
+        """Direct access to the partitions, preventing any movement.
+        """
+        return self._latest_view
+
+    @property
+    def devices(self):
+        return get_placement_for_any(self._latest_view)
+
+    @property
+    def types(self):
+        return [type(x) for x in self._latest_view]
+
     def __getitem__(self, index: IndexType): # -> Union[Array, List[Array]]
         """
         Read partitions and make sure they are on the current device.
@@ -370,7 +384,9 @@ class PartitionedTensor():
         parse_index(self._latest_view, index, step=lambda I, i: I[i],
                 stop=lambda x: ret.append(clone_here(x) if is_array(x) else x))
         if len(ret) == 1:
+            if ret[0] is None: warn("Partition has been freed!")
             return ret[0]
+        warn("Multiple partitions are currently returned as a Python list of partitions (ndarrays).")
         return ret
 
     def __setitem__(self, index: IndexType, value):
@@ -384,8 +400,34 @@ class PartitionedTensor():
         """
         if not isinstance(index, tuple):
             index = (index,)
-        parse_index(self._latest_view, index, step=lambda I, i: I[i],
-                stop=lambda x: copy(x, value))
+
+        def _check_set(x):
+            x, i = x
+            # TODO (bozhi) need C pointers!
+            def _hard_set(i, value):
+                if len(i) == 1: self._latest_view[i[0]] = value
+                elif len(i) == 2: self._latest_view[i[0]][i[1]] = value
+                else: raise NotImplementedError("High-dimensional PartitionedTensor with None not supported!")
+            if x is None:
+                _hard_set(i, value)
+                return
+            is_to_array = is_array(x)
+            is_from_array = is_array(value)
+            if is_from_array and is_to_array:
+                try:
+                    copy(x, value)
+                except ValueError:
+                    warn("Incompatible arrays (e.g. different shapes). Overwritting.")
+                    _hard_set(i, value)
+            else:
+                # TODO (bozhi): should not allow None assignment but implement free(index)
+                if not is_to_array and x is not None:
+                    warn("Array partition was modified as %s object." % type(x))
+                if not is_from_array and value is not None:
+                    warn("Modifying array partition with %s object!" % type(value))
+                x = value
+
+        parse_index((self._latest_view, ()), index, step=lambda I, i: (I[0][i], I[1]+(i,)), stop=_check_set)
 
     def __len__(self):
         return len(self._latest_view)
