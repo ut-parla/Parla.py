@@ -25,7 +25,12 @@ def main():
     # stored within the memory of a single GPU
     # so that strong scaling numbers make sense.
     n = 20000
-    blocks = ngpus * 2
+    # Overdecomposing doesn't actually seem to help in this case
+    # with the current parla runtime. This may be related to
+    # some weirdness within the scheduler though, so
+    # we can leave the code for blocks in-place for further
+    # testing later.
+    blocks = ngpus
     np.random.seed(0)
     a_cpu = np.random.rand(n, n).astype(np.float32, order = 'F')
     b_cpu = np.random.rand(n, n).astype(np.float32, order = 'F')
@@ -63,11 +68,16 @@ def main():
                         @spawn(matmul[i, j], placement = c_block, memory = memsize)
                         def matmul_task():
                             old_device = cp.cuda.Device()
+                            #local_start = time.perf_counter()
                             b_block_local = clone_here(b_block)
+                            #cp.cuda.get_current_stream().synchronize()
+                            #communication_stop = time.perf_counter()
                             # cupy doesn't support the out argument for matmul yet so we have to copy.
                             # cp.matmul(a_block, b_block_local.T, out = c_block)
-                            #print(i, j, old_device, cp.cuda.Device(), c_block.device, a_block.device, b_block_local.device, b_block.device)
                             c_block[:] = a_block @ b_block_local.T
+                            #cp.cuda.get_current_stream().synchronize()
+                            #computation_stop = time.perf_counter()
+                            #print(i, j, computation_stop - communication_stop, communication_stop - local_start)
                 await matmul
                 stop = time.perf_counter()
                 print(stop - start)
