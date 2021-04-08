@@ -394,6 +394,7 @@ async def tsqr_blocked_puregpu(A, block_size):
         @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=Q1[i])
         def t3():
             #print("t3[", i, "] start on ", get_current_devices(), sep='', flush=True)
+            perf_stats.t3_is_GPU_tasks[i] = True
 
             # Copy the data to the processor
             # Q1 and Q2 must have an equal number of blocks, where Q1 blocks' ncols = Q2 blocks' nrows
