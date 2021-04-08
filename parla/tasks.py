@@ -501,15 +501,11 @@ def reserve_persistent_memory(amount, device = None):
         memsize = amount
     elif hasattr(amount, '__cuda_array_interface__'):
         import cupy
-        # cupy has the info we need and views are cheap,
-        # so get a view then read off the size/device info.
-        view = cupy.array(amount, copy = False)
-        # TODO: there's actually a storage_size helper routine in
-        # parla.array. We should use it here and move the logic
-        # about buffer protocols there.
-        memsize = view.nbytes
+        if not isinstance(amount, cupy.ndarray):
+            raise NotImplementedError("Currently only CuPy arrays are supported for making space reservations on the GPU.")
+        memsize = amount.nbytes
         if device is None:
-            device = view.device
+            device = amount.device
     else:
         # Check if "amount" supports the buffer protocol.
         # if it does, we're reserving memory on the CPU
