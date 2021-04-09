@@ -257,7 +257,7 @@ async def tsqr_blocked(A, block_size):
         if PLACEMENT_STRING == 'gpu' or PLACEMENT_STRING == 'both':
             T1_MEMORY = int(4.2*A_blocked[i:i+1].nbytes) # Estimate based on empirical evidence
 
-        @spawn(taskid=T1[i], placement=PLACEMENT, memory=T1_MEMORY)
+        @spawn(taskid=T1[i], placement=PLACEMENT, memory=T1_MEMORY, vcus=ACUS)
         def t1():
             #print("t1[", i, "] start on ", get_current_devices(), sep='', flush=True)
 
@@ -312,7 +312,7 @@ async def tsqr_blocked(A, block_size):
         if PLACEMENT_STRING == 'gpu' or PLACEMENT_STRING == 'both':
             T3_MEMORY = 4*Q1_blocked[i].nbytes # # This is a guess
 
-        @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=PLACEMENT, memory=T3_MEMORY)
+        @spawn(taskid=T3[i], dependencies=[T1[i], t2], placement=PLACEMENT, memory=T3_MEMORY, vcus=ACUS)
         def t3():
             #print("t3[", i, "] start on ", get_current_devices(), sep='', flush=True)
 
@@ -528,12 +528,16 @@ if __name__ == "__main__":
     # Set up PLACEMENT variable
     if PLACEMENT_STRING == 'cpu':
         PLACEMENT = cpu
+        ACUS = None
     elif PLACEMENT_STRING == 'gpu':
         PLACEMENT = [gpu(i) for i in range(NGPUS)]
+        ACUS = None
     elif PLACEMENT_STRING == 'both':
-        PLACEMENT = [cpu] + [gpu(i) for i in range(NGPUS)]
+        PLACEMENT = [cpu(0)] + [gpu(i) for i in range(NGPUS)]
+        ACUS = 1
     elif PLACEMENT_STRING == 'puregpu':
         PLACEMENT = [gpu(i) for i in range(NGPUS)]
+        ACUS = None
         BLOCK_SIZE = int(NROWS / NGPUS)
     else:
         print("Invalid value for placement. Must be 'cpu' or 'gpu' or 'both' or 'puregpu'")
