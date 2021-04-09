@@ -165,6 +165,7 @@ class perfStats:
 def qr_block(block, taskid):
     t1_ker_start = time()
     Q, R = np.linalg.qr(block)
+    cp.cuda.get_current_stream().synchronize()
     t1_ker_end = time()
     perf_stats.t1_ker_tasks[taskid] = t1_ker_end - t1_ker_start
     return Q, R
@@ -177,6 +178,7 @@ def qr_block_gpu(block, taskid):
     # Run the kernel
     t1_ker_start = time()
     gpu_Q, gpu_R = cp.linalg.qr(block)
+    cp.cuda.get_current_stream().synchronize()
     t1_ker_end = time()
     perf_stats.t1_ker_tasks[taskid] = t1_ker_end - t1_ker_start
 
@@ -184,6 +186,7 @@ def qr_block_gpu(block, taskid):
     t1_D2H_start = time()
     cpu_Q = cp.asnumpy(gpu_Q)
     cpu_R = cp.asnumpy(gpu_R)
+    cp.cuda.get_current_stream().synchronize()
     t1_D2H_end = time()
     perf_stats.t1_D2H_tasks[taskid] = t1_D2H_end - t1_D2H_start
 
@@ -194,6 +197,7 @@ def qr_block_gpu(block, taskid):
 def matmul_block(block_1, block_2, taskid):
     t3_ker_start = time()
     Q = block_1 @ block_2
+    cp.cuda.get_current_stream().synchronize()
     t3_ker_end = time()
     perf_stats.t3_ker_tasks[taskid] = t3_ker_end - t3_ker_start
     return Q
@@ -206,12 +210,14 @@ def matmul_block_gpu(block_1, block_2, taskid):
     # Run the kernel
     t3_ker_start = time()
     gpu_Q = cp.matmul(block_1, block_2)
+    cp.cuda.get_current_stream().synchronize()
     t3_ker_end = time()
     perf_stats.t3_ker_tasks[taskid] = t3_ker_end - t3_ker_start
 
     # Transfer the data
     t3_D2H_start = time()
     cpu_Q = cp.asnumpy(gpu_Q)
+    cp.cuda.get_current_stream().synchronize()
     t3_D2H_end = time()
     perf_stats.t3_D2H_tasks[taskid] = t3_D2H_end - t3_D2H_start
 
@@ -258,6 +264,7 @@ async def tsqr_blocked(A, block_size):
             # Copy the data to the processor
             t1_H2D_start = time()
             A_block_local = A_blocked[i:i+1]
+            cp.cuda.get_current_stream().synchronize()
             t1_H2D_end = time()
             perf_stats.t1_H2D_tasks[i] = t1_H2D_end - t1_H2D_start
 
@@ -313,6 +320,7 @@ async def tsqr_blocked(A, block_size):
             t3_H2D_start = time()
             Q1_block_local = Q1_blocked[i]
             Q2_block_local = Q2_blocked[i:i+1]
+            cp.cuda.get_current_stream().synchronize()
             t3_H2D_end = time()
             perf_stats.t3_H2D_tasks[i] = t3_H2D_end - t3_H2D_start
 
