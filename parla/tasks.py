@@ -29,7 +29,7 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaskID", "TaskSpace", "spawn", "get_current_devices", "tasks", "finish", "CompletedTaskSpace", "Task"
+    "TaskID", "TaskSpace", "spawn", "get_current_devices", "tasks", "finish", "CompletedTaskSpace", "Task", "reserve_persistent_memory"
 ]
 
 
