@@ -2,6 +2,8 @@ import logging
 import threading
 from time import sleep
 
+import pytest
+
 from parla import Parla, TaskEnvironment
 from parla.cpu import cpu
 from parla.environments import EnvironmentComponentInstance, EnvironmentComponentDescriptor
@@ -85,6 +87,7 @@ def test_component_initialized():
         assert task_results == ["test"]
 
 
+@pytest.mark.skipif(len(cpu.devices) < 2, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_multiple_environments_fixed_assignment():
     # Dummy environments with no components for testing.
     environments = [TaskEnvironment(placement=[cpu(0)], components=[DummyComponent("foo")]),
@@ -102,6 +105,7 @@ def test_multiple_environments_fixed_assignment():
         assert set(task_results) == {"foo", "bar"}
 
 
+@pytest.mark.skipif(len(cpu.devices) < 2, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_multiple_environments_free_assignment():
     # Dummy environments with no components for testing.
     environments = [TaskEnvironment(placement=[cpu(0)], components=[DummyComponent("foo")]),
@@ -126,6 +130,7 @@ def test_multiple_environments_free_assignment():
             assert set(task_results) == {"foo", "bar"}
 
 
+@pytest.mark.skipif(len(cpu.devices) < 2, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_multiple_environments_tagged():
     # Dummy environments with no components for testing.
     environments = [TaskEnvironment(placement=[cpu(0)], components=[DummyComponent("foo")], tags=(threading,)),
@@ -149,6 +154,7 @@ def test_multiple_environments_tagged():
             assert task_results == ["bar"]
 
 
+@pytest.mark.skipif(len(cpu.devices) < 2, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_multiple_environments_best_fit():
     # Dummy environments with no components for testing.
     environments = [TaskEnvironment(placement=[cpu(0)], components=[DummyComponent("foo")]),
@@ -190,6 +196,7 @@ def test_multiple_environments_best_fit():
             assert task_results == ["bar", "bar", "bar"]
 
 
+@pytest.mark.skipif(len(cpu.devices) < 5, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_multiple_environments_less_good_fit():
     # Dummy environments with no components for testing.
     environments = [TaskEnvironment(placement=[cpu(0), cpu(1)], components=[DummyComponent("foo")]),

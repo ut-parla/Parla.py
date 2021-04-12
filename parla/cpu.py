@@ -43,7 +43,6 @@ class _CPUMemory(Memory):
 
 class _CPUDevice(Device):
     def __init__(self, architecture: "Architecture", index, *args, n_cores, **kws):
-        assert n_cores == 1
         super().__init__(architecture, index, *args, **kws)
         self.n_cores = n_cores or get_n_cores()
         self.available_memory = get_total_memory()*_MEMORY_FRACTION / get_n_cores() * self.n_cores
@@ -75,19 +74,32 @@ class _NumPyArrayType(ArrayType):
         return numpy
 
 
-class _CPUCoresArchitecture(Architecture):
+class _GenericCPUArchitecture(Architecture):
+    def __init__(self, name, id):
+        super().__init__(name, id)
+        self.n_cores = get_n_cores()
+
+
+class _CPUCoresArchitecture(_GenericCPUArchitecture):
+    """
+    A CPU architecture that treats each CPU core as a Parla device.
+    Each device will have one VCU.
+
+    WARNING: This architecture configures OpenMP and MKL to execute without any parallelism.
+    """
+
     n_cores: int
     """
     The number of cores for which this process has affinity and are exposed as devices.
     """
     def __init__(self, name, id):
         super().__init__(name, id)
-        self.n_cores = get_n_cores()
         self._devices = [self(i) for i in range(self.n_cores)]
-        logger.info("CPU 'cores mode' enabled. "
-                    "Do not use parallel kernels in this mode (it will cause massive over subscription of the CPU). ")
-        logger.info("Parla detected {} cores. Parla cannot currently distinguish threads from core. "
-                    "Set CPU affinity to only include one thread on each core to fix this issue.".format(self.n_cores))
+        logger.warning("CPU 'cores mode' enabled. "
+                       "Do not use parallel kernels in this mode (it will cause massive over subscription of the CPU). "
+                       "Setting OMP_NUM_THREADS=1 and MKL_THREADING_LAYER=SEQUENTIAL to avoid implicit parallelism.")
+        os.environ["OMP_NUM_THREADS"] = "1"
+        os.environ["MKL_THREADING_LAYER"] = "SEQUENTIAL"
 
     @property
     def devices(self):
@@ -95,6 +107,29 @@ class _CPUCoresArchitecture(Architecture):
 
     def __call__(self, id, *args, **kwds) -> _CPUDevice:
         return _CPUDevice(self, id, *args, **kwds, n_cores=1)
+
+
+class _CPUWholeArchitecture(_GenericCPUArchitecture):
+    """
+    A CPU architecture that treats the entire CPU as a single Parla device.
+    That device will have one VCU per core.
+    """
+
+    n_cores: int
+    """
+    The number of cores for which this process has affinity and are exposed as VCUs.
+    """
+    def __init__(self, name, id):
+        super().__init__(name, id)
+        self._device = self(0)
+
+    @property
+    def devices(self):
+        return [self._device]
+
+    def __call__(self, id, *args, **kwds) -> _CPUDevice:
+        assert id == 0, "Whole CPU architecture only supports a single CPU device."
+        return _CPUDevice(self, id, *args, **kwds, n_cores=None)
 
 
 class UnboundCPUComponentInstance(EnvironmentComponentInstance):
@@ -127,7 +162,12 @@ class UnboundCPUComponent(EnvironmentComponentDescriptor):
         return UnboundCPUComponentInstance(self, env)
 
 
-cpu = _CPUCoresArchitecture("CPU Cores", "cpu")
+if os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() == "cores":
+    cpu = _CPUCoresArchitecture("CPU Cores", "cpu")
+else:
+    if os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() not in ("whole", ""):
+        logger.warning("PARLA_CPU_ARCHITECTURE only supports cores or whole.")
+    cpu = _CPUWholeArchitecture("Whole CPU", "cpu")
 cpu.__doc__ = """The `~parla.device.Architecture` for CPUs.
 
 >>> cpu()
@@ -135,7 +175,3 @@ cpu.__doc__ = """The `~parla.device.Architecture` for CPUs.
 
 device._register_architecture("cpu", cpu)
 array._register_array_type(numpy.ndarray, _NumPyArrayType())
-
-# Set OpenMP and MKL to use a single thread for calls
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_THREADING_LAYER"] = "SEQUENTIAL"

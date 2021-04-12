@@ -1,5 +1,7 @@
 import logging
+import sys
 from itertools import combinations
+from random import random
 from time import sleep
 
 import numpy as np
@@ -242,8 +244,9 @@ def test_closure_detachment(runtime_sched):
     assert task_results == list(range(10))
 
 
+@pytest.mark.skipif(len(cpu.devices) < 3, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_placement(runtime_sched):
-    devices = [cpu(0), cpu(1), cpu(6)]
+    devices = [cpu(0), cpu(1), cpu(2)]
     for rep in repetitions():
         task_results = []
         for (i, dev) in enumerate(devices):
@@ -274,6 +277,7 @@ def test_placement_data(runtime_sched):
         assert task_results == devices
 
 
+@pytest.mark.skipif(len(cpu.devices) < 2, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_placement_options_vcus(runtime_sched):
     # test multiple options in placement list with only one device used in the end
     for rep in repetitions():
@@ -290,26 +294,68 @@ def test_placement_options_vcus(runtime_sched):
         assert task_results.count(cpu(1)) == N/2
 
 
+@pytest.mark.skipif(len(cpu.devices) != 1, reason="Run with PARLA_CPU_ARCHITECTURE=whole")
+def test_placement_options_vcus_more_than_1(runtime_sched):
+    # test multiple options in placement list with only one device used in the end
+    for rep in repetitions():
+        N = 4
+        task_results_a = []
+        task_results_b = []
+        n_running = [0]
+        for i in range(N):
+            @spawn(placement=cpu, vcus=cpu.n_cores)
+            def task():
+                task_results_a.append(i)
+                n_running[0] += 1
+                assert n_running[0] == 1
+                sleep(0.1)
+                assert n_running[0] == 1
+                n_running[0] -= 1
+                task_results_b.append(i)
+        sleep_until(lambda: len(task_results_b) == N)
+        assert task_results_a == task_results_b
+
+        N = 4
+        task_results_a = []
+        task_results_b = []
+        n_running = [0]
+        for i in range(N):
+            @spawn(placement=cpu, vcus=cpu.n_cores/2)
+            def task():
+                sleep(0.01)
+                task_results_a.append(i)
+                n_running[0] += 1
+                assert n_running[0] <= 2
+                sleep(0.1)
+                assert n_running[0] <= 2
+                n_running[0] -= 1
+                task_results_b.append(i)
+                sleep(0.01)
+        sleep_until(lambda: len(task_results_b) == N)
+
+
+@pytest.mark.skipif(len(cpu.devices) < 2, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_placement_options_memory(runtime_sched):
     # test multiple options in placement list with only one device used in the end
     for rep in repetitions():
         task_results = []
         for i in range(4):
-            @spawn(placement=[cpu(0), cpu(3)], memory=cpu(0).available_memory)
+            @spawn(placement=[cpu(0), cpu(1)], memory=cpu(0).available_memory)
             def task():
                 sleep(0.1)
                 task_results.append(get_current_devices()[0])
         sleep_until(lambda: len(task_results) == 4)
-        assert set(task_results) == {cpu(0), cpu(3)}
+        assert set(task_results) == {cpu(0), cpu(1)}
         assert task_results.count(cpu(0)) == 2
-        assert task_results.count(cpu(3)) == 2
+        assert task_results.count(cpu(1)) == 2
 
 
+@pytest.mark.skipif(len(cpu.devices) < 4, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_placement_multi():
     # Dummy environments with no components for testing.
     environments = [TaskEnvironment(placement=d, components=[]) for d in combinations(cpu.devices, 2)]
     with Parla(environments):
-        devices = [frozenset((cpu(0), cpu(1))), frozenset((cpu(1), cpu(2))), frozenset((cpu(6), cpu(3)))]
+        devices = [frozenset((cpu(0), cpu(1))), frozenset((cpu(1), cpu(2))), frozenset((cpu(4), cpu(3)))]
         for rep in repetitions():
             task_results = []
             for (i, dev) in enumerate(devices):
@@ -321,8 +367,9 @@ def test_placement_multi():
             assert task_results == devices
 
 
+@pytest.mark.skipif(len(cpu.devices) < 3, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_placement_await(runtime_sched):
-    devices = [cpu(0), cpu(1), cpu(6)]
+    devices = [cpu(0), cpu(1), cpu(2)]
 
     for rep in repetitions():
         task_results = []
@@ -334,9 +381,10 @@ def test_placement_await(runtime_sched):
                 task_results.append(get_current_devices()[0])
             sleep_until(lambda: len(task_results) == (i+1)*2)
 
-        assert task_results == [cpu(0), cpu(0), cpu(1), cpu(1), cpu(6), cpu(6)]
+        assert task_results == [cpu(0), cpu(0), cpu(1), cpu(1), cpu(2), cpu(2)]
 
 
+@pytest.mark.skipif(len(cpu.devices) < 2, reason="Run with PARLA_CPU_ARCHITECTURE=cores")
 def test_memory_aware_scheduling(runtime_sched):
     # test memory restrictions
     for rep in repetitions():

@@ -638,7 +638,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 0.01,
                  max_worker_queue_depth: int = 2):
         super().__init__()
-        n_threads = n_threads or len(environments)
+        n_threads = n_threads or sum(d.resources.get("vcus", 1) for e in environments for d in e.placement)
         self._environments = TaskEnvironmentRegistry(*environments)
         self._exceptions = []
         self._active_task_count = 1 # Start with one count that is removed when the scheduler is "exited"
@@ -787,12 +787,12 @@ class Scheduler(ControllableThread, SchedulerContext):
 
                 if not task.assigned:
                     task._assignment_tries = getattr(task, "_assignment_tries", 0) + 1
-                    if task._assignment_tries > _ASSIGNMENT_FAILURE_WARNING_LIMIT:
-                        logger.warning("Task %r: Failed to assign devices. The required resources may not be "
-                                       "available on this machine at all.\n"
-                                       "Available resources: %r\n"
-                                       "Unallocated resources: %r",
-                                       task, self._available_resources, self._unassigned_resources)
+                    # if task._assignment_tries > _ASSIGNMENT_FAILURE_WARNING_LIMIT:
+                    #     logger.warning("Task %r: Failed to assign devices. The required resources may not be "
+                    #                    "available on this machine at all.\n"
+                    #                    "Available resources: %r\n"
+                    #                    "Unallocated resources: %r",
+                    #                    task, self._available_resources, self._unassigned_resources)
                     # Put task we cannot assign resources to at the back of the queue
                     logger.debug("Task %r: Failed to assign", task)
                     self.enqueue_task(task)
