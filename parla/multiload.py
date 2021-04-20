@@ -555,9 +555,9 @@ class MultiloadComponent(EnvironmentComponentDescriptor):
 
 def CPUAffinity(multi: MultiloadComponentInstance, env: TaskEnvironment):
     # Collect CPU numbers and set the affinity
-    import parla.cpu
+    from .cpu_impl import cpu
     cpus = []
     for d in env.placement:
-        if d.architecture is parla.cpu.cpu:
+        if d.architecture is cpu:
             cpus.append(d.index)
     multi.multiload_context.set_allowed_cpus(cpus)
