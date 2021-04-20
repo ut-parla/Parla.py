@@ -104,7 +104,7 @@ CC="gcc -no-pie -fno-PIE" CXX="g++ -no-pie -fno-PIE" MIG="mig" MAKE="make"\
  --enable-stack-protector=strong \
  --enable-obsolete-rpc \
  --enable-obsolete-nsl \
- --enable-kernel=3.2 --enable-systemtap --enable-multi-arch --enable-static-pie
+ --enable-kernel=3.2 --enable-multi-arch --enable-static-pie
 make
 make install
 cd ../..
