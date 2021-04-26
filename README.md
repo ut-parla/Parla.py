@@ -121,7 +121,7 @@ cd ..
 If that actually worked, you can now copy the following single line into a separate shell script (say parla.sh) and use that like the Python command.
 NOTE: the interactive shell doesn't work on some machines right now and we don't know why yet, so only use this to run scripts.
 ```Shell
-LD_PRELOAD="$HOME/Parla.py/runtime_libs/build/libparla_supervisor.so" "$HOME/Parla.py/runtime_libs/usingldso" "$HOME/Parla.py/glibc/install" python "$@"
+LD_LIBRARY_PATH="$HOME/Parla.py/runtime_libs/build:$LD_LIBRARY_PATH" LD_PRELOAD="$HOME/Parla.py/runtime_libs/build/libparla_supervisor.so" "$HOME/Parla.py/runtime_libs/usingldso" "$HOME/Parla.py/glibc/install" python "$@"
 ```
 Using the parla.sh shell script you can run parla programs as "sh parla.sh $ARGS" where $ARGS is whatever arguments you'd be passing to Python.
 
