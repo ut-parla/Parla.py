@@ -10,7 +10,7 @@
 
 // Adapted from an example at https://eli.thegreenplace.net/2015/programmatic-access-to-the-call-stack-in-c/
 // This approach fails to print out symbols from VECs, but it at least keeps going so we get a partial stack trace.
-inline void show_backtrace_with_unwind(void) {
+void show_backtrace_with_unwind(void) {
   unw_cursor_t cursor;
   unw_context_t context;
 
@@ -38,7 +38,7 @@ inline void show_backtrace_with_unwind(void) {
 
 // Just use backtrace directly.
 // This stops as soon as it fails to print a given symbol, so we don't even get a partial backtrace in that case.
-inline void show_backtrace(void) {
+void show_backtrace(void) {
   void *array[10];
   size_t size;
 
