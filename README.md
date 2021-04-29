@@ -73,7 +73,7 @@ Here are instructions for how to get the VEC prototype running locally:
 Glibc is usually the pain point.
 Everything should be working for numpy/openblas now.
 Other libraries may or may not work.
-Make sure you have recent versions of gcc, binutils, make, libunwind, and CMake.
+Make sure you have recent versions of cython, numpy, gcc, binutils, make, libunwind, and CMake.
 Everything except gcc is available via conda if you need it.
 We recommend using conda-forge (see https://conda-forge.org/docs/user/introduction.html#how-can-i-install-packages-from-conda-forge), but the default packages may work too.
 Leave "$HOME/Parla.py" empty since this will clone a bunch of stuff there.
