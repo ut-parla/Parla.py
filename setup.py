@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 
-from distutils.core import setup, Extension
+import os
+from setuptools import setup, Extension
+from Cython.Build import cythonize
+
+cython_modules = cythonize('parla/*.pyx')
 
 cache_filler_modules = []
 for i in range(128):
@@ -14,5 +18,5 @@ setup(name = "parla",
       version = "0.1",
       description = "The parla Python frontend.",
       packages = ['parla'],
-      ext_modules=cache_filler_modules,
+      ext_modules = cache_filler_modules + cython_modules,
       )
