@@ -6,11 +6,11 @@ parser.add_argument("input", help="Path to input graph")
 parser.add_argument("vecs", help="# of threads/vecs to run", type=int)
 args = parser.parse_args()
 
-from parla_galois.core import py_load_file, py_init_galois
-py_init_galois()
-g = py_load_file(args.input)
-
 def bfs_sssp(i):
+    from parla_galois.core import py_load_file, py_init_galois
+    import parla_galois.core
+    py_init_galois()
+    g = py_load_file(args.input)
     source = i
     report = (i+1)*5
     slot = i
