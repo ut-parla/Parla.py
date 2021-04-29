@@ -49,7 +49,7 @@ inline void show_backtrace(void) {
   backtrace_symbols_fd(array, size, STDERR_FILENO);
 }
 
-inline void handler(int sig) {
+void handler(int sig) {
   fprintf(stderr, "Error: signal %d:\n", sig);
   show_backtrace_with_unwind();
   exit(1);
