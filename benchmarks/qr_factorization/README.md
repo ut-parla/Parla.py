@@ -20,7 +20,7 @@ export PYTHONPATH="/path/to/Parla.py" # Replace with your path
 Some of these programs use VECs (Virtual Execution Contexts), which require additional setup.
 
 ### Usage
-The main program with a Parla implementation of the blocked TSQR algorithm is qr_parla.py. It can simply be run with
+The main program with a Parla implementation of the blocked TSQR algorithm is `qr_parla.py`. It can simply be run with
 ```
 python qr_parla.py
 ```
@@ -56,13 +56,13 @@ qr_parla.py -r 500000 -c 1000 -b 125000 -i 1 -g 4 -p gpu # Factorize a 500k by 1
 	- Original proof of concept for blocked implementation. Doesn't actually parallelize over blocks. Not used for testing.
 - `qr_parla_maybe_segfault.py`
 	- Reproduces a segfault that occurs inconsistently; further testing needed.
-- `qr-multithread.py`
+- `qr_multithread.py`
 	- Previously used for testing performance of VECs. Attempt to achieve nested parallelism by spawning multiple threads. Doesn't actually work, as all NumPy calls are multiplexed onto a single group of threads (obviating the need for VECs to manage different contexts if parallelism is to be achieved in Python with threads.)
-- `qr-multiprocess.py`
+- `qr_multiprocess.py`
 	- Previously used for testing performance of VECs. Achieves nested parallelism by spawning multiple processes, requiring data to be copied.
-- `qr-vec.py` \*
+- `qr_vec.py` \*
 	- Uses VECs (Virtual Execution Contexts) in order to achieve nested parallelism using multiple threads in a single virtual address space.
-- `vec-segfault.py` \*
+- `vec_segfault.py` \*
 	- Slimmed down version of qr-vec.py for isolating a segmentation fault that has yet to be fixed.  
 
 \* Note that VECs have their own special installation process and don't work with vanilla Parla.
