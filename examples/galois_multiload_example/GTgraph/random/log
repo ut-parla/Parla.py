@@ -1,0 +1,18 @@
+
+Graph Generator Parameters
+
+**************************
+GRAPH_MODEL		: 1
+n			: 1000
+p			: 0.000001
+m			: 500
+SELF_LOOPS		: 0
+MAX_WEIGHT		: 100
+MIN_WEIGHT		: 0
+STORE_IN_MEMORY		: 1
+WRITE_TO_FILE		: 1
+SORT_EDGELISTS		: 1
+SORT_TYPE	        : 0
+OUTFILE			: r.dm
+LOGFILE			: log
+

@@ -54,6 +54,7 @@ def makeExtension(extName):
         libraries = ['galois_shmem', "numa"],
         library_dirs = lib_dirs,
         runtime_library_dirs = lib_dirs,
+        extra_compile_args=['-std=c++17'],
         # extra_compile_args=["-std=c++11","-O3", "-Wno-sign-compare", "-w"],
         # extra_link_args=["-lkokkoscore", "-Wl,--no-as-needed", "-ldl", "-lpthread"]
     )
@@ -68,6 +69,7 @@ setup(
     name="parla_galois",
     packages=["parla_galois"],
     ext_modules=extensions,
+    extra_compile_args=['-std=c++17'],
     package_data={
         '':['*.pxd']
     },

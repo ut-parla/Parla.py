@@ -1,3 +1,7 @@
 parla_galois/core.cpp
 build/
 parla_galois/cmake-build-debug/
+parla_galois.egg-info/
+parla_galois/CMakeCache.txt
+parla_galois/CMakeFiles/
+parla_galois/cmake_install.cmake
