@@ -10,7 +10,7 @@ import psutil
 
 from . import array, device
 from .array import ArrayType
-from .cpu_impl import cpu
+from .cpu_impl import cpu, _CPUMemory
 
 __all__ = ["cpu"]
 
