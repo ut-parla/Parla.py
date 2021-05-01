@@ -3,9 +3,9 @@
 
 import numpy as np
 from scipy import sparse as sp
-from numba import jit
+#from numba import jit
 
-@jit
+#@jit
 def laplacian_helper(n, offset, num_edges, data, indices, indptr):
     indptr[0] = 0
     current_indptr = 1
@@ -48,7 +48,7 @@ def discrete_laplacian(n):
     laplacian_helper(n, offset, num_edges, data, indices, indptr)
     return sp.csc_matrix((data, indices, indptr), shape=(n, n))
 
-@jit
+#@jit
 def laplacian_3d_helper(n, inner_offset, outer_offset, num_edges, data, indices, indptr):
     indptr[0] = 0
     current_indptr = 1
