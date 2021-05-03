@@ -26,7 +26,6 @@ cdef long int get_current():
 cdef getattrofunc old_module_getattro = (<PyTypeObject*>ModuleType).tp_getattro
 
 cdef str base_modules_name = "_parla_base_modules"
-cdef str dict_name = "__dict__"
 
 def empty_forwarding_module():
     forwarding_module = ModuleType("")
@@ -45,16 +44,11 @@ def is_forwarding(module):
     ret = get_base_modules(module) is not None
     return ret
 
-cdef int count22 = 0
-
 cdef object new_module_getattro(object module, object attr):
     base_modules = get_base_modules(module)
     if base_modules is None:
         ret = old_module_getattro(module, attr)
         return ret
-    (&count22)[0] += 1
-    cdef object py_attr = attr.encode()
-    cdef char* c_attr = py_attr
     wrapped_module = base_modules[get_current()]
     ret = old_module_getattro(wrapped_module, attr)
     return ret
