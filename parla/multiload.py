@@ -18,6 +18,7 @@ from heapq import merge
 from contextlib import contextmanager
 from typing import Collection, Optional, Callable, List, Any
 from itertools import islice
+import inspect
 
 from .environments import EnvironmentComponentDescriptor, EnvironmentComponentInstance, TaskEnvironment
 
@@ -59,6 +60,8 @@ class virt_dlopen_state(ctypes.Structure):
 virt_dlopen_swap_state = _parla_supervisor.virt_dlopen_swap_state
 virt_dlopen_swap_state.argtypes = [ctypes.c_char, ctypes.c_long]
 virt_dlopen_swap_state.restype = virt_dlopen_state
+# Needed by the override extension module
+address_of_virt_dlopen_get_state = ctypes.cast(_parla_supervisor.virt_dlopen_get_state, ctypes.c_void_p).value
 
 # Load a bunch of extension modules to saturate Python's cache of
 # shared object handles. See
@@ -163,13 +166,11 @@ class MultiloadContext():
         self.force_dlopen_in_context()
         self.cpu_affinity_stack.append(os.sched_getaffinity(0))
         os.sched_setaffinity(0, self.allowed_cpus)
-        # print(f"Pushing CPU affinity ({self.cpu_affinity_stack[-1]}) and forcing CPU affinity {self.allowed_cpus}")
         return self
 
     def __exit__(self, *args):
         removed = multiload_thread_locals.context_stack.pop()
         assert removed is self
-        # print(f"Popping CPU affinity ({self.cpu_affinity_stack[-1]})")
         os.sched_setaffinity(0, self.cpu_affinity_stack.pop())
         multiload_thread_locals.context_stack[-1].force_dlopen_in_context()
 
@@ -212,24 +213,26 @@ def get_context_module_specs():
 def allocate_multiload_context() -> MultiloadContext:
     return free_multiload_contexts.pop()
 
-def forward_getattribute(self, attr):
-    if attr[:6] == "_parla":
-        return object.__getattribute__(self, attr)
-    return getattr(object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()], attr)
+from .forwarding_modules import is_forwarding, empty_forwarding_module, get_base_modules
 
-def forward_setattr(self, name, value):
-    if name[:6] == "_parla":
-        return object.__setattr__(self, name, value)
-    return object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()].__setattr__(name, value)
+#def forward_getattribute(self, attr):
+#    if attr[:6] == "_parla":
+#        return object.__getattribute__(self, attr)
+#    return object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()].__getattribute__(attr)
+
+#def forward_setattr(self, name, value):
+#    if name[:6] == "_parla":
+#        return object.__setattr__(self, name, value)
+#    return object.__getattribute__(self, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()].__setattr__(name, value)
 
 # Hopefully we'll overload this later using a technique like
 # the one used in forbiddenfruit, so cache the original version first.
-builtin_module_setattr = types.ModuleType.__setattr__
+#builtin_module_setattr = types.ModuleType.__setattr__
 
-def module_setattr(self, name, value):
-    if is_forwarding(self):
-        return forward_setattr(self, name, value)
-    return builtin_module_setattr(self, name, value)
+#def module_setattr(self, name, value):
+#    if is_forwarding(self):
+#        return forward_setattr(self, name, value)
+#    return builtin_module_setattr(self, name, value)
 
 # Need forbiddenfruit module to do this.
 #curse(types.ModuleType, "__setattr__", module_setattr)
@@ -239,12 +242,12 @@ def module_setattr(self, name, value):
 # so instead we need to create a function object that captures the needed info
 # on a per-module basis and use that to override __dir__.
 # See https://www.python.org/dev/peps/pep-0562/ for details.
-def get_forward_dir(module):
-    def forward_dir():
-        forwarding_dir = object.__dir__(module)
-        module_dir = object.__getattribute__(module, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()].__dir__()
-        return list(merge(forwarding_dir, module_dir))
-    return forward_dir
+#def get_forward_dir(module):
+#    def forward_dir():
+#        forwarding_dir = object.__dir__(module)
+#        module_dir = object.__getattribute__(module, "_parla_base_modules")[multiload_thread_locals.current_context.__index__()].__dir__()
+#        return list(merge(forwarding_dir, module_dir))
+#    return forward_dir
 
 # Just defining __getattribute__ at module scope isn't actually
 # doing the correct thing right now. It's probably a bug.
@@ -255,36 +258,36 @@ def get_forward_dir(module):
 # The signature isn't the same as the usual __getattr__ though,
 # as is the case with __dir__. 
 # Again see https://www.python.org/dev/peps/pep-0562/ for details.
-def get_forward_getattr(module):
-    def forward_getattr(name: str):
-        # Hack around the fact that the frozen importlib
-        # accesses __path__ from the parent module while importing
-        # submodules.
-        # The real fix is to reorganize things so that imports of
-        # modules are done into each environment separately.
-        # That reorganization is also what's needed to support
-        # loading distinct sets of modules into each context.
-        if name == "__path__":
-            return getattr(module._parla_base_modules[0], name)
-        return getattr(module._parla_base_modules[multiload_thread_locals.current_context.__index__()], name)
-    return forward_getattr
+#def get_forward_getattr(module):
+#    def forward_getattr(name: str):
+#        # Hack around the fact that the frozen importlib
+#        # accesses __path__ from the parent module while importing
+#        # submodules.
+#        # The real fix is to reorganize things so that imports of
+#        # modules are done into each environment separately.
+#        # That reorganization is also what's needed to support
+#        # loading distinct sets of modules into each context.
+#        if name == "__path__":
+#            return getattr(module._parla_base_modules[0], name)
+#        return getattr(module._parla_base_modules[multiload_thread_locals.current_context.__index__()], name)
+#    return forward_getattr
 
-def empty_forwarding_module():
-    forwarding_module = types.ModuleType("")
-    for name in dir(forwarding_module):
-        delattr(forwarding_module, name)
-    forwarding_module._parla_forwarding_module = True
-    forwarding_module._parla_base_modules = dict()
-    # Overriding __getattribute__ at a module level
-    # doesn't actually work right now.
-    #forwarding_module.__getattribute__ = forward_getattribute
-    forwarding_module.__dir__ = get_forward_dir(forwarding_module)
-    # If overriding __getattribute__ ever starts working, this may not be needed.
-    forwarding_module.__getattr__ = get_forward_getattr(forwarding_module)
-    return forwarding_module
+#def empty_forwarding_module():
+#    forwarding_module = types.ModuleType("")
+#    for name in dir(forwarding_module):
+#        delattr(forwarding_module, name)
+#    forwarding_module._parla_forwarding_module = True
+#    3forwarding_module._parla_base_modules = dict()
+#    # Overriding __getattribute__ at a module level
+#    # doesn't actually work right now.
+#    #forwarding_module.__getattribute__ = forward_getattribute
+#    forwarding_module.__dir__ = get_forward_dir(forwarding_module)
+#    # If overriding __getattribute__ ever starts working, this may not be needed.
+#    forwarding_module.__getattr__ = get_forward_getattr(forwarding_module)
+#    return forwarding_module
 
-def is_forwarding(module):
-    return getattr(module, "_parla_forwarding_module", False)
+#def is_forwarding(module):
+#    return getattr(module, "_parla_forwarding_module", False)
 
 # Technique to check if something is in the standard library.
 # Based loosely off of https://stackoverflow.com/a/22196023.
@@ -344,15 +347,19 @@ def get_full_name(name, globals=None, locals=None, fromlist=tuple(), level=0):
 
 def register_module(forwarding_module, module):
     context = multiload_thread_locals.current_context.__index__()
-    assert context not in forwarding_module._parla_base_modules
-    forwarding_module._parla_base_modules[context] = module
+    base_modules = get_base_modules(forwarding_module)
+    assert context not in base_modules
+    base_modules[context] = module
 
 def get_module_for_current_context(module):
-    assert is_forwarding(module)
-    return module._parla_base_modules.get(multiload_thread_locals.current_context.__index__())
+    base_modules = get_base_modules(module)
+    assert base_modules is not None
+    return base_modules.get(multiload_thread_locals.current_context.__index__())
+
 def check_module_for_current_context(module):
-    assert is_forwarding(module)
-    return multiload_thread_locals.current_context.__index__() in module._parla_base_modules
+    base_modules = get_base_modules(module)
+    assert base_modules is not None
+    return multiload_thread_locals.current_context.__index__() in base_modules
 
 class ModuleImport:
     def __init__(self, name):
