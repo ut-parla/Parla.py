@@ -4,7 +4,6 @@ from parla.multiload import multiload_contexts as VECs
 
 import sys
 import argparse
-#import mkl # Do this later in the VEC
 #import numpy as np # Do this later so we can set the threadpool size
 import concurrent.futures
 import queue
@@ -85,14 +84,14 @@ def VEC_matmul(A, B):
     return M
 
 def tsqr_blocked(A):
+    if NCOLS > BLOCK_SIZE:
+        print('Block size must be greater than or equal to the number of columns in the input matrix', file=sys.stderr)
+        exit(1)
+
+    with main_VEC:
+        A_blocked, nblocks = make_blocked(A, BLOCK_SIZE)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=NGROUPS) as executor:
-        if NCOLS > BLOCK_SIZE:
-            print('Block size must be greater than or equal to the number of columns in the input matrix', file=sys.stderr)
-            exit(1)
-
-        with main_VEC:
-            A_blocked, nblocks = make_blocked(A, BLOCK_SIZE)
-
         # Parallel step 1
         #print('ENTERING FIRST PARALLEL SECTION')
         # Each thread gets a block from A_blocked to run numpy's build-in qr factorization on
@@ -178,10 +177,8 @@ if __name__ == "__main__":
     VEC_q = queue.Queue()
     for i in range(NGROUPS):
         # Limit thread count here
-        #VECs[i].setenv('OMP_NUM_THREADS', str(NTHREADS))
+        VECs[i].setenv('OMP_NUM_THREADS', str(NTHREADS))
         with VECs[i]:
-            #import mkl
-            #mkl.set_num_threads(int(NTHREADS))
             import numpy as np
 
         # Populate VEC queue
