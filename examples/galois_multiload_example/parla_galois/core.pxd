@@ -14,3 +14,4 @@ cdef extern from "bfs_cpp.cpp" nogil:
     unsigned int read_distance(Graph* pGraph, int node, int slot)
     void init_galois()
 
+    void delete_galois()

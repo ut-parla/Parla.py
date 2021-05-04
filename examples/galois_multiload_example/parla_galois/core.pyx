@@ -18,6 +18,9 @@ def py_load_file(str fn):
 def py_init_galois():
     init_galois()
 
+def py_delete_galois():
+    delete_galois()
+
 def set_active_threads(int i):
     return setActiveThreads(i)
 

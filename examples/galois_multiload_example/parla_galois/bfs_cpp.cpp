@@ -290,10 +290,13 @@ void runAlgo(Graph& graph, const GNode& source, Algo algo, int slot) {
   }
 }
 
-
 void init_galois() {
     MARK();
     G = new galois::SharedMemSys();
+}
+
+void delete_galois() {
+  delete G;
 }
 
 Graph* load_file(const std::string& filename) {
@@ -307,7 +310,7 @@ Graph* load_file(const std::string& filename) {
 }
 
 void bfs(Graph* pGraph, int iSource, int slot) {
-  bool execution = true;
+  bool parallel_exec = true;
   Graph& graph = *pGraph;
 
   if (iSource >= graph.size()) {
@@ -327,13 +330,13 @@ void bfs(Graph* pGraph, int iSource, int slot) {
   //Algo algo = SyncTile;
 
   std::cout << "Running " << ALGO_NAMES[algo] << " algorithm with "
-            << (bool(execution) ? "PARALLEL" : "SERIAL") << " execution "
+            << (bool(parallel_exec) ? "PARALLEL" : "SERIAL") << " execution "
             << " on slot " << slot
             << std::endl;
 
-  if (execution == SERIAL) {
+  if (parallel_exec == SERIAL) {
     runAlgo<false>(graph, source, algo, slot);
-  } else if (execution == PARALLEL) {
+  } else if (parallel_exec == PARALLEL) {
     runAlgo<true>(graph, source, algo, slot);
   } else {
     std::cerr << "ERROR: unknown type of execution passed to -exec"

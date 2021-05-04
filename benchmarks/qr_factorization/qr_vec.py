@@ -173,6 +173,7 @@ if __name__ == "__main__":
     for i in range(MAX_WORKERS):
         # Limit thread count here
         VECs[i].setenv('OMP_NUM_THREADS', str(THREADS_PER_WORKER))
+        VECs[i].setenv('VECID', str(i))
         with VECs[i]:
             import numpy as np
 

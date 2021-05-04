@@ -6,7 +6,7 @@
 """
 
 from distutils.sysconfig import get_config_var
-import os
+import os, shutil
 import sys
 import gc
 import threading
@@ -27,7 +27,7 @@ __all__ = ["multiload", "MultiloadContext", "MultiloadComponent", "CPUAffinity",
 
 NUMBER_OF_REPLICAS = 12
 MAX_REPLICA_ID = 16
-
+FAKE_CPUINFO_DIR = "/tmp/parla/fakecpuinfos"
 
 # Supervisor wrappers
 
@@ -83,8 +83,10 @@ assert module_spec_cache is not None
 # to update the main module_spec_cache.
 module_spec_caches_for_contexts = dict()
 
-# Context representation
+#fake cpuinfos
+fake_cpuinfos = dict()
 
+# Context representation
 class MultiloadContext():
     nsid: int
 
@@ -111,6 +113,10 @@ class MultiloadContext():
                 self.load_stub_library(libpython_name)
                 sys.setdlopenflags(self.saved_rtld)
 
+        #make sure the cpuinfo dir exists
+        if nsid is not None and nsid == 0:
+            self.init_fake_cpuinfos()
+
     def dispose(self):
         # TODO: Implement unloading of contexts
         raise NotImplementedError()
@@ -135,12 +141,44 @@ class MultiloadContext():
     def unsetenv(self, name: str):
         context_unsetenv(self.nsid, name.encode("ascii"))
 
+    def init_fake_cpuinfos(self):
+        global fake_cpuinfos
+        #init everything only once
+        if not fake_cpuinfos:
+            #create dirs in tmp
+            shutil.rmtree(FAKE_CPUINFO_DIR)
+            os.makedirs(FAKE_CPUINFO_DIR)
+            f = open("/proc/cpuinfo")
+            cpuinfo = f.read()
+            f.close()
+            #last one is empty for some reason, cut it off
+            fake_cpuinfos = cpuinfo.split("\n\n")[:-1]
+            print(f"Read cpuinfo, found {len(fake_cpuinfos)} cores")
+
+    def create_cpuinfo_file(self):
+        """ Create fake cpuinfo file. assumes self.allowed_cpus exists."""
+        #set VECID so that open shim can see and open correct file
+        self.setenv("VECID", str(self.nsid))
+        
+        fname = f"cpuinfo_{self.nsid}"
+        fpath = os.path.join(FAKE_CPUINFO_DIR, fname)
+        with open(fpath, "w") as f:
+            for core in self.allowed_cpus:
+                #bound check
+                if core > len(fake_cpuinfos):
+                    print(f"Trying to enable core {core} but there are only {len(fake_cpuinfos)}. Ignoring.. (fix your stuff)")
+                    continue
+                f.write(fake_cpuinfos[core])
+                f.write("\n\n")
+        print(f"Wrote file with {len(self.allowed_cpus)} cores for VEC #{self.nsid} at {fpath}")
+
     def set_allowed_cpus(self, cpus: Collection[int]):
         cpu_array = (ctypes.c_int * len(cpus))()
         for i, cpu in enumerate(cpus):
             cpu_array[i] = cpu
         context_affinity_override_set_allowed_cpus_py(self.nsid, len(cpus), cpu_array)
         self.allowed_cpus = set(cpus)
+        self.create_cpuinfo_file()
 
     def load_stub_library(self, library_name):
         """Load the stub library for `library_name`.
