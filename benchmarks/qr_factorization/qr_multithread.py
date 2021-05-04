@@ -3,10 +3,13 @@
 import sys
 import argparse
 import mkl
-#import numpy as np # Do this later so we can set the threadpool size
+import numpy as np
+import scipy.linalg
 import concurrent.futures
 import queue
 from time import perf_counter as time
+
+TOTAL_THREADS = 24 # This is the default on my machine (Zemaitis)
 
 # Accepts a matrix and returns a list of its blocks
 # block_size rows are grouped together
@@ -30,6 +33,9 @@ def make_blocked(A, block_size):
 def unblock(A):
     return np.concatenate(A)
 
+def qr_worker(block):
+    return scipy.linalg.qr(block, mode='economic')
+
 def tsqr_blocked(A):
     if NCOLS > BLOCK_SIZE:
         print('Block size must be greater than or equal to the number of columns in the input matrix', file=sys.stderr)
@@ -41,16 +47,18 @@ def tsqr_blocked(A):
     with concurrent.futures.ThreadPoolExecutor(max_workers=NGROUPS) as executor:
         # Parallel step 1
         #print('ENTERING FIRST PARALLEL SECTION')
-        # Each thread gets a block from A_blocked to run numpy's build-in qr factorization on
-        block_results = executor.map(np.linalg.qr, A_blocked)
+        mkl.set_num_threads(int(NTHREADS))
+        # Each thread gets a block from A_blocked to run scipy's built-in QR factorization on
+        block_results = executor.map(qr_worker, A_blocked)
         for result in block_results:
             Q1.append(result[0])
             R1.append(result[1])
         #print('FINISHED FIRST PARALLEL SECTION')
+        mkl.set_num_threads(TOTAL_THREADS)
 
         # Sequential bottleneck
         R1 = unblock(R1)
-        Q2, R = np.linalg.qr(R1) # R here is the final R result
+        Q2, R = scipy.linalg.qr(R1, mode='economic') # R here is the final R result
 
         # Q1 and Q2 must have an equal number of blocks, where Q1 blocks' ncols = Q2 blocks' nrows
         # Q1: block_count = A.nrows / block_size. ncols = A.ncols.
@@ -59,10 +67,12 @@ def tsqr_blocked(A):
 
         # Parallel step 2
         #print('ENTERING SECOND PARALLEL SECTION')
+        mkl.set_num_threads(int(NTHREADS))
         # Each thread performs a matrix multiplication call
         Q = executor.map(np.matmul, Q1, Q2)
         Q = list(Q) # Convert from a generator to a list
         #print('FINISHED SECOND PARALLEL SECTION')
+        mkl.set_num_threads(TOTAL_THREADS)
 
     Q = unblock(Q)
     return Q, R
@@ -109,9 +119,6 @@ if __name__ == "__main__":
     print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' warmup=', WARMUP, \
         ' threads=', NTHREADS, ' ngroups=', NGROUPS, ' check_result=', CHECK_RESULT, ' csv=', CSV, sep='')
     
-    mkl.set_num_threads(int(NTHREADS))
-    import numpy as np
-
     for i in range(WARMUP + ITERS):
         # Original matrix
         np.random.seed(i)

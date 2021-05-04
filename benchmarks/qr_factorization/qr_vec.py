@@ -5,9 +5,12 @@ from parla.multiload import multiload_contexts as VECs
 import sys
 import argparse
 #import numpy as np # Do this later so we can set the threadpool size
+#import scipy.linalg # Do this later so we can set the threadpool size
 import concurrent.futures
 import queue
 from time import perf_counter as time
+
+TOTAL_THREADS = 24 # This is the default on my machine (Zemaitis)
 
 # Needed because VECs lose track of object type. No copy (I think?)
 def fixarr(A):
@@ -46,7 +49,7 @@ def VEC_qr(A):
     """
 
     with VECs[VEC_id]:
-        Q, R = np.linalg.qr(fixarr(A))
+        Q, R = scipy.linalg.qr(fixarr(A), mode='economic')
 
     """
     mystring = ['|' for x in range(NGROUPS)]
@@ -94,7 +97,7 @@ def tsqr_blocked(A):
     with concurrent.futures.ThreadPoolExecutor(max_workers=NGROUPS) as executor:
         # Parallel step 1
         #print('ENTERING FIRST PARALLEL SECTION')
-        # Each thread gets a block from A_blocked to run numpy's build-in qr factorization on
+        # Each thread gets a block from A_blocked to run numpy's built-in QR factorization on
         block_results = executor.map(VEC_qr, A_blocked)
 
         # Regroup results
@@ -110,7 +113,7 @@ def tsqr_blocked(A):
             R1 = unblock(R1)
 
             # R here is the final R result
-            Q2, R = np.linalg.qr(R1)
+            Q2, R = scipy.linalg.qr(R1, mode='economic')
 
             # Q1 and Q2 must have an equal number of blocks, where Q1 blocks' ncols = Q2 blocks' nrows
             # Q1: block_count = A.nrows / BLOCK_SIZE. ncols = A.ncols.
@@ -177,17 +180,19 @@ if __name__ == "__main__":
     VEC_q = queue.Queue()
     for i in range(NGROUPS):
         # Limit thread count here
-        VECs[i].setenv('OMP_NUM_THREADS', str(NTHREADS))
+        VECs[i].setenv('OMP_NUM_THREADS', NTHREADS)
         with VECs[i]:
             import numpy as np
+            import scipy.linalg
 
         # Populate VEC queue
         VEC_q.put(i)
     
-    # Reserve last context for single threaded stuff
-    # Unlimited threads, don't setenv
+    # Reserve last context for when we want to use all threads
+    VECs[NGROUPS].setenv('OMP_NUM_THREADS', str(TOTAL_THREADS))
     with VECs[NGROUPS]:
-        import numpy as np # TODO Make sure this gets all threads
+        import numpy as np
+        import scipy.linalg
     main_VEC = VECs[NGROUPS]
 
     for i in range(WARMUP + ITERS):
