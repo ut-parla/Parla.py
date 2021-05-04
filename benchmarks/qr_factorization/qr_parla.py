@@ -4,7 +4,7 @@ import sys
 import argparse
 import numpy as np
 import cupy as cp
-from time import time
+from time import perf_counter as time
 import os
 
 from parla import Parla

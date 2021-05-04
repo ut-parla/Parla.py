@@ -6,7 +6,7 @@ import mkl
 #import numpy as np # Do this later so we can set the threadpool size
 import concurrent.futures
 import queue
-import time
+from time import perf_counter as time
 
 # Accepts a matrix and returns a list of its blocks
 # block_size rows are grouped together
@@ -118,9 +118,9 @@ if __name__ == "__main__":
         A = np.random.rand(NROWS, NCOLS)
 
         # Multithreaded blocked version with VECs
-        start = time.time()
+        start = time()
         Q, R = tsqr_blocked(A)
-        end = time.time()
+        end = time()
 
         if (i >= WARMUP):
             print(end - start)
