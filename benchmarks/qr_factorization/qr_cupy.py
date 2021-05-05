@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import cupy as cp
-from time import time
+from time import perf_counter as time
 
 def check_result(A, Q, R):
     # Check product

@@ -2,23 +2,19 @@
 
 from parla.multiload import multiload_contexts as VECs
 
-import os
 import sys
-import getopt
+import argparse
+#import numpy as np # Do this later so we can set the threadpool size
+#import scipy.linalg # Do this later so we can set the threadpool size
 import concurrent.futures
-import time
 import queue
+from time import perf_counter as time
 
-# Default values, can override with command line args
-ROWS = 240000 # Must be >> COLS
-COLS = 1000
-BLOCK_SIZE = 3000 # Must be >= COLS
-MAX_WORKERS = 8 # Must be < 12 due to limited VECs
-THREADS_PER_WORKER = 4 # For OMP_NUM_THREADS
+TOTAL_THREADS = 24 # This is the default on my machine (Zemaitis)
 
-main_VEC = None
-locks = None
-VEC_q = queue.Queue()
+# Needed because VECs lose track of object type. No copy (I think?)
+def fixarr(A):
+    return np.asarray(memoryview(A))
 
 # Accepts a matrix and returns a list of its blocks
 # block_size rows are grouped together
@@ -47,16 +43,16 @@ def VEC_qr(A):
     VEC_id = VEC_q.get()
 
     """
-    mystring = ['|' for x in range(MAX_WORKERS)]
+    mystring = ['|' for x in range(NGROUPS)]
     mystring[VEC_id] = 'x'
     print(mystring)
     """
 
     with VECs[VEC_id]:
-        Q, R = np.linalg.qr(fixarr(A))
+        Q, R = scipy.linalg.qr(fixarr(A), mode='economic')
 
     """
-    mystring = ['|' for x in range(MAX_WORKERS)]
+    mystring = ['|' for x in range(NGROUPS)]
     mystring[VEC_id] = 'o'
     print(mystring)
     """
@@ -71,7 +67,7 @@ def VEC_matmul(A, B):
     VEC_id = VEC_q.get()
 
     """
-    mystring = ['|' for x in range(MAX_WORKERS)]
+    mystring = ['|' for x in range(NGROUPS)]
     mystring[VEC_id] = 'x'
     print(mystring)
     """
@@ -80,7 +76,7 @@ def VEC_matmul(A, B):
         M = np.matmul(fixarr(A), fixarr(B))
 
     """
-    mystring = ['|' for x in range(MAX_WORKERS)]
+    mystring = ['|' for x in range(NGROUPS)]
     mystring[VEC_id] = 'o'
     print(mystring)
     """
@@ -90,18 +86,18 @@ def VEC_matmul(A, B):
     VEC_q.put(VEC_id)
     return M
 
-def tsqr_blocked_multi(A, block_size, workers):
-    with concurrent.futures.ThreadPoolExecutor(max_workers = workers) as executor:
-        if COLS > BLOCK_SIZE:
-            print('Block size must be greater than or equal to the number of columns in the input matrix', file=sys.stderr)
-            exit(1)
+def tsqr_blocked(A):
+    if NCOLS > BLOCK_SIZE:
+        print('Block size must be greater than or equal to the number of columns in the input matrix', file=sys.stderr)
+        exit(1)
 
-        with main_VEC:
-            A_blocked, nblocks = make_blocked(A, block_size)
+    with main_VEC:
+        A_blocked, nblocks = make_blocked(A, BLOCK_SIZE)
 
+    with concurrent.futures.ThreadPoolExecutor(max_workers=NGROUPS) as executor:
         # Parallel step 1
         #print('ENTERING FIRST PARALLEL SECTION')
-        # Each thread gets a block from A_blocked to run numpy's build-in qr factorization on
+        # Each thread gets a block from A_blocked to run numpy's built-in QR factorization on
         block_results = executor.map(VEC_qr, A_blocked)
 
         # Regroup results
@@ -117,11 +113,11 @@ def tsqr_blocked_multi(A, block_size, workers):
             R1 = unblock(R1)
 
             # R here is the final R result
-            Q2, R = np.linalg.qr(R1)
+            Q2, R = scipy.linalg.qr(R1, mode='economic')
 
             # Q1 and Q2 must have an equal number of blocks, where Q1 blocks' ncols = Q2 blocks' nrows
-            # Q1: block_count = A.nrows / block_size. ncols = A.ncols.
-            # Q2: nrows = (A.nrows * A.ncols / block_size). Need block_count = A.nrows / block_size, nrows = A.ncols
+            # Q1: block_count = A.nrows / BLOCK_SIZE. ncols = A.ncols.
+            # Q2: nrows = (A.nrows * A.ncols / BLOCK_SIZE). Need block_count = A.nrows / BLOCK_SIZE, nrows = A.ncols
             Q2 = make_blocked(Q2, A.shape[1])[0]
 
         # Parallel step 2
@@ -135,66 +131,86 @@ def tsqr_blocked_multi(A, block_size, workers):
             return Q, R
 
 def check_result(A, Q, R):
-    # Check product
     A = fixarr(A)
     Q = fixarr(Q)
     R = fixarr(R)
+
+    # Check product
     is_correct_prod = np.allclose(np.matmul(Q, R), A)
     
     # Check orthonormal
     Q_check = np.matmul(Q.transpose(), Q)
-    is_ortho_Q = np.allclose(Q_check, np.identity(COLS))
+    is_ortho_Q = np.allclose(Q_check, np.identity(NCOLS))
     
     # Check upper
     is_upper_R = np.allclose(R, np.triu(R))
 
     return is_correct_prod and is_ortho_Q and is_upper_R
 
-def fixarr(A):
-    return np.asarray(memoryview(A))
-
 if __name__ == "__main__":
-    opts, args = getopt.getopt(sys.argv[1:], 'r:c:b:w:t:')
-    for opt, arg in opts:
-        if opt == '-r':
-            ROWS = int(arg)
-        elif opt == '-c':
-            COLS = int(arg)
-        elif opt == '-b':
-            BLOCK_SIZE = int(arg)
-        elif opt == '-w':
-            MAX_WORKERS = int(arg)
-        elif opt == '-t':
-            THREADS_PER_WORKER = int(arg)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-r", "--rows", help="Number of rows for input matrix; must be >> cols", type=int, default=5000)
+    parser.add_argument("-c", "--cols", help="Number of columns for input matrix", type=int, default=100)
+    parser.add_argument("-b", "--block_size", help="Block size to break up input matrix; must be >= cols", type=int, default=500)
+    parser.add_argument("-i", "--iterations", help="Number of iterations to run experiment", type=int, default=1)
+    parser.add_argument("-w", "--warmup", help="Number of warmup runs to perform before the experiment", type=int, default=0)
+    parser.add_argument("-t", "--threads", help="Number of threads per VEC", default='4')
+    parser.add_argument("-g", "--ngroups", help="Number of thread groups to use (max 11)", type=int, default='4')
+    parser.add_argument("-K", "--check_result", help="Checks final result on CPU", action="store_true")
+    parser.add_argument("--csv", help="Prints stats in csv format", action="store_true")
 
-    print('ROWS=', ROWS, ' COLS=', COLS, ' BLOCK_SIZE=', BLOCK_SIZE, ' MAX_WORKERS=', MAX_WORKERS, 'THREADS_PER_WORKER=', THREADS_PER_WORKER, sep='')
+    args = parser.parse_args()
+
+    # Set global config variables
+    NROWS = args.rows
+    NCOLS = args.cols
+    BLOCK_SIZE = args.block_size
+    ITERS = args.iterations
+    WARMUP = args.warmup
+    NTHREADS = args.threads
+    NGROUPS = args.ngroups
+    CHECK_RESULT = args.check_result
+    CSV = args.csv
+
+    print('%**********************************************************************************************%\n')
+    print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' warmup=', WARMUP, \
+        ' threads=', NTHREADS, ' ngroups=', NGROUPS, ' check_result=', CHECK_RESULT, ' csv=', CSV, sep='')
     
     # Set up VEC's
-    for i in range(MAX_WORKERS):
+    VEC_q = queue.Queue()
+    for i in range(NGROUPS):
         # Limit thread count here
-        VECs[i].setenv('OMP_NUM_THREADS', str(THREADS_PER_WORKER))
+        VECs[i].setenv('OMP_NUM_THREADS', NTHREADS)
         with VECs[i]:
             import numpy as np
+            import scipy.linalg
 
         # Populate VEC queue
         VEC_q.put(i)
     
-    # Reserve last context for single threaded stuff
-    # Unlimited threads, don't setenv
-    with VECs[MAX_WORKERS]:
+    # Reserve last context for when we want to use all threads
+    VECs[NGROUPS].setenv('OMP_NUM_THREADS', str(TOTAL_THREADS))
+    with VECs[NGROUPS]:
         import numpy as np
-    main_VEC = VECs[MAX_WORKERS]
+        import scipy.linalg
+    main_VEC = VECs[NGROUPS]
 
-    for i in range(6):
+    for i in range(WARMUP + ITERS):
         with main_VEC:
             # Original matrix
-            A = np.random.rand(ROWS, COLS)
+            np.random.seed(i)
+            A = np.random.rand(NROWS, NCOLS)
 
         # Multithreaded blocked version with VECs
-        start = time.time()
-        Q, R = tsqr_blocked_multi(A, BLOCK_SIZE, MAX_WORKERS)
-        end = time.time()
-        print(end - start)
+        start = time()
+        Q, R = tsqr_blocked(A)
+        end = time()
 
-        with main_VEC:
-            print(check_result(A, Q, R))
+        if (i >= WARMUP):
+            print(end - start)
+
+        if CHECK_RESULT:
+            with main_VEC:
+                print(check_result(A, Q, R))
+
+    print('\n%**********************************************************************************************%\n')
