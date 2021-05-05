@@ -18,7 +18,7 @@ from heapq import merge
 from contextlib import contextmanager
 from typing import Collection, Optional, Callable, List, Any
 from itertools import islice
-
+import re
 from .environments import EnvironmentComponentDescriptor, EnvironmentComponentInstance, TaskEnvironment
 
 #from forbiddenfruit import curse
@@ -154,21 +154,31 @@ class MultiloadContext():
             #last one is empty for some reason, cut it off
             fake_cpuinfos = cpuinfo.split("\n\n")[:-1]
             print(f"Read cpuinfo, found {len(fake_cpuinfos)} cores")
+            for i in range(len(fake_cpuinfos)):
+                fc = fake_cpuinfos[i]
+                for line in fc.splitlines():
+                    if line.startswith("processor"):
+                        break
+                nline = re.sub("\d+", "{procid}", line)
+                fc = fc.replace(line, nline)
+                fake_cpuinfos[i] = fc
 
     def create_cpuinfo_file(self):
         """ Create fake cpuinfo file. assumes self.allowed_cpus exists."""
         #set VECID so that open shim can see and open correct file
         self.setenv("VECID", str(self.nsid))
-        
+        lower_cpu = min(self.allowed_cpus)
+        self.setenv("VECID_CPU_OFFSET", str(lower_cpu))
+
         fname = f"cpuinfo_{self.nsid}"
         fpath = os.path.join(FAKE_CPUINFO_DIR, fname)
         with open(fpath, "w") as f:
-            for core in self.allowed_cpus:
+            for pid, core in enumerate(self.allowed_cpus):
                 #bound check
                 if core > len(fake_cpuinfos):
                     print(f"Trying to enable core {core} but there are only {len(fake_cpuinfos)}. Ignoring.. (fix your stuff)")
                     continue
-                f.write(fake_cpuinfos[core])
+                f.write(fake_cpuinfos[core].format(procid=pid))
                 f.write("\n\n")
         print(f"Wrote file with {len(self.allowed_cpus)} cores for VEC #{self.nsid} at {fpath}")
 

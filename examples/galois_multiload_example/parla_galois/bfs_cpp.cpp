@@ -326,8 +326,8 @@ void bfs(Graph* pGraph, int iSource, int slot) {
                  [&graph, &slot](GNode n) { graph.getData(n).distances[slot] = BFS::DIST_INFINITY; });
   graph.getData(source).distances[slot] = 0;
 
-  Algo algo = Sync;
-  //Algo algo = SyncTile;
+  //Algo algo = Sync;
+  Algo algo = SyncTile;
 
   std::cout << "Running " << ALGO_NAMES[algo] << " algorithm with "
             << (bool(parallel_exec) ? "PARALLEL" : "SERIAL") << " execution "

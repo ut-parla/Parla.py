@@ -89,31 +89,3 @@ PRELOAD_SHIM(pid_t, getpid, (void)) {
         DEBUG("Lying about PID: Real pid %d, returning %d", pid, p);
     return p;
 }
-
-/*
-PRELOAD_SHIM(int, open, (const char *pathname, int flags, mode_t mode)) {
-    init_open();
-    const char* vecid = getenv("VECID");
-    printf("open shim:: VEC (%s) opening file %s\n", 
-        (vecid!=NULL)? vecid : "NULL",
-        pathname);
-
-    //1. vecid must be in env
-    //2. file must exist
-    if (!strcmp("/proc/cpuinfo", pathname) && vecid) {
-        char fpath[100];
-        sprintf(fpath, "%s/%s%s", "/tmp/parla/fakecpuinfos", "cpuinfo_", vecid);
-        
-        // can't use O_RDONLY because it's defined in fcntl.h and including that
-        //messes up the shim since it apparently redefines open
-        int fid = next_open(fpath, 0, 0);
-        if (fid < 0)
-            printf("open shim: tried opening fake cpuinfo %s but failed. perhaps set_allowed_cpus wasn't called\n", fpath);
-        else {
-            printf("open shim: fake cpuinfo for VEC #%s locked and loaded\n", vecid);
-            return fid;
-        }
-    }
-    return next_open(pathname, flags, mode);
-}
-*/

@@ -74,6 +74,7 @@ PRELOAD_SHIM(int, open64, (const char *pathname, int flags)) {
 }
 */
 
+/*
 PRELOAD_SHIM(int, open, (const char *pathname, int flags, mode_t mode)) {
     init_open();
     const char* vecid = getenv("VECID");
@@ -99,3 +100,4 @@ PRELOAD_SHIM(int, open, (const char *pathname, int flags, mode_t mode)) {
     }
     return next_open(pathname, flags, mode);
 }
+*/
