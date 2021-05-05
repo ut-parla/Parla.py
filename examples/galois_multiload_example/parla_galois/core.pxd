@@ -12,6 +12,6 @@ cdef extern from "bfs_cpp.cpp" nogil:
     Graph* load_file(string& filename)
     void bfs(Graph* pGraph, int iSource, int slot)
     unsigned int read_distance(Graph* pGraph, int node, int slot)
-    void init_galois()
+    void init_galois(int nThreads)
 
     void delete_galois()

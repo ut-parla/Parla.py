@@ -28,28 +28,28 @@ with multiload():
 
 # Function each thread will run
 def bfs_sssp(i, barrier):
-    with multiload_contexts[i]:
-        from time import sleep
-        #import parla_galois.core
-        with Timer.get_handle("init-galois"):
-            parla_galois.core.py_init_galois()
-        with Timer.get_handle("load-graph"):
-            g = parla_galois.core.py_load_file(args.input)
-        # sync so everyone runs concurrently
-        idx = barrier.wait()
-        if idx == 0: barrier.reset()
-        
-        #source = i
-        #report = (i+1)*5
-        source = 0
-        report = 5
-        slot = i
-        
-        with Timer.get_handle("bfs"):
-            parla_galois.core.py_bfs(g, source, slot)
-            print(f"distance from {source} to {report} at slot {slot} is {parla_galois.core.py_distance(g, report, slot)}")
+    #with multiload_contexts[i]:
+    from time import sleep
+    import parla_galois.core
+    with Timer.get_handle("init-galois"):
+        parla_galois.core.py_init_galois(len(multiload_contexts[i].allowed_cpus))
+    with Timer.get_handle("load-graph"):
+        g = parla_galois.core.py_load_file(args.input)
+    # sync so everyone runs concurrently
+    idx = barrier.wait()
+    if idx == 0: barrier.reset()
+    
+    #source = i
+    #report = (i+1)*5
+    source = 0
+    report = 5
+    slot = i
+    
+    with Timer.get_handle("bfs"):
+        parla_galois.core.py_bfs(g, source, slot)
+        print(f"distance from {source} to {report} at slot {slot} is {parla_galois.core.py_distance(g, report, slot)}")
 
-        parla_galois.core.py_delete_galois()
+    parla_galois.core.py_delete_galois()
 
 #bfs_sssp(0)
 

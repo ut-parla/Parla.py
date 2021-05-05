@@ -22,9 +22,10 @@ def py_load_file(str fn):
     r = <unsigned long>load_file(bytes(fn, "utf-8"))
     return r
 
-def py_init_galois():
+def py_init_galois(int nThreads):
+    cdef int cnThreads = nThreads
     with nogil:
-        init_galois()
+        init_galois(cnThreads)
 
 def py_delete_galois():
     delete_galois()

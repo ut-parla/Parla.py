@@ -290,9 +290,10 @@ void runAlgo(Graph& graph, const GNode& source, Algo algo, int slot) {
   }
 }
 
-void init_galois() {
+void init_galois(int nThreads) {
     MARK();
     G = new galois::SharedMemSys();
+    galois::setActiveThreads(nThreads);
 }
 
 void delete_galois() {
