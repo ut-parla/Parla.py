@@ -468,27 +468,33 @@ def may_import_new_module(full_name, fromlist):
 # These locks manage that.
 module_import_locks = dict()
 
+@contextmanager
+def lock_module(base_name):
+    lock = module_import_locks.get(base_name)
+    if lock is None:
+        lock = threading.RLock()
+        module_import_locks[base_name] = lock
+    with lock:
+        yield
+
 def import_in_current(name, glob = None, loc = None, fromlist = tuple(), level = 0):
     full_name = get_full_name(name, glob, loc, fromlist, level)
     base_name = full_name.split(".", 1)[0]
-    if base_name not in module_import_locks:
-        module_import_locks[base_name] = threading.RLock()
-    with module_import_locks[base_name]:
-        if base_name in multiload_thread_locals.in_progress:
+    if base_name in multiload_thread_locals.in_progress:
+        builtin_import(name, glob, loc, fromlist, level)
+        return
+    if base_name in sys.modules:
+        current_base = sys.modules[base_name]
+        if is_exempt(base_name, current_base):
             builtin_import(name, glob, loc, fromlist, level)
             return
-        if base_name in sys.modules:
-            current_base = sys.modules[base_name]
-            if is_exempt(base_name, current_base):
-                builtin_import(name, glob, loc, fromlist, level)
-                return
-            if not is_forwarding(current_base) and not is_exempt(base_name, current_base):
-                raise ImportError("Attempting to import module {} within a given execution context that has already been imported globally".format(base_name))
-        if not may_import_new_module(full_name, fromlist):
-            builtin_import(name, glob, loc, fromlist, level)
-            return
-        with ModuleImport(base_name):
-            builtin_import(name, glob, loc, fromlist, level)
+        if not is_forwarding(current_base) and not is_exempt(base_name, current_base):
+            raise ImportError("Attempting to import module {} within a given execution context that has already been imported globally".format(base_name))
+    if not may_import_new_module(full_name, fromlist):
+        builtin_import(name, glob, loc, fromlist, level)
+        return
+    with ModuleImport(base_name):
+        builtin_import(name, glob, loc, fromlist, level)
 
 @contextmanager
 def outermost_multiload_here():
@@ -500,17 +506,20 @@ def outermost_multiload_here():
         multiload_thread_locals.multiloading = True
 
 def import_override(name, glob = None, loc = None, fromlist = tuple(), level = 0):
-    if multiload_thread_locals.multiloading:
-        with outermost_multiload_here():
-            for context in multiload_contexts:
-                with context:
-                    import_in_current(name, glob, loc, fromlist, level)
-    else:
-        import_in_current(name, glob, loc, fromlist, level)
     full_name = get_full_name(name, glob, loc, fromlist, level)
-    if fromlist:
-        return sys.modules[full_name]
-    return sys.modules[full_name.split(".", 1)[0]]
+    base_name = full_name.split(".", 1)[0]
+    with lock_module(base_name):
+        if multiload_thread_locals.multiloading:
+            with outermost_multiload_here():
+                for context in multiload_contexts:
+                    with context:
+                        import_in_current(name, glob, loc, fromlist, level)
+        else:
+            import_in_current(name, glob, loc, fromlist, level)
+        full_name = get_full_name(name, glob, loc, fromlist, level)
+        if fromlist:
+            return sys.modules[full_name]
+        return sys.modules[full_name.split(".", 1)[0]]
 
 builtins.__import__ = import_override
 
