@@ -1,9 +1,11 @@
 # https://arxiv.org/pdf/1301.1071.pdf "Direct TSQR"
 
+import os
+os.environ["OMP_NUM_THREADS"] = "24" # This is the default on my machine (Zemaitis)
 import sys
 import argparse
-import mkl
-#import numpy as np # Do this later so we can set the threadpool size
+import numpy as np
+import scipy.linalg
 from time import perf_counter as time
 
 # Accepts a matrix and returns a list of its blocks
@@ -38,14 +40,14 @@ def tsqr_blocked(A):
 
     for block in A_blocked:
         # Use numpy's built in qr for the base factorization
-        block_Q, block_R = np.linalg.qr(block)
+        block_Q, block_R = scipy.linalg.qr(block, mode='economic')
         Q1.append(block_Q)
         R1.append(block_R)
 
     R1 = unblock(R1)
 
     # R here is the final R result
-    Q2, R = np.linalg.qr(R1)
+    Q2, R = scipy.linalg.qr(R1, mode='economic')
 
     # Q1 and Q2 must have an equal number of blocks, where Q1 blocks' ncols = Q2 blocks' nrows
     # Q2 is currently an (ncols * nblocks) x ncols matrix. Need nblocks of ncols rows each
@@ -76,7 +78,6 @@ if __name__ == "__main__":
     parser.add_argument("-b", "--block_size", help="Block size to break up input matrix; must be >= cols", type=int, default=500)
     parser.add_argument("-i", "--iterations", help="Number of iterations to run experiment", type=int, default=1)
     parser.add_argument("-w", "--warmup", help="Number of warmup runs to perform before the experiment", type=int, default=0)
-    parser.add_argument("-t", "--threads", help="Number of threads per VEC", default='24')
     parser.add_argument("-K", "--check_result", help="Checks final result on CPU", action="store_true")
     parser.add_argument("--csv", help="Prints stats in csv format", action="store_true")
 
@@ -88,17 +89,13 @@ if __name__ == "__main__":
     BLOCK_SIZE = args.block_size
     ITERS = args.iterations
     WARMUP = args.warmup
-    NTHREADS = args.threads
     CHECK_RESULT = args.check_result
     CSV = args.csv
 
     print('%**********************************************************************************************%\n')
     print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' warmup=', WARMUP, \
-        ' threads=', NTHREADS, ' check_result=', CHECK_RESULT, ' csv=', CSV, sep='')
+        ' check_result=', CHECK_RESULT, ' csv=', CSV, sep='')
     
-    mkl.set_num_threads(int(NTHREADS))
-    import numpy as np
-
     for i in range(WARMUP + ITERS):
         # Original matrix
         np.random.seed(i)

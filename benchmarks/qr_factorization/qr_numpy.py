@@ -1,3 +1,5 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "24" # This is the default on my machine (Zemaitis)
 import argparse
 import numpy as np
 from time import perf_counter as time

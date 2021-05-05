@@ -1,5 +1,5 @@
-import mkl
-mkl.set_num_threads(6) # NTHREADS
+import os
+os.environ["OMP_NUM_THREADS"] = "6"
 
 import time 
 import numpy as np
@@ -20,7 +20,7 @@ for i in range(NGROUPS):
     a_part.append(np.array(a[i * block_size : (i + 1) * block_size]))
 
 def worker(block):
-    A = np.linalg.qr(block)
+    A = scipy.linalg.qr(block, mode='economic')
     return 
 
 thread_list = []
