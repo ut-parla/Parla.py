@@ -3,16 +3,17 @@ os.environ["OMP_NUM_THREADS"] = "24" # This is the default on my machine (Zemait
 import numpy as np
 from time import perf_counter as time
 
-NMATRICES = 500
-MATRIX_SIZES  = [256, 2048]
+NMATRICES = 8
+MATRIX_SIZES  = [512, 4096]
 
-mats = [[np.random.rand(s, s) for i in range(NMATRICES)] for s in MATRIX_SIZES]
+small_mats = [np.random.rand(MATRIX_SIZES[0], MATRIX_SIZES[0]) for i in range(NMATRICES)]
+large_mat = np.random.rand(MATRIX_SIZES[1], MATRIX_SIZES[1])
 
 print("Starting computation")
 start = time()
+large_mat = np.matmul(large_mat, large_mat)
 for i in range(NMATRICES):
-    mats[0][i] = np.matmul(mats[0][i], mats[0][i])
-    mats[1][i] = np.matmul(mats[1][i], mats[1][i])
+    small_mats[i] = np.matmul(small_mats[i], small_mats[i])
 total = time() - start
 
 print(total)
