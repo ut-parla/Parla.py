@@ -73,6 +73,8 @@ PRELOAD_SHIM(long, sysconf, (int name)) {
 
 PRELOAD_SHIM(int, get_nprocs, (void)) {
     init_get_nprocs();
+    printf("Returning min of get_nprocs and allowed cpus: %d  %d\n",
+        next_get_nprocs(), CPU_COUNT(&allowed_cpus));
     return MIN(next_get_nprocs(), CPU_COUNT(&allowed_cpus));
 }
 
