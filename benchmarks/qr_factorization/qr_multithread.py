@@ -1,10 +1,10 @@
 # https://arxiv.org/pdf/1301.1071.pdf "Direct TSQR"
 
+import os
 import sys
 import argparse
-import mkl
-import numpy as np
-import scipy.linalg
+#import numpy as np # Do this later so we can set the threadpool size
+#import scipy.linalg # Do this later so we can set the threadpool size
 import concurrent.futures
 import queue
 from time import perf_counter as time
@@ -47,14 +47,12 @@ def tsqr_blocked(A):
     with concurrent.futures.ThreadPoolExecutor(max_workers=NGROUPS) as executor:
         # Parallel step 1
         #print('ENTERING FIRST PARALLEL SECTION')
-        mkl.set_num_threads(int(NTHREADS))
         # Each thread gets a block from A_blocked to run scipy's built-in QR factorization on
         block_results = executor.map(qr_worker, A_blocked)
         for result in block_results:
             Q1.append(result[0])
             R1.append(result[1])
         #print('FINISHED FIRST PARALLEL SECTION')
-        mkl.set_num_threads(TOTAL_THREADS)
 
         # Sequential bottleneck
         R1 = unblock(R1)
@@ -67,12 +65,10 @@ def tsqr_blocked(A):
 
         # Parallel step 2
         #print('ENTERING SECOND PARALLEL SECTION')
-        mkl.set_num_threads(int(NTHREADS))
         # Each thread performs a matrix multiplication call
         Q = executor.map(np.matmul, Q1, Q2)
         Q = list(Q) # Convert from a generator to a list
         #print('FINISHED SECOND PARALLEL SECTION')
-        mkl.set_num_threads(TOTAL_THREADS)
 
     Q = unblock(Q)
     return Q, R
@@ -119,6 +115,10 @@ if __name__ == "__main__":
     print('Config: rows=', NROWS, ' cols=', NCOLS, ' block_size=', BLOCK_SIZE, ' iterations=', ITERS, ' warmup=', WARMUP, \
         ' threads=', NTHREADS, ' ngroups=', NGROUPS, ' check_result=', CHECK_RESULT, ' csv=', CSV, sep='')
     
+    os.environ["OMP_NUM_THREADS"] = NTHREADS
+    import numpy as np
+    import scipy.linalg
+
     for i in range(WARMUP + ITERS):
         # Original matrix
         np.random.seed(i)

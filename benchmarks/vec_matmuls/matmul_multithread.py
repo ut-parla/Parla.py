@@ -1,31 +1,34 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "24" # TODO: Play with this for best performance
 import numpy as np
 from time import perf_counter as time
-import mkl
-import concurrent.futures
+import threading
 
-MATRIX_COUNTS = [2**i for i in range(7, 12)]
-MATRIX_SIZES  = MATRIX_COUNTS[::-1]
-THREAD_COUNTS = [24, 12, 8, 6, 4]
+NMATRICES = 8
+MATRIX_SIZES  = [512, 4096]
 
-print(MATRIX_COUNTS)
-print(MATRIX_SIZES)
+small_mats = [np.random.rand(MATRIX_SIZES[0], MATRIX_SIZES[0]) for i in range(NMATRICES)]
+large_mats = []
+large_mats.append(np.random.rand(MATRIX_SIZES[1], MATRIX_SIZES[1]))
 
-mats = [[None for i in range(count)] for count in MATRIX_COUNTS]
+def small_worker(i):
+    small_mats[i] = np.matmul(small_mats[i], small_mats[i])
 
-for i, s in enumerate(MATRIX_SIZES):
-    for j in range(MATRIX_COUNTS[i]):
-        mats[i][j] = np.random.rand(s, s)
-
-def worker(mats, i, j):
-    mats[i][j] = np.matmul(mats[i][j], mats[i][j])
+def large_worker(large_mats):
+    large_mats[0] = np.matmul(large_mats[0], large_mats[0])
     
-start = time()
-for i, s in enumerate(MATRIX_SIZES):
-    mkl.set_num_threads(THREAD_COUNTS[i])
-    with concurrent.futures.ThreadPoolExecutor(max_workers=24 / THREAD_COUNTS[i]) as executor:
-        for j in range(MATRIX_COUNTS[i]):
-            executor.submit(worker, mats, i, j)
+small_threads = [None] * NMATRICES
 
+print("Starting computation")
+start = time()
+t_large = threading.Thread(target=large_worker, args=(large_mats,))
+t_large.start()
+for i in range(NMATRICES):
+    small_threads[i] = threading.Thread(target=small_worker, args=(i,))
+    small_threads[i].start()
+for i in range(NMATRICES):
+    small_threads[i].join()
+t_large.join()
 total = time() - start
 
 print(total)
