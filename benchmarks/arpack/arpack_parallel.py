@@ -9,7 +9,7 @@ from parla.multiload import multiload, multiload_contexts
 
 OMP_NUM_THREADS = sys.argv[2]
 nworkers = int(sys.argv[1])
-n = 10000
+n = 40000
 nruns = 11
 
 os.environ['OMP_NUM_THREADS'] = OMP_NUM_THREADS

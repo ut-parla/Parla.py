@@ -6,7 +6,7 @@ import sys
 import time
 
 OMP_NUM_THREADS = sys.argv[1]
-n = 10000
+n = 40000
 nruns = 11
 
 from mpi4py import MPI
