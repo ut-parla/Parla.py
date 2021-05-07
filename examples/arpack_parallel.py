@@ -14,16 +14,16 @@ nruns = 11
 
 os.environ['OMP_NUM_THREADS'] = OMP_NUM_THREADS
 
-print("starting setup", file = sys.stderr)
-print("starting setup")
+#print("starting setup", file = sys.stderr)
+#print("starting setup")
 for i in range(nworkers):
     with multiload_contexts[i] as VEC:
-        print("start setup for VEC {}".format(i), file = sys.stderr)
+        #print("start setup for VEC {}".format(i), file = sys.stderr)
         VEC.setenv("OMP_NUM_THREADS", OMP_NUM_THREADS)
         import numpy as np
         import scipy.sparse as sparse
         import scipy.sparse.linalg as sla
-        print("end setup for VEC {}".format(i), file = sys.stderr)
+        #print("end setup for VEC {}".format(i), file = sys.stderr)
 
 from test_data import discrete_laplacian
 
