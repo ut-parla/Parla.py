@@ -5,8 +5,7 @@ import os
 import sys
 import time
 
-OMP_NUM_THREADS = sys.argv[2]
-nworkers = int(sys.argv[1])
+OMP_NUM_THREADS = sys.argv[1]
 n = 10000
 nruns = 11
 
@@ -30,8 +29,6 @@ indptr = memoryview(base_array.indptr)
 np.random.seed(0)
 v0 = memoryview(np.random.rand(n))
 
-pool = ThreadPoolExecutor(max_workers = nworkers)
-#print("starting")
 rank = MPI.COMM_WORLD.Get_rank()
 for i in range(nruns):
     MPI.COMM_WORLD.Barrier()
