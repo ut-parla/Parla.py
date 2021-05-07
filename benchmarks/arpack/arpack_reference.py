@@ -5,7 +5,6 @@ import os
 import sys
 import time
 
-OMP_NUM_THREADS = sys.argv[2]
 nworkers = int(sys.argv[1])
 n = 40000
 nruns = 11
