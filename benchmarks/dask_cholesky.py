@@ -1,3 +1,5 @@
+import time
+
 import numpy
 import cupy
 import dask
@@ -18,6 +20,9 @@ if __name__ == '__main__':
     a = a @ a.T
     a = dask.array.from_array(a, chunks = (block_size, block_size))
     a = a.map_blocks(cupy.asarray)
+    a.compute()
+    start = time.perf_counter()
     cho = dask.array.linalg.cholesky(a)
     cho.compute()
-    print("done")
+    stop = time.perf_counter()
+    print(stop - start)
