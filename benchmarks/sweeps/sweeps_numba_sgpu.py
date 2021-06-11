@@ -177,9 +177,8 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id
             I[ix,iy,iz,dir_idx,k] = flux
         break
 
-def sweep_step_new(work_items, processed, redundant, I, sigma, new_sigma, directions, sigma_a, sigma_s):
+def sweep_step_new(work_items, tgroup_id, I, sigma, new_sigma, directions, sigma_a, sigma_s):
     # Sweep across the graph for the differencing scheme for the gradient.
-    tgroup_id = processed
     chunk_size = 1024
     num_blocks = (work_items.shape[0] + chunk_size - 1) // chunk_size
     compute_fluxes[num_blocks, chunk_size, 0, uint_t_nbytes](work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id)
@@ -227,21 +226,13 @@ def sweep():
     directions = cp.array(directions)
     # TODO: tune block sizes on a newer GPU.
     # TODO: estimate number of blocks based off of problem size.
-    blocks = 131072
-    threads_per_block = 256
-    processed = cp.zeros((1,), uint_t_npy)
-    redundant = cp.zeros((1,), uint_t_npy)
+    tgroup_id = cp.zeros((1,), uint_t_npy)
     start = perf_counter()
     for i in range(num_iters):
         sigma, new_sigma = new_sigma, sigma
         I[1:-1,1:-1,1:-1,:,-1] = np.nan
-        processed[0] = 0
-        redundant[0] = 0
-        previous = 0
-        processed_per_step = []
-        redundant_per_step = []
-        iteration_times = []
-        sweep_step_new(work_items, processed, redundant, I, sigma, new_sigma, directions, sigma_a, sigma_s)
+        tgroup_id[0] = 0
+        sweep_step_new(work_items, tgroup_id, I, sigma, new_sigma, directions, sigma_a, sigma_s)
     stop = perf_counter()
     print("I sum:", I.sum())
     print("new sigma sum:", new_sigma.sum())
