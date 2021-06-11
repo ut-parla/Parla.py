@@ -110,11 +110,12 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id
     if work_item_idx >= work_items.shape[0]:
         return
     idx = work_items[work_item_idx]
-    nx = uint_t(I.shape[0] - 2,) ##
-    ny = uint_t(I.shape[1] - 2,) ##
-    nz = uint_t(I.shape[2] - 2,) ##
-    num_dirs = I.shape[3] ##
-    num_groups = I.shape[4] ##
+    # TODO: The uint_t specs for nx, ny, and nz here drastically change the result. WHY?
+    nx = uint_t(sigma.shape[0])
+    ny = uint_t(sigma.shape[1])
+    nz = uint_t(sigma.shape[2])
+    num_dirs = sigma.shape[3]#uint_t(I.shape[3])
+    num_groups = I.shape[4]#uint_t(I.shape[4])
     sigma_x, sigma_y, sigma_z, dir_idx = unravel_4d_index(nx, ny, nz, directions.shape[0], idx)
     # Now change abstract indices in the iteration space into indices into I.
     # This is necessary since the beginning and end of each spatial axis
@@ -180,6 +181,7 @@ def sweep_step(work_items, tgroup_id, I, sigma, new_sigma, coefs, directions, si
     # Sweep across the graph for the differencing scheme for the gradient.
     chunk_size = 1024
     num_blocks = (work_items.shape[0] + chunk_size - 1) // chunk_size
+    print(I.shape, sigma.shape)
     compute_fluxes[num_blocks, chunk_size, 0, uint_t_nbytes](work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id)
     # Compute the scattering terms in the collision operator.
     compute_new_scattering(sigma_s, I, coefs, new_sigma)
