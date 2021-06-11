@@ -131,9 +131,9 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a_s, tgroup_id, num_d
     x_neighbor_idx = ix + uint_t(1) if x_has_sign else ix - uint_t(1)
     y_neighbor_idx = iy + uint_t(1) if y_has_sign else iy - uint_t(1)
     z_neighbor_idx = iz + uint_t(1) if z_has_sign else iz - uint_t(1)
-    x_coef = -nx if x_has_sign else nx
-    y_coef = -ny if y_has_sign else ny
-    z_coef = -nz if z_has_sign else nz
+    x_coef = -float_t(nx) if x_has_sign else float_t(nx)
+    y_coef = -float_t(ny) if y_has_sign else float_t(ny)
+    z_coef = -float_t(nz) if z_has_sign else float_t(nz)
     denominator = (sigma_a_s -
                    x_coef * dirx -
                    y_coef * diry -
@@ -142,8 +142,9 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a_s, tgroup_id, num_d
     # that uses coefficients specific to this direction. Frequencies may also be
     # considered, but some kind of lower-dimensional thing is usually used
     # to store the scattering terms. This sum just runs over the directions.
-    incoming_scattering = 0.
-    for j in range(sigma.shape[3]):
+    incoming_scattering = float_t(0.)
+    for j64 in range(uint_t(sigma.shape[3])):
+        j = uint_t(j64)
         incoming_scattering += sigma[sigma_x, sigma_y, sigma_z, j]
     incoming_scattering *= num_dirs_inv
     # For simplicity we're assuming all frequencies scatter the same, so
@@ -151,11 +152,7 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a_s, tgroup_id, num_d
     x_factor = x_coef * dirx
     y_factor = y_coef * diry
     z_factor = z_coef * dirz
-    div = 1. / denominator
-    denominator = (sigma_a_s -
-                   x_coef * dirx -
-                   y_coef * diry -
-                   z_coef * dirz)
+    div = float_t(1.) / denominator
     while True:
         cuda.threadfence()
         # Stop if the upstream neighbors aren't ready.
@@ -165,13 +162,14 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a_s, tgroup_id, num_d
             continue
         # For simplicity we're assuming all frequencies scatter the same, so
         # sum across frequencies now.
-        for k in range(I.shape[4]):
+        for k64 in range(uint_t(I.shape[4])):
+            k = uint_t(k64)
             numerator = (incoming_scattering -
                          x_factor * I[x_neighbor_idx,iy,iz,dir_idx,k] -
                          y_factor * I[ix,y_neighbor_idx,iz,dir_idx,k] -
                          z_factor * I[ix,iy,z_neighbor_idx,dir_idx,k])
             flux = numerator * div
-            if k == I.shape[4] - 1:
+            if k == I.shape[4] - uint_t(1):
                 cuda.threadfence()
             I[ix,iy,iz,dir_idx,k] = flux
         break
@@ -255,6 +253,6 @@ def sweep():
     #plt.show()
 
 #print(compute_fluxes.inspect_asm())
-print(compute_fluxes.inspect_types())
+#print(compute_fluxes.inspect_types())
 sweep()
 #cuda.profile_stop()
