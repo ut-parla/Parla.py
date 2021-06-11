@@ -175,6 +175,8 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id
         break
 
 def sweep_step(work_items, tgroup_id, I, sigma, new_sigma, coefs, directions, sigma_a, sigma_s):
+    I[1:-1,1:-1,1:-1,:,-1] = np.nan
+    tgroup_id[0] = 0
     # Sweep across the graph for the differencing scheme for the gradient.
     chunk_size = 1024
     num_blocks = (work_items.shape[0] + chunk_size - 1) // chunk_size
@@ -229,8 +231,6 @@ def sweep():
     start = perf_counter()
     for i in range(num_iters):
         sigma, new_sigma = new_sigma, sigma
-        I[1:-1,1:-1,1:-1,:,-1] = np.nan
-        tgroup_id[0] = 0
         sweep_step(work_items, tgroup_id, I, sigma, new_sigma, coefs, directions, sigma_a, sigma_s)
     stop = perf_counter()
     print("I sum:", I.sum())
@@ -253,5 +253,6 @@ def sweep():
     #plt.show()
 
 #print(compute_fluxes.inspect_asm())
+#print(compute_fluxes.inspect_types())
 sweep()
 #cuda.profile_stop()
