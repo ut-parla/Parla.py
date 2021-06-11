@@ -102,10 +102,10 @@ def compute_new_scattering(sigma_s, I, coefs, new_sigma):
 @cuda.jit(nb.void(uint_t[:], float_t[:,:,:,:,:], float_t[:,:,:,:], float_t[:,:], float_t, uint_t[:], float_t))
 def compute_fluxes(work_items, I, sigma, directions, sigma_a_s, tgroup_id, num_dirs_inv):
     block_base_index = cuda.shared.array((1,), uint_t)
-    if cuda.threadIdx.x == 0:
-        block_base_index[0] = cuda.atomic.add(tgroup_id, 0, 1) * cuda.blockDim.x
+    if not cuda.threadIdx.x:
+        block_base_index[0] = cuda.atomic.add(tgroup_id, 0, 1) * uint_t(cuda.blockDim.x)
     cuda.syncthreads()
-    work_item_idx = block_base_index[0] + cuda.threadIdx.x
+    work_item_idx = block_base_index[0] + uint_t(cuda.threadIdx.x)
     if work_item_idx >= work_items.shape[0]:
         return
     idx = work_items[work_item_idx]
@@ -113,24 +113,24 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a_s, tgroup_id, num_d
     nx = uint_t(sigma.shape[0])
     ny = uint_t(sigma.shape[1])
     nz = uint_t(sigma.shape[2])
-    num_dirs = sigma.shape[3]#uint_t(I.shape[3])
-    num_groups = I.shape[4]#uint_t(I.shape[4])
+    num_dirs = uint_t(sigma.shape[3])
+    num_groups = uint_t(I.shape[4])
     sigma_x, sigma_y, sigma_z, dir_idx = unravel_4d_index(nx, ny, nz, directions.shape[0], idx)
     # Now change abstract indices in the iteration space into indices into I.
     # This is necessary since the beginning and end of each spatial axis
     # is used for boundary conditions.
-    ix = uint_t(sigma_x + 1)
-    iy = uint_t(sigma_y + 1)
-    iz = uint_t(sigma_z + 1)
+    ix = sigma_x + uint_t(1)
+    iy = sigma_y + uint_t(1)
+    iz = sigma_z + uint_t(1)
     dirx = directions[dir_idx, 0]
     diry = directions[dir_idx, 1]
     dirz = directions[dir_idx, 2]
-    x_has_sign = dirx < 0.
-    y_has_sign = diry < 0.
-    z_has_sign = dirz < 0.
-    x_neighbor_idx = uint_t(ix + 1 if x_has_sign else ix - 1)
-    y_neighbor_idx = uint_t(iy + 1 if y_has_sign else iy - 1)
-    z_neighbor_idx = uint_t(iz + 1 if z_has_sign else iz - 1)
+    x_has_sign = dirx < float_t(0.)
+    y_has_sign = diry < float_t(0.)
+    z_has_sign = dirz < float_t(0.)
+    x_neighbor_idx = ix + uint_t(1) if x_has_sign else ix - uint_t(1)
+    y_neighbor_idx = iy + uint_t(1) if y_has_sign else iy - uint_t(1)
+    z_neighbor_idx = iz + uint_t(1) if z_has_sign else iz - uint_t(1)
     x_coef = -nx if x_has_sign else nx
     y_coef = -ny if y_has_sign else ny
     z_coef = -nz if z_has_sign else nz
@@ -255,6 +255,6 @@ def sweep():
     #plt.show()
 
 #print(compute_fluxes.inspect_asm())
-#print(compute_fluxes.inspect_types())
+print(compute_fluxes.inspect_types())
 sweep()
 #cuda.profile_stop()
