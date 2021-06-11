@@ -122,10 +122,12 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id
     ix = uint_t(sigma_x + 1)
     iy = uint_t(sigma_y + 1)
     iz = uint_t(sigma_z + 1)
-    # TODO: just pull the directions values into registers in advance.
-    x_has_sign = directions[dir_idx, 0] < 0.
-    y_has_sign = directions[dir_idx, 1] < 0.
-    z_has_sign = directions[dir_idx, 2] < 0.
+    dirx = directions[dir_idx, 0]
+    diry = directions[dir_idx, 1]
+    dirz = directions[dir_idx, 2]
+    x_has_sign = dirx < 0.
+    y_has_sign = diry < 0.
+    z_has_sign = dirz < 0.
     x_neighbor_idx = uint_t(ix + 1 if x_has_sign else ix - 1)
     y_neighbor_idx = uint_t(iy + 1 if y_has_sign else iy - 1)
     z_neighbor_idx = uint_t(iz + 1 if z_has_sign else iz - 1)
@@ -133,9 +135,9 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id
     y_coef = -ny if y_has_sign else ny
     z_coef = -nz if z_has_sign else nz
     denominator = (sigma_a + sigma_s -
-                   x_coef * directions[dir_idx, 0] -
-                   y_coef * directions[dir_idx, 1] -
-                   z_coef * directions[dir_idx, 2])
+                   x_coef * dirx -
+                   y_coef * diry -
+                   z_coef * dirz)
     # In full-blown versions of this code this sum is actually an inner product
     # that uses coefficients specific to this direction. Frequencies may also be
     # considered, but some kind of lower-dimensional thing is usually used
@@ -146,14 +148,14 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id
     incoming_scattering /= num_dirs
     # For simplicity we're assuming all frequencies scatter the same, so
     # sum across frequencies now.
-    x_factor = x_coef * directions[dir_idx, 0]
-    y_factor = y_coef * directions[dir_idx, 1]
-    z_factor = z_coef * directions[dir_idx, 2]
+    x_factor = x_coef * dirx
+    y_factor = y_coef * diry
+    z_factor = z_coef * dirz
     div = 1. / denominator
     denominator = (sigma_a + sigma_s -
-                   x_coef * directions[dir_idx, 0] -
-                   y_coef * directions[dir_idx, 1] -
-                   z_coef * directions[dir_idx, 2])
+                   x_coef * dirx -
+                   y_coef * diry -
+                   z_coef * dirz)
     while True:
         cuda.threadfence()
         # Stop if the upstream neighbors aren't ready.
