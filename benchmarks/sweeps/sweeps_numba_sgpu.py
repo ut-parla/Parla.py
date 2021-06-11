@@ -66,12 +66,9 @@ def generate_items(directions, nx, ny, nz, nd):
                     items_index += 1
     return items
 
-def compute_new_scattering(sigma_s, I, new_sigma):
+def compute_new_scattering(sigma_s, I, coefs, new_sigma):
     num_dirs = I.shape[3]
     num_groups = I.shape[4]
-    # TODO: move this outside of this function so it can be allocated outside the main loop
-    coefs = cp.empty((num_groups,), np.float32)
-    coefs[:] = sigma_s / num_groups
     # TODO: Switch this over to scattering only between directions (like tycho 2 does) instead of being only between frequencies.
     # TODO: Turn this into a cublas sgemmBatched call since cupy probably doesn't even call the right routine for this.
     assert I.strides[3] == 4
@@ -177,13 +174,13 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id
             I[ix,iy,iz,dir_idx,k] = flux
         break
 
-def sweep_step_new(work_items, tgroup_id, I, sigma, new_sigma, directions, sigma_a, sigma_s):
+def sweep_step_new(work_items, tgroup_id, I, sigma, new_sigma, coefs, directions, sigma_a, sigma_s):
     # Sweep across the graph for the differencing scheme for the gradient.
     chunk_size = 1024
     num_blocks = (work_items.shape[0] + chunk_size - 1) // chunk_size
     compute_fluxes[num_blocks, chunk_size, 0, uint_t_nbytes](work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id)
     # Compute the scattering terms in the collision operator.
-    compute_new_scattering(sigma_s, I, new_sigma)
+    compute_new_scattering(sigma_s, I, coefs, new_sigma)
 
 def partition_sphere(num_vert_dirs, num_horiz_dirs):
     horiz_centers = np.linspace(0, 2 * np.pi, num_horiz_dirs, endpoint=False) + np.pi / num_horiz_dirs
@@ -227,12 +224,14 @@ def sweep():
     # TODO: tune block sizes on a newer GPU.
     # TODO: estimate number of blocks based off of problem size.
     tgroup_id = cp.zeros((1,), uint_t_npy)
+    coefs = cp.empty((num_groups,), np.float32)
+    coefs[:] = sigma_s / num_groups
     start = perf_counter()
     for i in range(num_iters):
         sigma, new_sigma = new_sigma, sigma
         I[1:-1,1:-1,1:-1,:,-1] = np.nan
         tgroup_id[0] = 0
-        sweep_step_new(work_items, tgroup_id, I, sigma, new_sigma, directions, sigma_a, sigma_s)
+        sweep_step_new(work_items, tgroup_id, I, sigma, new_sigma, coefs, directions, sigma_a, sigma_s)
     stop = perf_counter()
     print("I sum:", I.sum())
     print("new sigma sum:", new_sigma.sum())
