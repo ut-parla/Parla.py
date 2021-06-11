@@ -199,7 +199,7 @@ def get_positive_x_direction(directions):
 # TODO: NVProf
 
 def sweep():
-    nx = ny = nz = uint_t(32)
+    nx = ny = nz = uint_t(64)
     num_vert_dirs = uint_t(10)
     num_horiz_dirs = uint_t(20)
     num_groups = uint_t(32)
