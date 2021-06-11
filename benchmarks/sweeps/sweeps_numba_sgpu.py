@@ -41,7 +41,7 @@ def unravel_4d_index(n0, n1, n2, n3, ix):
     assert 0 <= i3 < n3
     return i0, i1, i2, i3
 
-# Sequential preprocessing run on CPU.
+# Sequential preprocessing run on CPU to sort work items by DAG level.
 @nb.jit(uint_t[:](float_t[:,:], uint_t, uint_t, uint_t, uint_t), nopython = True)
 def generate_items(directions, nx, ny, nz, nd):
     items = np.empty((nx * ny * nz * nd), uint_t_npy)
@@ -70,7 +70,6 @@ def compute_new_scattering(sigma_s, I, coefs, new_sigma):
     num_dirs = I.shape[3]
     num_groups = I.shape[4]
     # TODO: Switch this over to scattering only between directions (like tycho 2 does) instead of being only between frequencies.
-    # TODO: Turn this into a cublas sgemmBatched call since cupy probably doesn't even call the right routine for this.
     assert I.strides[3] == 4
     assert new_sigma.strides[3] == 4
     cublas_handle = cp.cuda.device.get_cublas_handle()
@@ -88,7 +87,7 @@ def compute_new_scattering(sigma_s, I, coefs, new_sigma):
     strideB = 0
     beta_block = np.array(0., 'f')
     beta = beta_block.__array_interface__['data'][0]
-    ldc = num_dirs
+    ldc = num_dirs # doesn't matter since there's only one column here too.
     strideC = num_dirs
     batchCount = I.shape[2] - 2
     for i in range(1, I.shape[0] - 1):
@@ -181,7 +180,6 @@ def sweep_step(work_items, tgroup_id, I, sigma, new_sigma, coefs, directions, si
     # Sweep across the graph for the differencing scheme for the gradient.
     chunk_size = 1024
     num_blocks = (work_items.shape[0] + chunk_size - 1) // chunk_size
-    print(I.shape, sigma.shape)
     compute_fluxes[num_blocks, chunk_size, 0, uint_t_nbytes](work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id)
     # Compute the scattering terms in the collision operator.
     compute_new_scattering(sigma_s, I, coefs, new_sigma)
