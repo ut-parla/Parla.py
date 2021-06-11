@@ -99,8 +99,8 @@ def compute_new_scattering(sigma_s, I, coefs, new_sigma):
             cp.cuda.cublas.sgemmStridedBatched(cublas_handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount)
     #new_sigma[:] = I[1:-1,1:-1,1:-1] @ coefs
 
-@cuda.jit(nb.void(uint_t[:], float_t[:,:,:,:,:], float_t[:,:,:,:], float_t[:,:], float_t, float_t, uint_t[:]))
-def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id):
+@cuda.jit(nb.void(uint_t[:], float_t[:,:,:,:,:], float_t[:,:,:,:], float_t[:,:], float_t, uint_t[:], float_t))
+def compute_fluxes(work_items, I, sigma, directions, sigma_a_s, tgroup_id, num_dirs_inv):
     block_base_index = cuda.shared.array((1,), uint_t)
     if cuda.threadIdx.x == 0:
         block_base_index[0] = cuda.atomic.add(tgroup_id, 0, 1) * cuda.blockDim.x
@@ -134,7 +134,7 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id
     x_coef = -nx if x_has_sign else nx
     y_coef = -ny if y_has_sign else ny
     z_coef = -nz if z_has_sign else nz
-    denominator = (sigma_a + sigma_s -
+    denominator = (sigma_a_s -
                    x_coef * dirx -
                    y_coef * diry -
                    z_coef * dirz)
@@ -145,14 +145,14 @@ def compute_fluxes(work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id
     incoming_scattering = 0.
     for j in range(sigma.shape[3]):
         incoming_scattering += sigma[sigma_x, sigma_y, sigma_z, j]
-    incoming_scattering /= num_dirs
+    incoming_scattering *= num_dirs_inv
     # For simplicity we're assuming all frequencies scatter the same, so
     # sum across frequencies now.
     x_factor = x_coef * dirx
     y_factor = y_coef * diry
     z_factor = z_coef * dirz
     div = 1. / denominator
-    denominator = (sigma_a + sigma_s -
+    denominator = (sigma_a_s -
                    x_coef * dirx -
                    y_coef * diry -
                    z_coef * dirz)
@@ -182,7 +182,7 @@ def sweep_step(work_items, tgroup_id, I, sigma, new_sigma, coefs, directions, si
     # Sweep across the graph for the differencing scheme for the gradient.
     chunk_size = 1024
     num_blocks = (work_items.shape[0] + chunk_size - 1) // chunk_size
-    compute_fluxes[num_blocks, chunk_size, 0, uint_t_nbytes](work_items, I, sigma, directions, sigma_a, sigma_s, tgroup_id)
+    compute_fluxes[num_blocks, chunk_size, 0, uint_t_nbytes](work_items, I, sigma, directions, sigma_a + sigma_s, tgroup_id, 1. / I.shape[1])
     # Compute the scattering terms in the collision operator.
     compute_new_scattering(sigma_s, I, coefs, new_sigma)
 
