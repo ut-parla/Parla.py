@@ -66,77 +66,6 @@ def generate_items(directions, nx, ny, nz, nd):
                     items_index += 1
     return items
 
-@cuda.jit(nb.void(uint_t[:], uint_t[:], uint_t[:], float_t[:,:,:,:,:], float_t[:,:,:,:], float_t[:,:,:,:], float_t[:,:], float_t, float_t))
-def sweep_step(work_items, processed, redundant, I, sigma, new_sigma, directions, sigma_a, sigma_s):
-    nx = uint_t(I.shape[0] - 2,)
-    ny = uint_t(I.shape[1] - 2,)
-    nz = uint_t(I.shape[2] - 2,)
-    num_dirs = I.shape[3]
-    num_groups = I.shape[4]
-    global_thread_id = cuda.grid(1)
-    stride = cuda.gridsize(1)
-    # TODO: Eliminate this loop and just run more thread blocks?
-    # TODO: put directions in shared memory.
-    for idx in work_items[global_thread_id::stride]:
-        sigma_x, sigma_y, sigma_z, dir_idx = unravel_4d_index(nx, ny, nz, directions.shape[0], idx)
-        # Now change abstract indices in the iteration space into indices into I.
-        # This is necessary since the beginning and end of each spatial axis
-        # is used for boundary conditions.
-        ix = uint_t(sigma_x + 1)
-        iy = uint_t(sigma_y + 1)
-        iz = uint_t(sigma_z + 1)
-        # Stop if this one has already been computed
-        if (not math.isnan(I[ix, iy, iz, dir_idx, -1])):
-            cuda.atomic.add(redundant, 0, 1)
-            continue
-        x_has_sign = directions[dir_idx, 0] < 0.
-        y_has_sign = directions[dir_idx, 1] < 0.
-        z_has_sign = directions[dir_idx, 2] < 0.
-        x_neighbor_idx = uint_t(ix + 1 if x_has_sign else ix - 1)
-        y_neighbor_idx = uint_t(iy + 1 if y_has_sign else iy - 1)
-        z_neighbor_idx = uint_t(iz + 1 if z_has_sign else iz - 1)
-        # Stop if the upstream neighbors aren't ready.
-        if (math.isnan(I[x_neighbor_idx, iy, iz, dir_idx, -1]) or
-            math.isnan(I[ix, y_neighbor_idx, iz, dir_idx, -1]) or
-            math.isnan(I[ix, iy, z_neighbor_idx, dir_idx, -1])):
-            cuda.atomic.add(redundant, 0, 1)
-            continue
-        # TODO: Intelligent reduction instead of just an atomic.
-        cuda.atomic.add(processed, 0, 1)
-        x_coef = -nx if x_has_sign else nx
-        y_coef = -ny if y_has_sign else ny
-        z_coef = -nz if z_has_sign else nz
-        denominator = (sigma_a + sigma_s -
-                       x_coef * directions[dir_idx, 0] -
-                       y_coef * directions[dir_idx, 1] -
-                       z_coef * directions[dir_idx, 2])
-        # In full-blown versions of this code this sum is actually an inner product
-        # that uses coefficients specific to this direction. Frequencies may also be
-        # considered, but some kind of lower-dimensional thing is usually used
-        # to store the scattering terms. This sum just runs over the directions.
-        incoming_scattering = 0.
-        for j in range(sigma.shape[3]):
-            incoming_scattering += sigma[sigma_x, sigma_y, sigma_z, j]
-        incoming_scattering /= num_dirs
-        # For simplicity we're assuming all frequencies scatter the same, so
-        # sum across frequencies now.
-        new_sigma_part = 0.
-        x_factor = x_coef * directions[dir_idx, 0]
-        y_factor = y_coef * directions[dir_idx, 1]
-        z_factor = z_coef * directions[dir_idx, 2]
-        div = 1. / denominator
-        for k in range(I.shape[4]):
-            numerator = (incoming_scattering -
-                         x_factor * I[x_neighbor_idx,iy,iz,dir_idx,k] -
-                         y_factor * I[ix,y_neighbor_idx,iz,dir_idx,k] -
-                         z_factor * I[ix,iy,z_neighbor_idx,dir_idx,k])
-            flux = numerator * div
-            if k == I.shape[4] - 1:
-                cuda.threadfence()
-            I[ix,iy,iz,dir_idx,k] = flux
-            new_sigma_part += flux
-        new_sigma[sigma_x, sigma_y, sigma_z, dir_idx] = new_sigma_part * sigma_s / num_groups
-
 def compute_new_scattering(sigma_s, I, new_sigma):
     num_dirs = I.shape[3]
     num_groups = I.shape[4]
@@ -312,26 +241,10 @@ def sweep():
         processed_per_step = []
         redundant_per_step = []
         iteration_times = []
-        if True:
-            sweep_step_new(work_items, processed, redundant, I, sigma, new_sigma, directions, sigma_a, sigma_s)
-        else:
-            while processed[0] < work_items.size:
-                inner_start = perf_counter()
-                sweep_step[blocks, threads_per_block](work_items, processed, redundant, I, sigma, new_sigma, directions, sigma_a, sigma_s)
-                processed_per_step.append(str(processed[0] - previous))
-                redundant_per_step.append(str(redundant[0]))
-                redundant[0] = 0
-                inner_stop = perf_counter()
-                iteration_times.append(str(inner_stop - inner_start))
-                previous = int(processed[0])
-            #mx = cp.absolute(sigma - new_sigma).max() / num_dirs
-            #print("processed: [{}]".format(", ".join(processed_per_step)))
-            #print("redundant: [{}]".format(", ".join(redundant_per_step)))
-            #print("iteration times: [{}]".format(", ".join(iteration_times)))
-            #print("step:", i, "max diff:", mx)
-        print("I sum:", I.sum())
-        print("new sigma sum:", new_sigma.sum())
+        sweep_step_new(work_items, processed, redundant, I, sigma, new_sigma, directions, sigma_a, sigma_s)
     stop = perf_counter()
+    print("I sum:", I.sum())
+    print("new sigma sum:", new_sigma.sum())
     print("total time:", stop - start)
     # Normalize so the results are roughly the same as the previous version.
     new_sigma /= num_dirs
