@@ -99,8 +99,8 @@ def compute_new_scattering(sigma_s, I, coefs, new_sigma):
             cp.cuda.cublas.sgemmStridedBatched(cublas_handle, transa, transb, m, n, k, alpha, A, lda, strideA, B, ldb, strideB, beta, C, ldc, strideC, batchCount)
     #new_sigma[:] = I[1:-1,1:-1,1:-1] @ coefs
 
-@cuda.jit(nb.void(uint_t[:], float_t[:,:,:,:,:], float_t[:,:,:,:], float_t[:,:], float_t, uint_t[:], float_t))
-def compute_fluxes(work_items, I, sigma, directions, sigma_a_s, tgroup_id, num_dirs_inv):
+@cuda.jit(nb.void(uint_t[:], float_t[:,:,:,:,:], float_t[:], float_t[:,:,:,:], float_t[:,:], float_t, uint_t[:], float_t))
+def compute_fluxes(work_items, I, I_flat, sigma, directions, sigma_a_s, tgroup_id, num_dirs_inv):
     block_base_index = cuda.shared.array((1,), uint_t)
     if not cuda.threadIdx.x:
         block_base_index[0] = cuda.atomic.add(tgroup_id, 0, 1) * uint_t(cuda.blockDim.x)
@@ -180,8 +180,12 @@ def sweep_step(work_items, tgroup_id, I, sigma, new_sigma, coefs, directions, si
     # Sweep across the graph for the differencing scheme for the gradient.
     chunk_size = 1024
     num_blocks = (work_items.shape[0] + chunk_size - 1) // chunk_size
+    assert I.strides[3] == 4
+    I_flat = np.swapaxes(I, 3, 4).ravel()
+    cp.cuda.get_current_stream().synchronize()
     start = perf_counter()
-    compute_fluxes[num_blocks, chunk_size, 0, uint_t_nbytes](work_items, I, sigma, directions, sigma_a + sigma_s, tgroup_id, 1. / I.shape[1])
+    compute_fluxes[num_blocks, chunk_size, 0, uint_t_nbytes](work_items, I, I_flat, sigma, directions, sigma_a + sigma_s, tgroup_id, 1. / I.shape[1])
+    cp.cuda.get_current_stream().synchronize()
     stop = perf_counter()
     print("sweep kernel time:", stop - start)
     # Compute the scattering terms in the collision operator.
