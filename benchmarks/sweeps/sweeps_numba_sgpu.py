@@ -35,10 +35,10 @@ def unravel_4d_index(n0, n1, n2, n3, ix):
     i1 = uint_t(d1 % n1)
     d0 = uint_t(d1 // n1)
     i0 = uint_t(d0 % n0)
-    assert 0 <= i0 < n0
-    assert 0 <= i1 < n1
-    assert 0 <= i2 < n2
-    assert 0 <= i3 < n3
+    #assert 0 <= i0 < n0
+    #assert 0 <= i1 < n1
+    #assert 0 <= i2 < n2
+    #assert 0 <= i3 < n3
     return i0, i1, i2, i3
 
 # Sequential preprocessing run on CPU to sort work items by DAG level.
@@ -180,7 +180,10 @@ def sweep_step(work_items, tgroup_id, I, sigma, new_sigma, coefs, directions, si
     # Sweep across the graph for the differencing scheme for the gradient.
     chunk_size = 1024
     num_blocks = (work_items.shape[0] + chunk_size - 1) // chunk_size
+    start = perf_counter()
     compute_fluxes[num_blocks, chunk_size, 0, uint_t_nbytes](work_items, I, sigma, directions, sigma_a + sigma_s, tgroup_id, 1. / I.shape[1])
+    stop = perf_counter()
+    print("sweep kernel time:", stop - start)
     # Compute the scattering terms in the collision operator.
     compute_new_scattering(sigma_s, I, coefs, new_sigma)
 
