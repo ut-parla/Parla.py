@@ -2,14 +2,57 @@
 
 Parla is a high-level programming system for running numerical simulations on heterogeneous architectures.
 The current prototype emphasizes orchestrating data movement and kernel calls across all the CPUs and GPUs available on a given machine.
-API documentation is available at [http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html](http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html).
+<!--API documentation is available at [http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html](http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html). --> 
+
 
 # Installation
 
-Parla is available as a Conda package. 
-A docker image with the Conda package already set up is also available. 
-Parla requires Python 3.7 and numpy. The examples also require scipy, numba, and cupy.
+Parla is currently distributed from this repository as a Python module. 
+In the future, Parla will be available as a Conda package; for now, it must manually be installed. 
+For new users unfamiliar with Python package management, we recommend using Miniconda to manage Parla and its dependencies. 
+To install Miniconda you can follow the detailed instructions available from [Miniconda's documentation](https://docs.conda.io/en/latest/miniconda.html). 
+Abbreviated instructions are included here. 
+If you are running Linux and have `wget` available, you can download and install Miniconda into the Miniconda subdirectory of your home directory by running 
 
+```
+wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+bash miniconda.sh
+rm miniconda.sh
+```
+
+Restart your shell for changes to take effect. 
+
+<!--Parla is available as a Conda package. --> 
+<!--A docker image with the Conda package already set up is also available. --> 
+Parla requires Python 3.7 and numpy. The examples also require scipy, numba, and cupy. 
+You may want to create a new Conda environment with the required Python version, like so 
+
+```
+conda create -n environment_name python=3.7
+```
+
+To activate your Conda environment and install the required dependencies, run 
+
+```
+conda activate environment_name
+conda install numpy scipy numba cupy
+```
+
+To install Parla itself, navigate to the top-level directory of this repository, and from it, run
+
+```
+pip install .
+```
+
+Alternatively, if you are a Parla developer modifying Parla itself and you would like to see your changes reflected as you work, install it instead with
+```
+pip install -e .
+```
+
+Now all the scripts in this repository are runnable as normal Python scripts. 
+To test your installation, try running **_TODO: Hello, World!_**
+
+<!--
 ## Installation with Conda
 
 To use the conda package, you must first install Miniconda.
@@ -63,6 +106,7 @@ docker run --gpus all --rm -it utparla/parla
 Depending on your Docker configuration, you may need to run this command as root using `sudo` or some other method.
 Since CUDA is required for all the demos, you must provide some GPUs for the docker container to use.
 For this to work using the command shown, you need to use Docker 19.03 or later.
+-->
 
 ## Virtual Execution Contexts (Experimental)
 
