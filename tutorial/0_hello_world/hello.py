@@ -1,6 +1,6 @@
 from parla import Parla
 from parla.cpu import cpu
-from parla.tasks import *
+from parla.tasks import spawn
 
 def main():
     @spawn()
