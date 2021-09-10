@@ -24,7 +24,9 @@ Restart your shell for changes to take effect.
 
 <!--Parla is available as a Conda package. --> 
 <!--A docker image with the Conda package already set up is also available. --> 
-Parla requires Python 3.7 and numpy. The examples also require scipy, numba, and cupy. 
+Parla requires Python 3.7, numpy, and cython. 
+It also depends on C package libunwind. 
+The examples require scipy, numba, and cupy. 
 You may want to create a new Conda environment with the required Python version, like so 
 
 ```
@@ -34,8 +36,9 @@ conda create -n environment_name python=3.7
 To activate your Conda environment and install the required dependencies, run 
 
 ```
-conda activate environment_name
-conda install numpy scipy numba cupy
+sudo apt-get install libunwind-dev # Installs libunwind on your system
+conda activate environment_name # Opens your Conda environment
+conda install numpy cython scipy numba cupy # Installs Python packages into your environment
 ```
 
 To install Parla itself, navigate to the top-level directory of this repository, and from it, run
@@ -48,6 +51,8 @@ Alternatively, if you are a Parla developer modifying Parla itself and you would
 ```
 pip install -e .
 ```
+
+If you'd like to clear out the extra files created by Parla on installation, use [`git clean`](https://git-scm.com/docs/git-clean).  
 
 Now all the scripts in this repository are runnable as normal Python scripts. 
 To test your installation, try running **_TODO: Hello, World!_**
