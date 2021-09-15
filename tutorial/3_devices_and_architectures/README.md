@@ -4,7 +4,7 @@ Parla provides features to exploit heterogeneous architectures. Each task is all
 specify architectures or devices where it will be run.
 
 This lesson introduces how to write heterogeneous tasks, and
-function variants specialized to the specific architecuters, through a simple Parla example:
+function variants specialized to architectures, through a simple Parla example:
 `devices_and_architectures.py`
 
 You can run this example by the below command:
@@ -17,7 +17,7 @@ This script spawns two tasks and places them to CPU and GPU, respectively, perfo
 element-wise add oprations, and prints results.
 In this case, the GPU task calls a function variant to GPU which exploits CuPy library.
 
-The below is outputs of the example.
+The below is outputs of this example.
 
 ```
 5 7 9
@@ -38,8 +38,10 @@ First, lines 1, 4, and 6:
 ```
 
 Line 1 imports CuPy which GPU variant function would call.
+
 Line 4 imports Parla GPU runtime.
-LIne 6 imports a specialized decorator to exploit variant functions to architectures.
+
+Line 6 imports a specialized decorator to exploit variant functions specialized to architectures.
 
 
 ```
@@ -50,11 +52,13 @@ LIne 6 imports a specialized decorator to exploit variant functions to architect
 29    def elemwise_add_task()
 ```
 
-Lines 27 to 29 spawn two tasks placed on architecutrs of CPU and GPU, respectively.
-`@spawn(placement = cpu)` place a task on CPU, and `@spawn(placement = gpu(0))`
-places a task on specifically GPU0 among GPUs. 
+Lines 27 to 29 spawn two tasks placed on CPU and GPU, respectively.
+
+`@spawn(placement = cpu)` places a task on CPU, and `@spawn(placement = gpu(0))`
+places a task on specifically GPU0 out of all GPUs. 
+
 Note that Parla supports multiple architectures/devices to place a single task.
-For simplicity, this example places tasks on the single architecture/device.
+For simplicity, this example places each task on a single architecture/device.
 
 The task, `elemwise_add_task()`, calls specialized functions doing element-wise addition 
 between vectors. Let's take a look how to specialize functions.
@@ -75,14 +79,15 @@ variant function is called.
 20    cupy_elemwise_add = cupy.ElementwiseKernel(...)
 ```
 
-Line 16 declares a function variant for GPU through the decorator of `@element_add.variant(gpu)`.
+In line 16, the decorator of `@element_wise.variant(gpu)` declares a GPU function variant.
 This function runs on GPU and utilizes CuPy for element-wise vector addition (Line 20).
 
 ```
 30  elemwise_add()
 ```
 
-Lines 30 calls `element_wise()`.
+Line 30 calls `element_wise()`.
+
 Specialized functions are hidden from users and Parla
 automatically calls an appropriate function based on an architecture/devices of the current
 task.
