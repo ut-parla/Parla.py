@@ -25,7 +25,7 @@ Task[ 3 ]
 Task[ 4 ]
 ```
 
-Let's break down and understand this program line by line.
+Let's break down and understand this script line by line.
 In this lesson, we will skip lines explained by previous lessons.
 
 First, line 3:
