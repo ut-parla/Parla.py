@@ -51,10 +51,10 @@ At this point, no task is placed in and no slicing happens on the `TaskSpace`.
 Next, we look at lines 7-10:
 
 ```
-7  for i in range(5):
-8    @spawn(task[i], [task[0:i-1]])
-9    def t():
-10     print("Task[",i,"]")
+ 7  for i in range(5):
+ 8    @spawn(task[i], [task[0:i-1]])
+ 9    def t():
+10      print("Task[",i,"]")
 ```
 
 Line 7 spawns five tasks with `@spawn` decorator and its two parameters.
