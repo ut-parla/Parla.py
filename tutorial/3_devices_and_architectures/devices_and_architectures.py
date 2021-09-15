@@ -25,7 +25,7 @@ def main():
   x_cpu = [1, 2, 3]
   y_cpu = [4, 5, 6]
 
-  arch_mode = [cpu, gpu]
+  arch_mode = [cpu, gpu(0)]
 
   for i in range(2):
     @spawn(placement = arch_mode[i])
