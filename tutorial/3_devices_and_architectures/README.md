@@ -89,7 +89,7 @@ This function runs on GPU and utilizes CuPy for element-wise vector addition (Li
 Line 30 calls `element_wise()`.
 
 Specialized functions are hidden from users and Parla
-automatically calls an appropriate function based on an architecture/devices of the current
+automatically calls an appropriate function based on an architecture/a device of the current
 task.
 
 Congratulations! You've run how to utilize heterogeneous architectures/tasks on Parla.
