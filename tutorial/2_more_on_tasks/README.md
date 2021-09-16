@@ -1,4 +1,4 @@
-#Tutorial 2: More on Tasks
+# Tutorial 2: More on Tasks
 
 This section of the tutorial is to give a bit more detail on the particulars of
 using tasks. Specifically: how to control the execution flow of your program,
