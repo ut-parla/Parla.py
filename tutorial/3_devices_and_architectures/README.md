@@ -39,13 +39,13 @@ First, lines 1, 4, and 6:
 
 Line 1 imports CuPy which GPU variant function would call.
 
-Line 4 imports Parla GPU runtime.
+Line 4 imports and configures the Parla GPU runtime.
 
 Line 6 imports a specialized decorator to exploit variant functions specialized to architectures.
 
 
 ```
-25  arch_modes = [cpu, gpu(0)]
+25  arch_modes = [cpu, gpu, gpu(0)]
 26
 27  for arch_mode in arch_modes:
 28    @spawn(placement = arch_mode)
@@ -54,13 +54,21 @@ Line 6 imports a specialized decorator to exploit variant functions specialized 
 
 Lines 27 to 29 spawn two tasks placed on CPU and GPU, respectively.
 
-`@spawn(placement = cpu)` places a task on CPU, and `@spawn(placement = gpu(0))`
-places a task on specifically GPU0 out of all GPUs. 
+`@spawn(placement = cpu)` places a task on CPU, `@spawn(placement = gpu)` places a task that can run on any GPU, and `@spawn(placement = gpu(0))` places a task on specifically GPU0 out of all GPUs.
+
+
+The placement command is quite flexible.
+Instead of specifying an architecture
+directly you can pass a data buffer that implements the ndarray interface (such
+as a Numpy or Cupy array) and the device will dispatch to match that location.
+You can even pass a task object and it will run where that previous dependency
+ran.
+If no placement constraints are given a dask will run on any device.
 
 Note that Parla supports multiple architectures/devices to place a single task.
 For simplicity, this example places each task on a single architecture/device.
 
-The task, `elemwise_add_task()`, calls specialized functions doing element-wise addition 
+The task, `elemwise_add_task()`, calls specialized functions doing element-wise addition
 between vectors. Let's take a look how to specialize functions.
 
 ```

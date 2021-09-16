@@ -11,7 +11,7 @@ python intro_to_tasks.py
 ```
 
 This script spawns five tasks, assigns task ids from task[0] to task[4],
-and each of them prints its task id. In this case, a task waits tasks
+and each of them prints its task ID. In this case, a task waits on tasks
 having small indices through Parla task dependency decorator.
 
 The below is outputs of the example.
@@ -35,9 +35,9 @@ First, line 3:
 ```
 
 Line 3 imports `@spawn` decorator and `TaskSpace` class.
-A `TaskSpace` provides abstract n-dimensional spaces in which tasks can be placed.
+A `TaskSpace` provides an abstract high dimensional indexing space in which tasks can be placed.
 A `TaskSpace` can be indexed using any hashable values and any number of indices.
-If a dimension is indexed with numbers then that dimension can be sliced.
+If a dimension is indexed with numbers then those dimensions can be sliced.
 
 Further lines show the actual usage of the `TaskSpace`.
 
@@ -52,19 +52,19 @@ Next, we look at lines 7-10:
 
 ```
  7  for i in range(5):
- 8    @spawn(task[i], [task[0:i-1]])
+ 8    @spawn(task[i], dependencies=[task[0:i-1]])
  9    def t():
 10      print("Task[",i,"]")
 ```
 
-Line 7 spawns five tasks with `@spawn` decorator and its two parameters.
+Line 7-8 spawns five tasks with `@spawn` decorator and its two parameters.
 In this case, the first parameter, `task[i]`, assigns an index `i` to each task.
 This loop finally slices the `TaskSpace` into 5 dimensional task spaces.
 
 The second parameter, `[task[0:i-1]]`, specifies dependencies among tasks.
-By passing the point in the index space of the `TaskSpace`, Parla can specify dependent tasks
-having higher priorities than the current task.
-This will produce a series of tasks where each depends on all previous tasks.
+This can be a list of any combination of tasks and collections of tasks.
+Here by slicing the current `TaskSpace` up to the current tasks, we produce a series of tasks where each depends on all previous tasks.
+<!--- Note that this is equivalent to just depending on the previous task --->
 Each task will be scheduled and be run after all the previous tasks are completed, and
 therefore, the output will print task ids in increasing order.
 

@@ -22,7 +22,7 @@ def elemwise_add_gpu():
 
 
 def main():
-  arch_modes = [cpu, gpu(0)]
+  arch_modes = [cpu, gpu, gpu(0)]
 
   for arch_mode in arch_modes:
     @spawn(placement = arch_mode)
