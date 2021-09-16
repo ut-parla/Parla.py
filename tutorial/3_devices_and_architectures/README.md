@@ -63,7 +63,7 @@ directly you can pass a data buffer that implements the ndarray interface (such
 as a Numpy or Cupy array) and the device will dispatch to match that location.
 You can even pass a task object and it will run where that previous dependency
 ran.
-If no placement constraints are given a dask will run on any device.
+If no placement constraints are given the task may run on any available device.
 
 Note that Parla supports multiple architectures/devices to place a single task.
 For simplicity, this example places each task on a single architecture/device.
