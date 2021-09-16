@@ -50,8 +50,10 @@ This allows us to write code like :
 
 ```
 for i in range(3):
-    @spawn(task[i], task[i-1])
+    dep = [task2[i-1]] if (i)>0 else []
+    @spawn(task[i], dep)
     def worker():
+        nonlocal
         i = i + 4
         print(i, flush=True)
 ```
