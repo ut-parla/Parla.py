@@ -78,7 +78,7 @@ Finally, this script exploits `await` syntax of Python to wait the last task.
 18    await print_tasks()
 ```
 
-Lines 16-18 spawns a simple entrance task as an `async` function.
+Lines 16-17 spawn a simple entrance task of an `async` function.
 Line 18 awaits completion of `print_tasks()`.
 
 ```
