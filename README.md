@@ -24,7 +24,7 @@ Restart your shell for changes to take effect.
 
 <!--Parla is available as a Conda package. --> 
 <!--A docker image with the Conda package already set up is also available. --> 
-Parla requires Python 3.7, numpy, and cython. 
+Parla requires Python 3.7, numpy, cython, and psutil. 
 It also depends on C package libunwind. 
 The examples require scipy, numba, and cupy. 
 You may want to create a new Conda environment with the required Python version, like so 
@@ -33,29 +33,47 @@ You may want to create a new Conda environment with the required Python version,
 conda create -n environment_name python=3.7
 ```
 
-To activate your Conda environment and install the required dependencies, run 
+If you have sudo privileges on your system, install libunwind-dev as follows:
 
 ```
 sudo apt-get install libunwind-dev # Installs libunwind on your system
+```
+
+If you do not have sudo privileges and libunwind-dev is not already installed, you will have to build it yourself. 
+The repository and build instructions are located [here](https://github.com/libunwind/libunwind).  
+
+To activate your Conda environment and install the other required dependencies, run 
+
+```
 conda activate environment_name # Opens your Conda environment
-conda install numpy cython scipy numba cupy # Installs Python packages into your environment
+conda install numpy cython psutil scipy numba cupy # Installs Python packages into your environment
 ```
 
-To install Parla itself, navigate to the top-level directory of this repository, and from it, run
+To install Parla itself, navigate to the top-level directory of this repository, and from it, run ONE of the following two commands:
 
 ```
-pip install .
+pip install .     # For Parla Users
+pip install -e .  # For Parla Developers who are modifying Parla and would like to see their changes reflected as they work
 ```
 
-Alternatively, if you are a Parla developer modifying Parla itself and you would like to see your changes reflected as you work, install it instead with
-```
-pip install -e .
-```
-
-If you'd like to clear out the extra files created by Parla on installation, use [`git clean`](https://git-scm.com/docs/git-clean).  
+The installation process creates extra files in the repository. 
+Virtual execution contexts (experimental - see below) require on some of these files to be present. 
+If you are not using virtual execution contexts and would like to clear out the extra files created by Parla on installation, use [`git clean`](https://git-scm.com/docs/git-clean).  
 
 Now all the scripts in this repository are runnable as normal Python scripts. 
-To test your installation, try running **_TODO: Hello, World!_**
+To test your installation, try running
+
+```
+python tutorial/0_hello_world/hello.py
+```
+
+This should print
+
+```
+Hello, World!
+```
+
+We recommend entering the tutorial directory and working through it as a starting point for learning Parla.  
 
 <!--
 ## Installation with Conda
