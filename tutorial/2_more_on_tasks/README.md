@@ -6,7 +6,7 @@ how tasks are different than normal python functions, and some general advice
 for running tasks.
 
 ## Control Flow
-Parla uses the asynchronous `async`/`await` syntax to control and block program
+Parla uses the Python asynchronous `async`/`await` syntax to control and block program
 flow. Parla task objects, task ids, task collections, and `TaskSpaces` are all
 awaitable.
 
