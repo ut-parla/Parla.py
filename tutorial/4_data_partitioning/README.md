@@ -1,4 +1,4 @@
-# Lesson 5: Data Partitioning
+# Lesson 4: Data Partitioning
 
 Parla provides partitioners to partition 1-D or 2-D arrays into "logical devices". These partitions can be moved around different (physical) devices *automatically* on demand by the Parla runtime.
 

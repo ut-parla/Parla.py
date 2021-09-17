@@ -19,11 +19,11 @@ Accompanying source code demonstrates that feature.
 1. Devices and Architectures  
    - Place tasks on specific devices and architectures.  
    - Create specialized function variants.  
-1. Task Constraints  
-   - Limit resource usage of tasks.  
 1. Data Movement  
    - Easily move data between devices.  
    - Automatically partition and move data.  
+1. Task Constraints  
+   - Limit resource usage of tasks.  
 
 ## Completion
 After completing the tutorial, check out Parla.py/examples to see Parla features used in real applications. 
