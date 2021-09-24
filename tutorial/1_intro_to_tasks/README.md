@@ -11,23 +11,22 @@ You can run this example by the below command:
 python intro_to_tasks.py
 ```
 
-This script spawns five tasks, assigns task ids from task[0] to task[4],
-and each of them prints its task ID. In this case, a task waits on tasks
-having small indices through Parla task dependency decorator.
-This script waits for completion of the last priority task.
+This script introduces two examples of the task dependency usecases.
+The first example simply spawns two tasks, assigns task ids of task[0] and
+task[1], respectively, and each of them prints its task ID. This script
+specifies that task[1] depends on task[1] through Parla task dependency
+decorator. Therefore, task[1] will not run until task[0] completes.
 
-The below is outputs of the example.
-
+The below is outputs of the first example.
 
 ```
-Task[ 0 ]
-Task[ 1 ]
-Task[ 2 ]
-Task[ 3 ]
-Task[ 4 ]
+Task dependnecy: T[0] -> T[1] [START]
+  Task[0]
+  Task[1]
+Task dependency: T[0] -> T[1] [DONE]
 ```
 
-Let's break down and understand this script line by line.
+Let's break down and understand the first example line by line.
 In this lesson, we will skip lines explained by previous lessons.
 
 First, line 3:
@@ -40,55 +39,112 @@ Line 3 imports `@spawn` decorator and `TaskSpace` class.
 A `TaskSpace` provides an abstract high dimensional indexing space in which tasks can be placed.
 A `TaskSpace` can be indexed using any hashable values and any number of indices.
 If a dimension is indexed with numbers then those dimensions can be sliced.
+A `TaskSpace` is not a true list. It cannot exploit Python list indexing features.
+For example, [-1] does not point the last element of the `TaskSpace`.
+
+Note that names of `TaskSpace` and tasks are only used to express dependencies.
+Therefore, the names could be omitted.
 
 Further lines show the actual usage of the `TaskSpace`.
 
 ```
-7  task = TaskSpace("Task")
+7  task = TaskSpace("SimpleTask")
 ```
 
-Line 7 declares a `TaskSpace` named 'Task'.
+Line 7 declares a `TaskSpace` named 'SimpleTask'.
 At this point, no task is placed in and no slicing happens on the `TaskSpace`.
 
-Next, we look at lines 8-11:
+Next, we look at lines 8-10:
 
 ```
- 8  for i in range(5):
- 9    @spawn(task[i], dependencies=[task[:i]])
-10    def t():
-11      print("Task[",i,"]")
+ 8  @spawn(task[0])
+ 9  def t0():
+10    print("\tTask[0]")
 ```
 
-Line 8-9 spawns five tasks with `@spawn` decorator and its two parameters.
-In this case, the first parameter, `task[i]`, assigns an index `i` to each task.
-This loop finally slices the `TaskSpace` into 5 dimensional task spaces.
+Line 8 spawns a single task through `@spawn` decorator and assigns an index 0 of
+the `TaskSpace` to that. This task is not dependent on any task, and therefore,
+it begins execution as soon as the task is spawned.
 
-The second parameter, `[task[:i]]`, specifies dependencies among tasks.
-This can be a list of any combination of tasks and collections of tasks.
+Third, we look at lines 12-15:
+
+```
+12  @spawn(task[1], [task[0]])
+13  def t1():
+14    print("\tTask[1]")
+15  return task[1]
+```
+
+Line 12 spawns a single task assigned an index 1 of the `TaskSpace`.
+The second parameter of the `@spawn` decorator specifies task dependencies.
+If dependencies are specified, the task will be scheduled and be run after all
+the previous tasks are completed.
+In this case, `t1()` is specified as a successor of `t0()`. `t1()` will execute
+after `t0()` is completed.
+
+`dependencies` parameter of the `@spawn` decorator can be a list of
+any combination of tasks and collections of tasks.
+
+Now, let's look at the function declared at line 18, `task_loop_dependency()`,
+which exploits task lists to specify task dependencies.
+
+```
+18  def task_loop_dependency():
+19    NUM_SPAWNED_TASKS = 5
+20    task = TaskSpace("LoopTask")
+21    for i in range(NUM_SPAWNED_TASKS):
+22      @spawn(task[i], [task[:i]])
+23      def t():
+24        print("\tTask[",i,"]")
+25    return task[NUM_SPAWNED_TASKS - 1]
+```
+
 Here by slicing the current `TaskSpace` up to the current tasks, we produce
-a series of tasks where each depends on all previous tasks.
-Each task will be scheduled and be run after all the previous tasks are completed, and
+a series of tasks, from task[0] to task[4]. At the same time, by listing all previous tasks to
+`dependencies` parameter, `[task[:i]]`, of the `@spawn` decorator at line 22, we limit each task
+to be scheduled and be run after all the previous tasks are completed. and
 therefore, the output will print task ids in increasing order.
 
-Finally, this script exploits `await` syntax of Python to wait the last task.
+Below shows outputs of the second example.
 
 ```
-16  @spawn(placement=cpu)
-17  async def start_tasks():
-18    await print_tasks()
+Task dependency: All previous tasks -> T[curr]: [START]
+        Task[ 0 ]
+        Task[ 1 ]
+        Task[ 2 ]
+        Task[ 3 ]
+        Task[ 4 ]
+Task dependency: All previous tasks -> T[curr]: [DONE]
 ```
-
-Lines 16-17 spawn a simple entrance task of an `async` function.
-Line 18 awaits completion of `print_tasks()`.
-
-```
-12  return task[4]
-```
-
-In this case, `print_tasks()` returns the last index of the `TaskSpace` in line 12. 
-Therefore, `start_tasks()` awaits the last task of `print_tasks()`.
 
 In Parla, all tasks, task spaces, and task sets are awaitable.
 This feature is useful when you want to block until the awaiting task have completed. 
+As the last lesson, let's see how Parla exploits `await` syntax of Python.
 
-Congratulations! You've learned `TaskSpace` and specification for task dependencies of Parla.
+```
+29  @spawn(placement=cpu)
+30  async def start_tasks():
+..
+32    await task_simple_dependency()
+..
+36    await task_loop_dependency()
+```
+
+Lines 29-30 spawn a simple entrance task as an `async` function.
+This task calls and awaits two functions used by the above lessons.
+Now, let's look what objects this function awaits.
+
+```
+15  return task[1]
+..
+25  return task[NUM_SPAWNED_TASKS - 1]
+```
+
+The first function, `task_simple_dependency()` returns task[1] at line 15.
+The second function, `task_loop_dependency()` returns task[NUM_SPAWNED_TASKS - 1] at line 25.
+Both of them are task spaces that are assigned to the last task of each example.
+Therefore, line 32 and 36 awaits the last tasks of each example, blocks further executions,
+and guarantees that all tasks are completed.
+
+Congratulations! You've learned `TaskSpace`, specification for task dependencies, and 
+awaitability of Parla.
