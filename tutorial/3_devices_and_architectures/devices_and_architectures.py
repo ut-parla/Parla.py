@@ -24,26 +24,23 @@ def elemwise_add_gpu():
 def main():
   @spawn(placement=cpu)
   async def start_tasks():
-    cpu_arch_task_space = TaskSpace("cpu_arch_task")
-    @spawn(cpu_arch_task_space, placement=cpu)
-    def cpu_arch_task():
+    @spawn(placement=cpu)
+    async def cpu_arch_task():
       print("Spawns a CPU architecture task")
       elemwise_add()
-    await cpu_arch_task_space
+    await cpu_arch_task
 
-    gpu_arch_task_space = TaskSpace("gpu_arch_task")
-    @spawn(gpu_arch_task_space, [cpu_arch_task_space], placement=gpu)
-    def gpu_arch_task():
+    @spawn(placement=gpu)
+    async def gpu_arch_task():
       print("Spawns a GPU architecture task")
       elemwise_add()
-    await gpu_arch_task_space
+    await gpu_arch_task
 
-    single_gpu_task_space = TaskSpace("single_gpu_task")
-    @spawn(single_gpu_task_space, [gpu_arch_task_space], placement=gpu(0))
-    def single_gpu_task():
+    @spawn(placement=gpu(0))
+    async def single_gpu_task():
       print("Spawns a single GPU task")
       elemwise_add()
-    await single_gpu_task_space
+    await single_gpu_task
 
     # TODO(lhc): print() does not follow expected orders.
 
