@@ -7,6 +7,7 @@ This lesson introduces how to write heterogeneous tasks, and
 function variants specialized to architectures, through a simple Parla example:
 `devices_and_architectures.py`
 
+This lesson needs GPUs, CUDA, and CuPy.
 You can run this example by the below command:
 
 ```
