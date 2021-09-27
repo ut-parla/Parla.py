@@ -17,6 +17,8 @@ python devices_and_architectures.py
 This script spawns two tasks and places them to CPU and GPU, respectively, performs
 element-wise add oprations, and prints results.
 In this case, the GPU task calls a function variant to GPU which exploits CuPy library.
+Please note that this script requires a bit of time at the beginning since CuPy exploits
+just-in-time compiler to convert Python functions to CUDA kernels.
 
 The below is outputs of this example.
 
