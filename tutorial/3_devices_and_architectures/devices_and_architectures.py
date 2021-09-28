@@ -1,4 +1,5 @@
 import cupy
+import numpy
 from parla import Parla
 from parla.cpu import cpu
 from parla.cuda import gpu
@@ -6,6 +7,8 @@ from parla.tasks import spawn, TaskSpace
 from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 
+
+# Performs element-wise vector addition on CPUs.
 @specialized
 def elemwise_add():
   x = [1, 2, 3, 4]
@@ -13,6 +16,9 @@ def elemwise_add():
   print(*[x[i]+y[i] for i in range(len(x))], sep=' ')
 
 
+# GPU variant function of elementwise_add() using variant decorator.
+# This function is converted to CUDA kernel through CuPy JIT, and
+# performs on GPUs.
 @elemwise_add.variant(gpu)
 def elemwise_add_gpu():
   x = cupy.array([1, 2, 3, 4])
@@ -22,6 +28,10 @@ def elemwise_add_gpu():
 
 
 def main():
+  # Lesson 3-1:
+  # Spawns a task on any single CPU
+  # by specifying CPU architecture to placement, and
+  # performs element-wise vector addition.
   @spawn(placement=cpu)
   async def start_tasks():
     @spawn(placement=cpu)
@@ -30,35 +40,55 @@ def main():
       elemwise_add()
     await cpu_arch_task
 
-    @spawn(placement=gpu)
-    async def gpu_arch_task():
-      print("Spawns a GPU architecture task")
-      elemwise_add()
-    await gpu_arch_task
+  # Lesson 3-2:
+  # Spawns a task on any single GPU
+  # by specifying GPU architecture to placement, and
+  # performs elemnt-wise vector addition.
+  @spawn(placement=gpu)
+  async def gpu_arch_task():
+    print("Spawns a GPU architecture task")
+    elemwise_add()
+  await gpu_arch_task
 
-    @spawn(placement=gpu(0))
-    async def single_gpu_task():
-      print("Spawns a single GPU task")
-      elemwise_add()
-    await single_gpu_task
+  # Lesson 3-3:
+  # Spawns a task on a specific GPU, GPU0,
+  # by specifying GPU0 device to placement, and
+  # performs element-wise vector addition.
+  @spawn(placement=gpu(0))
+  async def single_gpu_task():
+    print("Spawns a single GPU task")
+    elemwise_add()
+  await single_gpu_task
 
-    # TODO(lhc): print() does not follow expected orders.
-
-    """
-    multi_gpus_task_space = TaskSpace("multi_gpus_task")
-    NUM_GPUS=2
-    x = cupy.array([1, 2, 3, 4])
-    y = cupy.array([5, 6, 7, 8])
-    mapper = LDeviceSequenceBlocked(2, placement=gpu)
-    x_view = mapper.partition_tensor(x)
-    y_view = mapper.partition_tensor(y)
-
-    #for gpu_id in range(NUM_GPUS):
-    #  @spawn(multi_gpus_task_space[gpu_id], [single_gpu_task_space, multi_gpus_task_space[:gpu_id]], placement=gpu(gpu_id))
-    #  def two_gpus_task(gpu_id=gpu_id):
-    #    print("Spawns multiple GPUs task", gpu_id)
-    #  await multi_gpus_task_space[gpu_id]
-    """
+  # Lesson 3-4:
+  # Spawns four tasks on four GPU devices, respectively,
+  # by specfiying GPU0 to 3 to placement, partitions
+  # target operand and ouptut lists into four chunks by
+  # Parla data partitioning,
+  # assigns each of the chunks to each task, and
+  # performs element-wise vector addition.
+  NUM_GPUS=4
+  # Operands for element-wise vector addition.
+  x = cupy.array([1, 2, 3, 4])
+  y = cupy.array([5, 6, 7, 8])
+  z = numpy.array([0, 0, 0, 0])
+  # TODO(lhc): should `z`(write) be cpu? gpu didn't work
+  # Partitions each operands into four chunks. 
+  mapper = LDeviceSequenceBlocked(NUM_GPUS, placement=cpu)
+  x_view = mapper.partition_tensor(x)
+  y_view = mapper.partition_tensor(y)
+  z_view = mapper.partition_tensor(z) 
+  # Spawns each task on each GPU.
+  # Therefore, total four tasks are spawned and placed
+  # on GPU0 to GPU3.
+  for gpu_id in range(NUM_GPUS):
+    @spawn(placement=gpu(gpu_id))
+    async def two_gpus_task(gpu_id=gpu_id):
+      # Only performs addition of the assigned chunks.
+      print(f"GPU[{gpu_id}] calculates z[{gpu_id}]")
+      z_view[gpu_id] = x_view[gpu_id] + y_view[gpu_id]
+    await two_gpus_task
+  print(*z, sep=' ')
 
 if __name__ == "__main__":
   with Parla():
