@@ -7,7 +7,6 @@ from parla import Parla
 from parla.cpu import cpu
 from parla.tasks import spawn, TaskSpace
 import numpy as np
-import math
 import random
 
 
@@ -21,7 +20,7 @@ def kmeanspp(data, k):
         centroids = []
         distance = np.full((k, num_points), np.Inf)
 
-        print(f"Begins with dataset with {num_points} points, need to find {k} centroid")
+        print(f"Begins with dataset with {num_points} points, need to find {k} centroids")
 
         # the first centroid is chose randomly
         centroids.append(data[random.randint(0, num_points-1)])
@@ -38,11 +37,15 @@ def kmeanspp(data, k):
                 task_counter += 1
             await task
 
-            # find the next centroid, which is the The point which has the farthest distance from its nearest centroid
-            # for each point find its nearest centroid
+            # for each point find its distance to nearest centroid
             minimum_distance = np.amin(distance, axis=0)
-            farest_point_idx = np.argmax(minimum_distance)
-            centroids.append(data[farest_point_idx])
+
+            # normalized the distance to generate a distribution
+            normalized_distribution = [d/np.sum(minimum_distance) for d in minimum_distance]
+
+            # select next centroid follow the distribution
+            next_centroid_idx = np.random.choice(range(num_points), p=normalized_distribution)
+            centroids.append(data[next_centroid_idx])
 
             print(f"Select centroid {i + 1}: [{centroids[i + 1][0]}, {centroids[i + 1][1]}]")
 
