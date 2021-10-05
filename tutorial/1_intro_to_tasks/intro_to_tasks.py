@@ -35,6 +35,25 @@ def task_loop_dependency():
   return task[NUM_SPAWNED_TASKS - 1]
 
 
+# Spawns two simple tasks on differen task spaces
+# and specifies simple dependency between them.
+def different_taskspace_dependency():
+  first_task = TaskSpace("FirstTask")
+  @spawn(first_task)
+  def t0():
+    print("\tTask[0]")
+
+  # Spawns a task on the different task space
+  # from the first task which is dependent on
+  # the first task.
+  second_task = TaskSpace("SecondTask")
+  @spawn(second_task, [first_task])
+  def t1():
+    print("\tTask[1]")
+  # Return the last task.
+  return second_task
+
+
 def main():
   @spawn(placement=cpu)
   async def start_tasks():
@@ -46,8 +65,13 @@ def main():
     print("Task dependency: All previous tasks -> T[curr]: [START]")
     # Awaits the last task of the second example.
     await task_loop_dependency()
-    print("Task dependency: All previous tasks -> T[curr]: [DONE]")
- 
+    print("Task dependency: All previous tasks -> T[curr]: [DONE]\n")
+
+    print("Task dependency: T1[0] -> T2[1] [START]")
+    # Awaits the last task of the third example.
+    await different_taskspace_dependency()
+    print("Task dependency: T1[0] -> T2[1] [DONE]")
+
 
 if __name__ == "__main__":
   with Parla():

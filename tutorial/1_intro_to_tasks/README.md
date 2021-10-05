@@ -11,7 +11,7 @@ You can run this example by the below command:
 python intro_to_tasks.py
 ```
 
-This script introduces two examples of the task dependency usecases.
+This script introduces three examples of the task dependency usecases.
 The first example simply spawns two tasks, assigns task ids of `task[0]` and
 `task[1]`, respectively, and each of them prints its task ID. This script
 specifies that `task[1]` depends on `task[0]` through Parla task dependency
@@ -114,6 +114,41 @@ Task dependency: All previous tasks -> T[curr]: [START]
         Task[ 3 ]
         Task[ 4 ]
 Task dependency: All previous tasks -> T[curr]: [DONE]
+```
+
+The last example (lines from 40 to 54) shows that Parla can mix tasks for different
+`TaskSpace`. In addition, Parla could specify relationships between tasks placed on different `TaskSpace`.
+
+```
+40  def different_taskspace_dependency():
+41    first_task = TaskSpace("FirstTask")
+42    @spawn(first_task)
+43    def t0():
+44      print("\tTask[0]")
+```
+
+The first task places on "FirstTask" `TaskSpace` (lines 41 and 42).
+
+```
+49  second_task = TaskSpace("SecondTask")
+50  @spawn(second_task, [first_task])
+51  def t1():
+52    print("\tTask[1]")
+```
+
+The second task place on "SecondTask" `TaskSpace` (lines 49 and 50).
+This task is specified as it is dependent on the first task through the dependency paramter of `[first_task]`.
+Therefore, it will wait on the queue until the first task completes.
+
+Parla allows users to use task features regardless of `TaskSpace` where tasks are placed on.
+
+Below shows outputs of this example.
+
+```
+Task dependency: T1[0] -> T2[1] [START]
+        Task[0]
+        Task[1]
+Task dependency: T1[0] -> T2[1] [DONE]
 ```
 
 In Parla, all tasks, task spaces, and task sets are awaitable.
