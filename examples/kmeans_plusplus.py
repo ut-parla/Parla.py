@@ -4,21 +4,24 @@ A implementation of parallel k-means (init by k-means++) on CPU/GPU.
 
 from parla import Parla
 from parla.cpu import cpu
+from parla.cuda import gpu
 from parla.tasks import spawn, TaskSpace
 import numpy as np
+import cupy as cp
 import random
 
 
-async def kmeanspp(data, k) -> list:
+async def kmeanspp(data: np.ndarray, k: int, centroids: list):
     """
     Parallel k-means++ on CPU.
     This algorithm will choosing the initial values for the k-means clustering.
+
+    centroids: the return value, will be modified
     """
-    task = TaskSpace("Task")
+    task = TaskSpace("KmeansppTask")
     task_counter = 0
 
     num_points = len(data)
-    centroids = []
     distance = np.full((k, num_points), np.Inf)
 
     print(f"Begins with dataset with {num_points} points, need to find {k} centroids")
@@ -51,19 +54,60 @@ async def kmeanspp(data, k) -> list:
         print(f"Select centroid {i + 1}: [{centroids[i + 1][0]}, {centroids[i + 1][1]}]")
 
     print("K-means++ done.")
-    return centroids
 
 
-def main(data, k):
+def kmeans(data: cp.ndarray, k: int, centroids: cp.ndarray):
+    """
+    Clusters points into k clusters using k_means clustering.
+    """
+    print("Start K-means clustering.")
+    num_points = len(data)
+    last_assignment = cp.zeros(num_points)
+
+    loop = 1
+    while True:
+        print(f"Loop {loop}")
+        # assign each point to nearest cluster
+        distance = cp.zeros((k, num_points))
+        for centroid_idx in range(k):
+            distance[centroid_idx] = cp.linalg.norm(data - centroids[centroid_idx], axis=1)
+        assignment = cp.argmin(distance, axis=0)
+
+        for i in range(k):
+            condition = assignment == i
+            # build new clusters
+            cluster = data[condition]
+            # compute new centroids
+            if cluster.size != 0:
+                centroids[i] = cp.mean(cluster, axis=0)
+
+        # stop when no point change its cluster
+        if cp.array_equal(last_assignment, assignment):
+            print("K-means Done.")
+            return assignment
+
+        last_assignment = cp.copy(assignment)
+        loop += 1
+
+
+def main(data: np.ndarray, k: int):
     """
     Launch tasks.
     """
 
     centroids = []
 
-    @spawn(placement=cpu)
+    task = TaskSpace("Task")
+
+    @spawn(task[0], placement=cpu)
     async def start_kmeanspp():
-        centroids = await kmeanspp(data, k)
+        await kmeanspp(data, k, centroids)
+
+    @spawn(task[1], [task[0]], placement=gpu)
+    async def start_kmeans():
+        assignment = kmeans(cp.asarray(data), k, cp.asarray(centroids))
+        print(assignment)
+
 
 if __name__ == "__main__":
     k = 5  # number of clusters
