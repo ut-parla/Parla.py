@@ -1,4 +1,4 @@
-# Lesson 4: Data Partitioning
+# Lesson 4: Data Partitioning and Automatic Movement
 
 Parla provides partitioners to partition 1-D or 2-D arrays into "logical devices". These partitions can be moved around different (physical) devices *automatically* on demand by the Parla runtime.
 
@@ -15,7 +15,7 @@ We are going to do the following things:
 
 For step 1, we first create a Parla partitioner (aka mapper), `LDeviceSequenceBlocked`. (For 2-D partitioning, Parla provides partitioners of two schemes, namely `LDeviceGridBlocked` and `LDeviceGridRaveled`.)
 ```
-mapper = LDeviceSequenceBlocked(2, placement=cpu)
+mapper = LDeviceSequenceBlocked(2, placement=[cpu[0], gpu[0]])
 partitioned_view = mapper.partition_tensor(data)
 ```
 We print out the details (value, type, and residence device) of the partitions.
