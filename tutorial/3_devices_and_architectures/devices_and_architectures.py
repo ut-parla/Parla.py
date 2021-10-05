@@ -5,7 +5,6 @@ from parla.cpu import cpu
 from parla.cuda import gpu
 from parla.tasks import spawn, TaskSpace
 from parla.function_decorators import specialized
-from parla.ldevice import LDeviceSequenceBlocked
 
 
 # Performs element-wise vector addition on CPUs.
@@ -69,15 +68,9 @@ def main():
   # performs element-wise vector addition.
   NUM_GPUS=4
   # Operands for element-wise vector addition.
-  x = cupy.array([1, 2, 3, 4])
-  y = cupy.array([5, 6, 7, 8])
-  z = numpy.array([0, 0, 0, 0])
-  # TODO(lhc): should `z`(write) be cpu? gpu didn't work
-  # Partitions each operands into four chunks. 
-  mapper = LDeviceSequenceBlocked(NUM_GPUS, placement=cpu)
-  x_view = mapper.partition_tensor(x)
-  y_view = mapper.partition_tensor(y)
-  z_view = mapper.partition_tensor(z) 
+  x = [1, 2, 3, 4]
+  y = [5, 6, 7, 8]
+  c = [0, 0, 0, 0]
   # Spawns each task on each GPU.
   # Therefore, total four tasks are spawned and placed
   # on GPU0 to GPU3.
@@ -86,7 +79,8 @@ def main():
     async def two_gpus_task(gpu_id=gpu_id):
       # Only performs addition of the assigned chunks.
       print(f"GPU[{gpu_id}] calculates z[{gpu_id}]")
-      z_view[gpu_id] = x_view[gpu_id] + y_view[gpu_id]
+      z_chunk = clone_here(x[gpu_id]) + clone_here(y[gpu_id])
+      copy(c[gpu_id], z_chunk)
     await two_gpus_task
   print(*z, sep=' ')
 
