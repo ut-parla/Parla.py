@@ -17,7 +17,7 @@ def elemwise_add():
   print("Output>>", *[x[i]+y[i] for i in range(len(x))], sep=' ')
 
 
-# GPU variant function of elementwise_add() using variant decorator.
+# GPU variant function of elemwise_add() using variant decorator.
 # This function is converted to CUDA kernel through CuPy JIT, and
 # performs on GPUs.
 @elemwise_add.variant(gpu)
@@ -25,6 +25,22 @@ def elemwise_add_gpu():
   print("GPU kernel is called..")
   x = cupy.array([1, 2, 3, 4])
   y = cupy.array([5, 6, 7, 8])
+  cupy_elemwise_add = cupy.ElementwiseKernel("int64 x, int64 y", "int64 z", "z = x + y")
+  print("Output>>", *cupy_elemwise_add(x, y), sep=' ')
+
+
+# Performs element-wise vector addition with input parameters on CPUs.
+@specialized
+def elemwise_add_with_params(x, y):
+  print("CPU kernel is called..")
+  print("Output>>", *[x[i]+y[i] for i in range(len(x))], sep=' ')
+
+
+# GPU variant function of elemwise_add_with_params() using
+# variant decorator.
+@elemwise_add_with_params.variant(gpu)
+def elemwise_add_with_params_gpu(x, y):
+  print("GPU kernel is called..")
   cupy_elemwise_add = cupy.ElementwiseKernel("int64 x, int64 y", "int64 z", "z = x + y")
   print("Output>>", *cupy_elemwise_add(x, y), sep=' ')
 
@@ -75,23 +91,27 @@ def main():
     # Lesson 3-5:
     # Spawns a task on CPU by passing numpy array to
     # placement, and prints its values.
-    arr_cpu = numpy.array([1, 2, 3, 4])
-    @spawn(placement=[arr_cpu])
+    x_cpu = numpy.array([1, 2, 3, 4])
+    y_cpu = numpy.array([5, 6, 7, 8])
+    @spawn(placement=[x_cpu, y_cpu])
     async def single_task_on_cpu_with_data_placement():
-      print("Spawns a single task on CPU")
       print("Specifies a placement through data location")
-      print("Output>>", arr_cpu)
+      print("This should be running on CPU")
+      print("Spawns a single task on CPU")
+      elemwise_add_with_params(x_cpu, y_cpu)
     await single_task_on_cpu_with_data_placement
 
     # Lesson 3-6:
     # Spawns a task on GPU by passing cupy array to
     # placement, and prints its values.
-    arr_gpu = cupy.array([1, 2, 3, 4])
-    @spawn(placement=[arr_gpu])
+    x_gpu = cupy.array([1, 2, 3, 4])
+    y_gpu = cupy.array([5, 6, 7, 8])
+    @spawn(placement=[x_gpu, y_gpu])
     async def single_task_on_gpu_with_data_placement():
-      print("Spawns a single task on GPU")
       print("Specifies a placement through data location")
-      print("Output>>", arr_gpu)
+      print("Spawns a single task on GPU")
+      print("This should be running on GPU")
+      elemwise_add_with_params(x_gpu, y_gpu)
     await single_task_on_gpu_with_data_placement
 
     # Lesson 3-7:
