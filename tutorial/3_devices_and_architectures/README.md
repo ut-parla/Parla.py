@@ -122,7 +122,7 @@ Let's look at line 23.
 This decorator declares a function variant of `elemwise_add()`,
 which is specialized to GPU tasks.
 Calling the variant is transparent to users.
-If GPU tasks call `elemwise_add()`, `elemwise_add_gpu()` is automatically called (line 68).
+If GPU tasks call `elemwise_add()`, `elemwise_add_gpu()` is automatically called (Line 68).
 
 `elemwise_add_gpu()` exploits `cupy` library to compute element-wise vector addition
 on GPU (Lines 23 to 29).
@@ -167,27 +167,26 @@ This examples shows a task which could schedule either CPU or GPU architecture.
 85  @spawn(placement=[cpu, gpu])
 ```
 
-Line 85 passes both cpu and gpu to the placement parameter.
+Line 85 passes both CPU and GPU to the placement parameter.
 It means that this task could be scheduled on any architecture available first.
-This task calls matching function variants based on the placed architecture.
+This task calls matching function variants to the target architecture.
 
 ## Lesson 3-5: Placing Task on CPU Through Data 
 
 Parla allows to place tasks based on data locations.
 If an array data is passed to placement,
-Parla places the task to the device where the data is allocated.
+Parla places the task to the device on which the data is allocated.
 Note that the current Parla runtime supports only numpy and cupy arrays.
-To show different placements depending on data locations passed to placement,
-we declare two element-wise vector addition function with input array parameters. 
+To show different placements depending on different data locations,
+we declare two element-wise vector addition functions
+accepting input array parameters. 
 
 ```
-...
 33  @specialzied
 34  def elemwise_add_with_params(x, y):
 ...
 41  @elemwise_add_with_params.variant(gpu)
 42  def elemwise_add_with_params_gpu(x, y):
-...
 ```
 
 Line 34 declares a CPU function, and line 42 declares a GPU function variant.
@@ -260,26 +259,26 @@ Output>> 6 8 10 12
 
 ## Lesson 3-7: Multi-GPU Tasks 
 
-The last example shows typical programming patterns for multi-gpu tasks.
-To fully exploit mulit-gpu, this example partitions input operands into
+The last example shows typical programming patterns for multi-GPU tasks on Parla.
+To fully exploit mulit-GPU, this example partitions input operands into
 chunks as the number of GPUs, assigns each of chunk to GPU having the same index
 to the chunk, and performs element-wise addition over the chunk vector on each GPU.
 
-Those input operands are allocated numpy arrays first,
-and copies and copies back them to/from GPU through explicit data movement
+Those input operands are allocated as numpy arrays first,
+and are copied and copied back to/from GPU through explicit data movement
 of Parla.
 Note that Parla also supports automatic data movement, but for simplicity,
-this example sticks to the explicit feature.
+this example sticks to the explicit data movement.
 
 First, it declares a global variable, `NUM_GPUS`,
-to set the number of GPUs to be used (line 124).
+to set the number of GPUs to be used (Line 124).
 You could update this number based on your system.
 
 ```
 124  NUM_GPUS=4
 ```
 
-Lines 126 to 128 declare and allocate operand and output numpy arrays on CPU.
+Lines 126 to 128 declare and allocate operand and output numpy arrays.
 All the vector size is 4. We will partition these vector into four scalar
 chunks, and assign them to each GPU.
 
@@ -291,7 +290,7 @@ chunks, and assign them to each GPU.
 
 Now, line 132 and 134 spawn tasks as the number of GPUs, and
 assigns each GPU ID to each task. For example, the task spawned
-at the first iteration will be placed on GPU 0.
+at the first iteration will be placed on GPU0.
 Line 134 passes the assigned GPU ID to the task.
 
 ```
@@ -309,7 +308,7 @@ array parameter, not scalar parameter.
 138  gpu_y = clone_here(y[gpu_id:(gpu_id+1)])
 ```
 
-Then, line 139 performs add operator between `gpu_x` and `gpu_y` which are copied to
+Then, line 139 performs add operator between `gpu_x` and `gpu_y` which were copied to
 the current memory space.
 The output is stored onto the local variable, `z_chunk`.
 
