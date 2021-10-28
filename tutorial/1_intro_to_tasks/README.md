@@ -39,13 +39,13 @@ Line 61:
 
 This imports the 'cpu' declaration, which is used in "@spawn" decorators to designate a task for execution on the CPU.
 
-Line 61:
+Line 64:
 
 ```
-61: from parla.tasks import spawn, TaskSpace
+64: from parla.tasks import spawn, TaskSpace
 ```
 
-Line 61 imports `@spawn` decorator and `TaskSpace` class. A `TaskSpace` provides an abstract high-dimensional indexing space in which tasks can be placed, and a `TaskSpace` can be indexed using any hashable values and any number of indices. If a dimension is indexed with numbers, then those dimensions can be sliced. Note, however, that a `TaskSpace` is not a Python list and thusly cannot exploit the advanced-indexing features of Python. For example, `[-1]` does not refer to the last element on `TaskSpace`.  Also note that names such as `TaskSpace` and the names assigned to tasks (their taskIDs) are only used to express dependencies.
+Line 64 imports `@spawn` decorator and `TaskSpace` class. A `TaskSpace` provides an abstract high-dimensional indexing space in which tasks can be placed, and a `TaskSpace` can be indexed using any hashable values and any number of indices. If a dimension is indexed with numbers, then those dimensions can be sliced. Note, however, that a `TaskSpace` is not a Python list and thusly cannot exploit the advanced-indexing features of Python. For example, `[-1]` does not refer to the last element on `TaskSpace`.  Also note that names such as `TaskSpace` and the names assigned to tasks (their taskIDs) are only used to express dependencies.
 
 # Example 1
 
