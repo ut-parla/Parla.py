@@ -12,6 +12,9 @@ This is a Parla tutorial introducing the Parla runtime, where a simple console-p
 # Import Parla
 from parla import Parla
 
+# Import cpu
+from parla.cpu import cpu
+
 # Import for the spawn decorator
 from parla.tasks import spawn
 
