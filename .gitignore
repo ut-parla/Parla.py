@@ -1,6 +1,12 @@
-docs/build
+# python cache
 *.pyc
 __pycache__
-.idea
+
+# build
+*build/
 /runtime_libs/build/
-/build/
+docs/build
+
+# IDE
+.idea
+.vscode
