@@ -26,7 +26,7 @@ class PArray:
     Args:
         array: :class:`cupy.ndarray` or :class:`numpy.array` object
 
-    Note: some methods are not allowed to be called outside of a Parla task context
+    Note: some methods should be called within the current task context
     """
     def __init__(self, array) -> None:
         num_devices = gpu.num_devices if gpu else 0
@@ -50,7 +50,7 @@ class PArray:
     def array(self):
         """
         The reference to cupy/numpy array on current device.
-        Note: should not be called outside of task context
+        Note: should be called within the current task context
         """
         return self._array[self._current_device_index]
 
@@ -58,7 +58,7 @@ class PArray:
     def _on_gpu(self) -> bool:
         """
         True if the array is on GPU.
-        Note: should not be called outside of task context
+        Note: should be called within the current task context
         """
         return self._current_device_index != CPU_INDEX
 
@@ -67,7 +67,7 @@ class PArray:
         """
         -1 if the current device is CPU.
         Otherwise GPU ID.
-        Note: should not be called outside of task context
+        Note: should be called within the current task context
         """
         device = PArray._get_current_device()
         if device.architecture == gpu:
@@ -83,7 +83,7 @@ class PArray:
         Args:
             array: :class:`cupy.ndarray` or :class:`numpy.array` object
 
-        Note: should not be called outside of task context
+        Note: should be called within the current task context
         Note: this method will also update the coherence protocol
         """
         this_device = self._current_device_index
@@ -120,7 +120,7 @@ class PArray:
             operator: if is this not None, data will be moved to operator,
                     else move to current device
 
-        Note: should not be called outside of task context
+        Note: should be called within the current task context
         """
         this_device = self._current_device_index
 
@@ -140,7 +140,7 @@ class PArray:
             operator: if is this not None, data will be moved to operator,
                     else move to current device
 
-        Note: should not be called outside of task context
+        Note: should be called within the current task context
         """
         this_device = self._current_device_index
 
@@ -159,15 +159,15 @@ class PArray:
         Process the given memory operations.
         Data will be moved, and protocol states is kept unchanged.
         """
-        if operation.inst == MemoryOperation.ERROR:
-            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
-                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
-        elif operation.inst == MemoryOperation.NOOP:
+        if operation.inst == MemoryOperation.NOOP:
             return  # do nothing
         elif operation.inst == MemoryOperation.LOAD:
             self._copy_data_between_device(operation.dst, operation.src, current_device)
         elif operation.inst == MemoryOperation.EVICT:
             self._array[operation.src] = None  # decrement the reference counter, relying on GC to free the memory
+        elif operation.inst == MemoryOperation.ERROR:
+            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
+                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
         else:
             raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
                                f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
@@ -175,7 +175,7 @@ class PArray:
     def _copy_data_between_device(self, dst, src, current_device) -> None:
         """
         Copy data from src to dst.
-        #TODO: support P2P copy and Stream
+        TODO: check cupy.copy and cupy.array works stably
         """
         if src == CPU_INDEX: # copy from CPU to GPU
             if dst == current_device:
@@ -197,26 +197,26 @@ class PArray:
         """
         Get current device from task environment.
 
-        Note: should not be called outside of task context
+        Note: should be called within the current task context
         """
         return get_current_devices()[0]
 
-    def _auto_move(self, index: int = None, do_write: bool = False) -> None:
+    def _auto_move(self, device_id: int = None, do_write: bool = False) -> None:
         """ Automatically move data to current device.
 
         Multiple copies on different devices will be made based on coherence protocol.
 
         Args:
-            do_write: True if want make the data writable in coherence protocol
+            device_id: current device id. CPU use CPU_INDEX as id
+            do_write: True if want make the device MO in coherence protocol
                 False if this is only for read only in current task
 
-
-        Note: should not be called outside of task context
+        Note: should be called within the current task context
         """
         if do_write:
-            self._coherence_write(index)
+            self._coherence_write(device_id)
         else:
-            self._coherence_read(index)
+            self._coherence_read(device_id)
 
     def _on_same_device(self, other: PArray) -> bool:
         """
