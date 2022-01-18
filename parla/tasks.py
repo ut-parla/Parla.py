@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager, contextmanager, ExitStack
 from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, FrozenSet, Dict
 
 from parla.device import Device, Architecture, get_all_devices
-from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context
+from parla.task_runtime import TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context, task_locals
 from parla.utils import parse_index
 
 try:
@@ -31,66 +31,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "TaskID", "TaskSpace", "spawn", "get_current_devices", "tasks", "finish", "CompletedTaskSpace", "Task", "reserve_persistent_memory"
 ]
-
-
-class TaskID:
-    """The identity of a task.
-
-    This combines some ID value with the task object itself. The task
-    object is assigned by `spawn`. This can be used in place of the
-    task object in most places.
-
-    """
-    _task: Optional[Task]
-    _id: Iterable[int]
-
-    def __init__(self, name, id: Iterable[int]):
-        """"""
-        self._name = name
-        self._id = id
-        self._task = None
-
-    @property
-    def task(self):
-        """Get the `Task` associated with this ID.
-
-        :raises ValueError: if there is no such task.
-        """
-        if not self._task:
-            raise ValueError("This task has not yet been spawned so it cannot be used.")
-        return self._task
-
-    @task.setter
-    def task(self, v):
-        assert not self._task
-        self._task = v
-
-    @property
-    def id(self):
-        """Get the ID object.
-        """
-        return self._id
-
-    @property
-    def name(self):
-        """Get the space name.
-        """
-        return self._name
-
-    @property
-    def full_name(self):
-        """Get the space name.
-        """
-        return "_".join(str(i) for i in (self._name, *self._id))
-
-    def __repr__(self):
-        return "TaskID({}, task={})".format(self.full_name, self._task)
-
-    def __str__(self):
-        return "<TaskID {}>".format(self.full_name)
-
-    def __await__(self):
-        return (yield TaskAwaitTasks([self.task], self.task))
 
 
 class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
@@ -255,31 +195,6 @@ def get_placement_for_any(placement: Union[Collection[PlacementSource], Any, Non
         return frozenset(get_all_devices())
 
 
-class _TaskLocals(threading.local):
-    def __init__(self):
-        super(_TaskLocals, self).__init__()
-        self.task_scopes = []
-
-    @property
-    def ctx(self):
-        return getattr(self, "_ctx", None)
-
-    @ctx.setter
-    def ctx(self, v):
-        self._ctx = v
-
-    @property
-    def global_tasks(self):
-        return getattr(self, "_global_tasks", [])
-
-    @global_tasks.setter
-    def global_tasks(self, v):
-        self._global_tasks = v
-
-
-_task_locals = _TaskLocals()
-
-
 def _task_callback(task, body) -> TaskState:
     """
     A function which forwards to a python function in the appropriate device context.
@@ -377,8 +292,8 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     # TODO: Document tags argument
 
     if not taskid:
-        taskid = TaskID("global_" + str(len(_task_locals.global_tasks)), (len(_task_locals.global_tasks),))
-        _task_locals.global_tasks += [taskid]
+        taskid = TaskID("global_" + str(len(task_locals.global_tasks)), (len(task_locals.global_tasks),))
+        task_locals.global_tasks += [taskid]
 
     def decorator(body):
         nonlocal placement, memory
@@ -429,7 +344,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
         logger.debug("Created: %s %r", taskid, body)
 
-        for scope in _task_locals.task_scopes:
+        for scope in task_locals.task_scopes:
             scope.append(task)
 
         # Return the task object
@@ -596,10 +511,10 @@ async def finish():
 
     """
     my_tasks = []
-    _task_locals.task_scopes.append(my_tasks)
+    task_locals.task_scopes.append(my_tasks)
     try:
         yield
     finally:
-        removed_tasks = _task_locals.task_scopes.pop()
+        removed_tasks = task_locals.task_scopes.pop()
         assert removed_tasks is my_tasks
         await tasks(my_tasks)
