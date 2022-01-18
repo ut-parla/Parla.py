@@ -73,4 +73,5 @@ if __name__ == '__main__':
         quicksort(a)
     end = time.perf_counter()
     print(end - start, "seconds")
+    print("Result:", (a == a_sorted).all())
     assert (a == a_sorted).all()
