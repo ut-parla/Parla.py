@@ -66,11 +66,13 @@ class EnvironmentComponentDescriptor(Callable[[], EnvironmentComponentInstance],
 
 class TaskEnvironment(ContextManager):
     tags: FrozenSet[Any]
+    env_no: int
     placement: FrozenSet[Device]
     components: Dict[EnvironmentComponentDescriptor, EnvironmentComponentInstance]
 
     def __init__(self,
                  placement: Collection[Union[Architecture, Device, "parla.tasks.Task", "parla.tasks.TaskID", Any]],
+                 env_no: int,
                  components: Collection[EnvironmentComponentDescriptor] = None,
                  tags: Collection[Any] = ()):
         """
@@ -83,6 +85,7 @@ class TaskEnvironment(ContextManager):
         from .tasks import get_placement_for_set
 
         tags = frozenset(tags)
+        self.env_no = env_no
         try:
             hash(tags)
         except TypeError as e:
