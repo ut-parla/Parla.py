@@ -1170,76 +1170,81 @@ class Scheduler(ControllableThread, SchedulerContext):
             if len(new_tasks) > 0:
                 self._mapped_task_queue.extendleft(new_tasks)
 
+    def run_mapper(self):
+        # The first loop iterates a spawned task queue
+        # and constructs a mapped task subgrpah.
+        while True:
+            self.fill_curr_spawned_task_queue()
+            task: Optional[Task] = self._dequeue_spawned_task()
+            if task:
+                if not task.assigned:
+                    print("\n[Scheduler] Spawned task, ", task.name, ", is mapped.", sep='')
+                    is_assigned = self._assignment_policy(task)
+                    assert isinstance(is_assigned, bool)
+                    if not is_assigned:
+                        self.enqueue_spawned_task(task)
+                    else:
+                        # Create data movement task
+                        # This step consists of five steps.
+                        #
+                        # 1. Get dependencies of the task.
+                        # 2. Reset dependency lists of the task.
+                        #    (Therefore, we can reduce unnecessary
+                        #     dependee iterations when higher priority tasks
+                        #     are done)
+                        # 3. Create data movement task with the depdencies.
+                        # 4. Set the original task as the data task's dependee.
+                        # 5. Set the data task as the original task's denpdency.
+                        deps = task.dependencies
+                        # TODO(lhc): I am not confident if this task id and
+                        #            local/global tasks work correctly.
+                        taskid = TaskID("global_" + str(len(task_locals.global_tasks)),
+                                        (len(task_locals.global_tasks),))
+                        task_locals.global_tasks += [taskid]
+                        taskid.dependencies = deps
+                        task._reset_dependencies()
+                        datamove_task = DataMovementTask(deps, task,
+                                             taskid, task.req,
+                                             ["in1 processing", "in2 processing"],
+                                             ["out processing"],
+                                             task.name + ".datamovement"
+                                             );
+                        self.incr_active_tasks()
+                        task._set_dependencies([datamove_task])
+                        # Only computation needs to set a assigned flag.
+                        # Data movement task is set as assigned when it is created.
+                        task.set_assigned()
+                        # If a task has no dependency after it is assigned to devices,
+                        # immediately enqueue a corresponding data movement task to
+                        # the ready queue.
+                        if not datamove_task.bool_check_remaining_dependencies():
+                            self.enqueue_task(datamove_task)
+                else:
+                    logger.exception("[Scheduler] Tasks on the spawned Q ", \
+                                     "should be not assigned any device.")
+                    self.stop()
+            else:
+                # If there is no spawned task at this moment,
+                # move to the mapped task scheduling.
+                break
+
+    def run_deviceq_mapper(self):
+        while True:
+            task: Optional[TaskBase] = self._dequeue_task()
+            if not task or not task.assigned:
+                logger.debug("Task %r: Failed to assign", task)
+                break
+            for d in task.req.devices:
+                print("[Scheduler] Task, ", task.name, ", is enqueued onto a device Q.", sep='')
+                worker = self._worker_threads[task.req.env_no]
+                worker._enqueue_task_local(task)
+
     def run(self) -> None:
         # noinspection PyBroadException
         try: # Catch all exception to report them usefully
             while self._should_run:
-                # The first loop iterates a spawned task queue
-                # and constructs a mapped task subgrpah.
-                while True:
-                    self.fill_curr_spawned_task_queue()
-                    task: Optional[Task] = self._dequeue_spawned_task()
-                    if task:
-                        if not task.assigned:
-                            print("\n[Scheduler] Spawned task, ", task.name, ", is mapped.", sep='')
-                            is_assigned = self._assignment_policy(task)
-                            assert isinstance(is_assigned, bool)
-                            if not is_assigned:
-                                self.enqueue_spawned_task(task)
-                            else:
-                                # Create data movement task
-                                # This step consists of five steps.
-                                #
-                                # 1. Get dependencies of the task.
-                                # 2. Reset dependency lists of the task.
-                                #    (Therefore, we can reduce unnecessary
-                                #     dependee iterations when higher priority tasks
-                                #     are done)
-                                # 3. Create data movement task with the depdencies.
-                                # 4. Set the original task as the data task's dependee.
-                                # 5. Set the data task as the original task's denpdency.
-                                deps = task.dependencies
-                                # TODO(lhc): I am not confident if this task id and
-                                #            local/global tasks work correctly. 
-                                taskid = TaskID("global_" + str(len(task_locals.global_tasks)),
-                                                (len(task_locals.global_tasks),))
-                                task_locals.global_tasks += [taskid]
-                                taskid.dependencies = deps
-                                task._reset_dependencies()
-                                datamove_task = DataMovementTask(deps, task,
-                                                     taskid, task.req,
-                                                     ["in1 processing", "in2 processing"],
-                                                     ["out processing"],
-                                                     task.name + ".datamovement"
-                                                     );
-                                self.incr_active_tasks()
-                                task._set_dependencies([datamove_task])
-                                # Only computation needs to set a assigned flag.
-                                # Data movement task is set as assigned when it is created.
-                                task.set_assigned()
-                                # If a task has no dependency after it is assigned to devices,
-                                # immediately enqueue a corresponding data movement task to
-                                # the ready queue.
-                                if not datamove_task.bool_check_remaining_dependencies():
-                                    self.enqueue_task(datamove_task)
-                        else:
-                            logger.exception("[Scheduler] Tasks on the spawned Q ", \
-                                             "should be not assigned any device.")
-                            self.stop()
-                    else:
-                        # If there is no spawned task at this moment,
-                        # move to the mapped task scheduling.
-                        break
-
-                while True:
-                    task: Optional[TaskBase] = self._dequeue_task()
-                    if not task or not task.assigned:
-                        logger.debug("Task %r: Failed to assign", task)
-                        break
-                    for d in task.req.devices:
-                        print("[Scheduler] Task, ", task.name, ", is enqueued onto a device Q.", sep='')
-                        worker = self._worker_threads[task.req.env_no]
-                        worker._enqueue_task_local(task)
+                self.run_mapper()
+                self.run_deviceq_mapper()
         except Exception:
             logger.exception("Unexpected exception in Scheduler")
             self.stop()
