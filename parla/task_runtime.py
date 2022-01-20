@@ -13,6 +13,7 @@ from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSe
 from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
 
+#logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
@@ -204,6 +205,10 @@ class TaskBase:
 
 
 class Task(TaskBase):
+    # This flag specifies if a task is assigned device.
+    # If it is, it sets to True. Otherwise, it sets to False.
+    # Any thread could read this flag, and therefore, mutex
+    # is always required.
     assigned: bool
 
     def __init__(self, func, args, dependencies: Collection["Task"], taskid,
@@ -276,6 +281,17 @@ class Task(TaskBase):
         """
         return tuple(self._dependees)
 
+    def set_assigned(self):
+        with self._mutex:
+            self.assigned = True
+
+    def is_assigned(self):
+        with self._mutex:
+            if self.assigned:
+                return True
+            else:
+                return False
+
     def _set_dependencies(self, dependencies):
         self._dependencies = dependencies
         self._remaining_dependencies = len(dependencies)
@@ -286,23 +302,20 @@ class Task(TaskBase):
     def _complete_dependency(self):
         with self._mutex:
             self._remaining_dependencies -= 1
-            print("Computation task, ", self._name, "'s one dependency is completed. [remaining:", \
+            self._check_remaining_dependencies()
+            print("Computation task, ", self.name, "'s one dependency is completed. [remaining:", \
                   self._remaining_dependencies, "]", sep='')
 
     def _check_remaining_dependencies(self):
-        if not self._remaining_dependencies:
+        if not self._remaining_dependencies and self.assigned:
             logger.info("Task %r: Scheduling", self)
             get_scheduler_context().enqueue_task(self)
 
-    def _bool_check_remaining_dependencies(self) -> bool:
-        """
-        Check if any remaining dependencies exist.
-        If it is, return True.
-        """
+    def bool_check_remaining_dependencies(self):
         if not self._remaining_dependencies:
-            logger.info("Task %r: Scheduling", self)
+            return False
+        else:
             return True
-        return False
 
     def _add_dependee(self, dependee: "TaskBase"):
         """Add the dependee if self is not completed, otherwise return False."""
@@ -331,7 +344,6 @@ class Task(TaskBase):
             self._set_dependencies(new_state.dependencies)
             self._check_remaining_dependencies()
             new_state.clear_dependencies()
-
         if new_state.is_terminal:
             self._notify_dependees()
             ctx.decr_active_tasks()
@@ -378,6 +390,10 @@ class Task(TaskBase):
 
 
 class DataMovementTask(TaskBase):
+    # This flag specifies if a task is assigned device.
+    # If it is, it sets to True. Otherwise, it sets to False.
+    # Any thread could read this flag, and therefore, mutex
+    # is always required.
     assigned: bool
 
     # TODO(lhc): For now, input and output data are string.
@@ -450,26 +466,34 @@ class DataMovementTask(TaskBase):
         """
         return tuple(self._dependees)
 
+    def set_assigned(self):
+        with self._mutex:
+            self.assigned = True
+
+    def is_assigned(self):
+        with self._mutex:
+            if self.assigned:
+                return True
+            else:
+                return False
+
     def _complete_dependency(self):
         with self._mutex:
             self._remaining_dependencies -= 1
+            self._check_remaining_dependencies()
             print("Data-movement task, ", self.name, "'s one dependency is " \
                   "completed. [remaining:", self._remaining_dependencies, sep='')
 
     def _check_remaining_dependencies(self):
-        if not self._remaining_dependencies:
+        if not self._remaining_dependencies and self.assigned:
             logger.info("Task %r: Scheduling", self)
             get_scheduler_context().enqueue_task(self)
 
-    def _bool_check_remaining_dependencies(self) -> bool:
-        """
-        Check if any remaining dependencies exist.
-        If it is, return True.
-        """
+    def bool_check_remaining_dependencies(self):
         if not self._remaining_dependencies:
-            logger.info("Task %r: Scheduling", self)
+            return False
+        else:
             return True
-        return False
 
     def _notify_dependees(self):
         with self._mutex:
@@ -488,7 +512,6 @@ class DataMovementTask(TaskBase):
             self._set_dependencies(new_state.dependencies)
             self._check_remaining_dependencies()
             new_state.clear_dependencies()
-
         if new_state.is_terminal:
             self._notify_dependees()
             ctx.decr_active_tasks()
@@ -1162,8 +1185,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                             print("\n[Scheduler] Spawned task, ", task.name, ", is mapped.", sep='')
                             is_assigned = self._assignment_policy(task)
                             assert isinstance(is_assigned, bool)
-                            task.assigned = is_assigned
-                            if not task.assigned:
+                            if not is_assigned:
                                 self.enqueue_spawned_task(task)
                             else:
                                 # Create data movement task
@@ -1193,8 +1215,14 @@ class Scheduler(ControllableThread, SchedulerContext):
                                                      );
                                 self.incr_active_tasks()
                                 task._set_dependencies([datamove_task])
-                                self.enqueue_mapped_task(datamove_task)
-                                self.enqueue_mapped_task(task)
+                                # Only computation needs to set a assigned flag.
+                                # Data movement task is set as assigned when it is created.
+                                task.set_assigned()
+                                # If a task has no dependency after it is assigned to devices,
+                                # immediately enqueue a corresponding data movement task to
+                                # the ready queue.
+                                if not datamove_task.bool_check_remaining_dependencies():
+                                    self.enqueue_task(datamove_task)
                         else:
                             logger.exception("[Scheduler] Tasks on the spawned Q ", \
                                              "should be not assigned any device.")
@@ -1203,34 +1231,6 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # If there is no spawned task at this moment,
                         # move to the mapped task scheduling.
                         break
-
-                # The second loop iterates a mapped task queue
-                # and constructs a ready queue with tasks of which dependent tasks are
-                # all resolved.
-                # If all dependencies are all resolved, move that task to the ready queue.
-                self.fill_curr_mapped_task_queue()
-                while True:
-                    task: Optional[Task] = self._dequeue_mapped_task()
-                    if task:
-                        if not task.assigned:
-                            logger.exception("[Scheduler] Tasks on the mapped Q ", \
-                                             "should be assigned a device.")
-                            self.stop()
-                        print("[Scheduler] Task, ", task.name, ", is checking whether its dependencies", \
-                              " are all resolved.", sep='')
-                        # Check and enqueue the task on the ready queue.
-                        if task._bool_check_remaining_dependencies():
-                            print("[Scheduler] Task, ", task.name, ", is enqueued onto a ready Q.", sep='')
-                            self.enqueue_task(task)
-                        else:
-                            print("[Scheduler] Task, ", task.name, ", dependencies are all not yet resolved.", \
-                                  " Re-enqueue this task onto the mapped Q. [remaining:", \
-                                  task._remaining_dependencies, "]", sep='')
-                            self.enqueue_mapped_task(task)
-                    else:
-                        # If there is no mapped task at this moment,
-                        # move to the ready task scheduling.
-                        break;
 
                 while True:
                     task: Optional[TaskBase] = self._dequeue_task()
