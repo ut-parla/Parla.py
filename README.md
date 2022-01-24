@@ -2,67 +2,89 @@
 
 Parla is a high-level programming system for running numerical simulations on heterogeneous architectures.
 The current prototype emphasizes orchestrating data movement and kernel calls across all the CPUs and GPUs available on a given machine.
-API documentation is available at [http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html](http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html).
+<!--API documentation is available at [http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html](http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html). --> 
+
 
 # Installation
 
-Parla is available as a Conda package. 
-A docker image with the Conda package already set up is also available. 
-Parla requires Python 3.7 and numpy. The examples also require scipy, numba, and cupy.
-
-## Installation with Conda
-
-To use the conda package, you must first install Miniconda.
-To install Miniconda you can follow the detailed instructions available at [https://docs.conda.io/en/latest/miniconda.html](https://docs.conda.io/en/latest/miniconda.html).
-Abbreviated instructions are included here.
-If you are running Linux and have `wget` available, you can download and install Miniconda into the Miniconda subdirectory of your home directory by running
+Parla is currently distributed from this repository as a Python module. 
+In the future, Parla will be available as a Conda package; for now, it must manually be installed. 
+For new users unfamiliar with Python package management, we recommend using Miniconda to manage Parla and its dependencies. 
+To install Miniconda you can follow the detailed instructions available from [Miniconda's documentation](https://docs.conda.io/en/latest/miniconda.html). 
+Abbreviated instructions are included here. 
+If you are running Linux and have `wget` available, you can download and install Miniconda into the Miniconda subdirectory of your home directory by running 
 
 ```
 wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-bash miniconda.sh -b -p $HOME/miniconda
+bash miniconda.sh
 rm miniconda.sh
 ```
 
-To make Miniconda available on your path in a given terminal session run
-```
-export PATH=$HOME/miniconda/bin:$PATH
-source activate
-```
+Restart your shell for changes to take effect. 
 
-Once that's done, you can install parla by running
-
-```
-conda install -y -c ut-parla parla
-```
-
-If you have already installed parla but need to access your Miniconda installation from a new terminal session just run (as before)
-```
-export PATH=$HOME/miniconda/bin:$PATH
-source activate
-```
-
-Once parla is installed and your environment is configured to use it, all the scripts in this repository's examples directory are runnable as normal python scripts.
-If git is installed you can clone the repository and run the inner product example by running:
+<!--Parla is available as a Conda package. --> 
+<!--A docker image with the Conda package already set up is also available. --> 
+Parla requires Python 3.7, numpy, cython, and psutil. 
+It also depends on C package libunwind. 
+The examples require scipy, numba, and cupy. 
+You may want to create a new Conda environment with the required Python version, like so 
 
 ```
-git clone https://github.com/ut-parla/Parla.py
-python Parla.py/examples/inner.py
+conda create -n environment_name python=3.7
 ```
 
-If git is not available, you can install it as a Conda package alongside parla by running `conda install -y git` from a terminal session configured to use Miniconda.
+If you have sudo privileges on your system, install libunwind-dev as follows:
+
+```
+sudo apt-get install libunwind-dev # Installs libunwind on your system
+```
+
+If you do not have sudo privileges and libunwind-dev is not already installed, you will have to build it yourself. 
+The repository and build instructions are located [here](https://github.com/libunwind/libunwind).  
+
+To activate your Conda environment and install the other required dependencies, run 
+
+```
+conda activate environment_name # Opens your Conda environment
+conda install numpy cython psutil scipy numba cupy # Installs Python packages into your environment
+```
+
+To install Parla itself, navigate to the top-level directory of this repository, and from it, run ONE of the following two commands:
+
+```
+pip install .     # For Parla Users
+pip install -e .  # For Parla Developers who are modifying Parla and would like to see their changes reflected as they work
+```
+
+The installation process creates extra files in the repository. 
+Virtual execution contexts (experimental - see below) require on some of these files to be present. 
+If you are not using virtual execution contexts and would like to clear out the extra files created by Parla on installation, use [`git clean`](https://git-scm.com/docs/git-clean).  
+
+Now all the scripts in this repository are runnable as normal Python scripts. 
+To test your installation, try running
+
+```
+python tutorial/0_hello_world/hello.py
+```
+
+This should print
+
+```
+Hello, World!
+```
+
+We recommend entering the tutorial directory and working through it as a starting point for learning Parla.  
 
 ## Running the Docker Container
-
-The Parla container requires CUDA support in the Docker host environment.
-To get a shell inside the provided docker container run
+The Parla container requires CUDA support in the Docker host environment. To get a shell inside the provided docker container run
 
 ```
-docker run --gpus all --rm -it utparla/parla
+docker run --gpus all --rm -it utpecos/parla
 ```
 
-Depending on your Docker configuration, you may need to run this command as root using `sudo` or some other method.
-Since CUDA is required for all the demos, you must provide some GPUs for the docker container to use.
-For this to work using the command shown, you need to use Docker 19.03 or later.
+In this container, a Parla repo with tutorial branch is put at the root of HOME directory, which could be used out of the box.
+
+Depending on your Docker configuration, you may need to run this command as root using sudo or some other method. Since CUDA is required for all the demos, you must provide some GPUs for the docker container to use. For this to work using the command shown, you need to use Docker 19.03 or later.
 
 ## Virtual Execution Contexts (Experimental)
 
