@@ -973,45 +973,75 @@ def shuffled(lst: Iterable[_T]) -> List[_T]:
     return lst
 
 class Scheduler(ControllableThread, SchedulerContext):
+    # See __init__ function below for comments on the functionality of these members
     _environments: TaskEnvironmentRegistry
-    # Worker threads for each device.
     _worker_threads: List[WorkerThread]
     _available_resources: ResourcePool
-    period: float
-    max_worker_queue_depth: int
+    period: float # TODO: Figure out what this is for
+    max_worker_queue_depth: int # TODO: Delete this
 
     def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 0.01,
                  max_worker_queue_depth: int = 2):
+        # ControllableThread: __init__ sets it to run
+        # SchedulerContext: No __init__
         super().__init__()
+
         # TODO(lhc): for now, assume that n_threads is always None.
         #            Each device needs a dedicated thread.
         n_threads = sum(d.resources.get("vcus", 1) for e in environments for d in e.placement)
+
+        # TODO: Figure out what these are for
         self._environments = TaskEnvironmentRegistry(*environments)
+
+        # Empty list for storing reported exceptions at runtime
         self._exceptions = []
-        self._active_task_count = 1 # Start with one count that is removed when the scheduler is "exited"
+
+        # Start with one count that is removed when the scheduler is "exited"
+        self._active_task_count = 1
+
+        # TODO: Delete this
         self.max_worker_queue_depth = max_worker_queue_depth
+
+        # TODO: Figure out what this is for
         self.period = period
+
+        # TODO: Figure out what this is for
         self._monitor = threading.Condition(threading.Lock())
-        self._allocation_queue = deque()
-        # Spawned queue should consist of two levels, current and new.
-        # New spawned tasks or tasks failed to schedule are always
-        # enqueued on the new queue.
-        # Tasks which the scheduler will try to schedule at the current
+
+        # Spawned task queues
+        # Tasks that have been spawned but not mapped are stored here.
+        # Tasks are removed once they are mapped.
+        # Spawned queue consists of two levels, current and new.
+        # Newly spawned tasks or tasks which fail to schedule are always
+        # enqueued on the "new" queue.
+        # When the mapper runs, it moves all tasks from the "new" to the "current" queue.
+        # Tasks which the mapper will try to map at the current
         # iteration are always dequeued from the current queue.
-        # For each iteration, elements on the new queue are moved and
-        # appended to the current queue.
-        # Through the two level queues, the scheduler could avoid tailing elements,
-        # and move to the next super step for the mapped tasks.
+        # This implementation is simple and avoids a long-running mapper in the case where new
+        # tasks spawn as it runs
         self._spawned_task_queue = deque()
         self._new_spawned_task_queue = deque()
+
+        # TODO: Delete these since they're not used I think
         self._mapped_task_queue = deque()
         self._new_mapped_task_queue = deque()
-        self._device_queues = []
+
+        # This is where tasks go when they have been mapped and their
+        # dependencies are complete, but they have not been scheduled.
+        self._ready_queue = deque()
+
+        # The device queues where scheduled tasks go to be launched from
         self._device_queues = [deque() for n in range(0, n_threads)]
+
+        # Track, allocate, and deallocate resources (devices)
         self._available_resources = ResourcePool(multiplier=1.0)
+
+        # Worker threads for each device (probably removing these)
         self._worker_threads = [WorkerThread(self, i) for i in range(n_threads)]
         for t in self._worker_threads:
             t.start()
+
+        # Start the scheduler thread (likely to change later)
         self.start()
 
     @property
@@ -1091,7 +1121,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         """Enqueue a task on the resource allocation queue.
            Note that this enqueue has no data race.
         """
-        self._allocation_queue.appendleft(task)
+        self._ready_queue.appendleft(task)
 
     def _dequeue_task(self, timeout=None) -> Optional[Task]:
         """Dequeue a task from the resource allocation queue.
@@ -1099,7 +1129,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         while True:
             try:
                 if self._should_run:
-                    return self._allocation_queue.pop()
+                    return self._ready_queue.pop()
                 else:
                     return None
             except IndexError:
@@ -1258,7 +1288,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def dump_status(self, lg=logger):
         lg.info("%r:\n%r\navailable: %r", self,
-                self._allocation_queue, self._available_resources)
+                self._ready_queue, self._available_resources)
         w: WorkerThread
         for w in self._worker_threads:
             w.dump_status(lg)
