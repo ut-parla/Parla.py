@@ -18,6 +18,7 @@ from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, 
 from parla.device import Device, Architecture, get_all_devices
 from parla.task_runtime import TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context
 from parla.utils import parse_index
+from parla.dataflow import Dataflow
 
 try:
     from parla import task_runtime, array
@@ -341,7 +342,10 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
           placement: Union[Collection[PlacementSource], Any, None] = None,
           ndevices: int = 1,
           tags: Collection[Any] = (),
-          data: Collection[Any] = None
+          data: Collection[Any] = None,
+          input: Collection[Any] = (),
+          output: Collection[Any] = (),
+          inout: Collection[Any] = ()
           ):
     """
     spawn(taskid: Optional[TaskID] = None, dependencies = (), *, memory: int = None, placement: Collection[Any] = None, ndevices: int = 1)
@@ -423,9 +427,18 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
         taskid.dependencies = dependencies
 
+        # gather input/output/inout, which is hint for data from or to the this task
+        dataflow = Dataflow(input, output, inout)
+
         # Spawn the task via the Parla runtime API
         task = task_runtime.get_scheduler_context().spawn_task(
-            _task_callback, (separated_body,), deps, taskid=taskid, req=req, name=getattr(body, "__name__", None))
+            function=_task_callback,
+            args=(separated_body,),
+            deps=deps,
+            taskid=taskid,
+            req=req,
+            dataflow=dataflow,
+            name=getattr(body, "__name__", None))
 
         logger.debug("Created: %s %r", taskid, body)
 

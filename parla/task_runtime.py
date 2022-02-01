@@ -11,8 +11,9 @@ from numbers import Number
 from threading import Thread, Condition
 from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar
 
-from .device import get_all_devices, Device, Architecture
-from .environments import TaskEnvironmentRegistry, TaskEnvironment
+from parla.device import get_all_devices, Device, Architecture
+from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
+from parla.dataflow import Dataflow
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +200,7 @@ class Task:
     _state: TaskState
 
     def __init__(self, func, args, dependencies: Collection["Task"], taskid,
-                 req: ResourceRequirements, name: Optional[str] = None):
+                 req: ResourceRequirements, dataflow: Dataflow, name: Optional[str] = None):
         self.name = name
         self._mutex = threading.Lock()
         with self._mutex:
@@ -207,6 +208,7 @@ class Task:
 
             self.req = req
             self.assigned = False
+            self.dataflow = dataflow  # input/output/inout of the task
 
             self._state = TaskRunning(func, args, None)
             self._dependees = []
@@ -280,6 +282,8 @@ class Task:
                 assert isinstance(self._state, TaskRunning)
                 # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
                 with _scheduler_locals._environment_scope(self.req.environment), self.req.environment:
+                    # move data to current device
+                    self.dataflow.auto_move()
                     task_state = self._state.func(self, *self._state.args)
                 if task_state is None:
                     task_state = TaskCompleted(None)
@@ -332,8 +336,8 @@ class InvalidSchedulerAccessException(RuntimeError):
 
 
 class SchedulerContext(metaclass=ABCMeta):
-    def spawn_task(self, function, args, deps, taskid, req, name: Optional[str] = None):
-        return Task(function, args, deps, taskid, req, name)
+    def spawn_task(self, function, args, deps, taskid, req, dataflow, name: Optional[str] = None):
+        return Task(function, args, deps, taskid, req, dataflow, name)
 
     @abstractmethod
     def enqueue_task(self, task):
