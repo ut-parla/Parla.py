@@ -1,3 +1,5 @@
+from __future__ import annotations # To support self references in type checking, must be first line
+
 import numpy
 import cupy
 
@@ -10,7 +12,7 @@ class PArray:
     """Multi-dimensional array on a CPU or CUDA device.
 
     This class is a wrapper around :class:`numpy.ndarray` and :class:`cupy.ndarray`,
-    It is used to support Parla sheduler optimization and automatic data movement
+    It is used to support Parla sheduler optimization and automatic data movement.
 
     Args:
         array: :class:`cupy.ndarray` or :class:`numpy.array` object
@@ -26,10 +28,10 @@ class PArray:
         return isinstance(self.array, cupy.ndarray)
 
     @property
-    def _index(self) -> int:
+    def _current_device_index(self) -> int:
         """
-        Index of Current Device
-        -1 if on CPU
+        Return -1 if the current device is CPU.
+        Otherwise return GPU ID.
         """
         if self._on_gpu:
             return self.array.device
@@ -48,7 +50,7 @@ class PArray:
         """
         device = PArray._get_current_device()
         if device.architecture == gpu:
-            if self._index == device.index:
+            if self._current_device_index == device.index:
                 return
             self._to_current_gpu()
         elif device.architecture == cpu:
@@ -65,7 +67,7 @@ class PArray:
         Move the array to GPU, do nothing if already on the device.
         `index` is the index of GPU copied to
         """
-        if self._index == index:
+        if self._current_device_index == index:
             return
 
         with cupy.cuda.Device(index):
@@ -79,7 +81,7 @@ class PArray:
             return
         self.array = cupy.asnumpy(self.array)
 
-    def _on_same_device(self, other) -> bool:
+    def _on_same_device(self, other: PArray) -> bool:
         """
         Return True if the two PArrays are in the same device.
         Note: other has to be a PArray object.

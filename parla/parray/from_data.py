@@ -6,7 +6,7 @@ from .core import PArray
 
 def array(object, dtype=None, copy=True, order='K', subok=False, ndmin=0, like=None, on_gpu=False):
     """
-    Creates an Parla array specific device (CPU by default).
+    Create a Parla array on the specific device (CPU by default).
 
     Args:
         object: :class:`cupy.ndarray` or :class:`numpy.array` object

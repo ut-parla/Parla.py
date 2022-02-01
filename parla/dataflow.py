@@ -1,6 +1,6 @@
 """
 This module implement dataflow tracking.
-Which is used to provide data-aware scheduling,
+It is used to provide data-aware scheduling,
 and also eager-fashion automatic data movement.
 """
 
