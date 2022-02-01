@@ -1,12 +1,16 @@
 from __future__ import annotations # To support self references in type checking, must be first line
 
-import numpy
-import cupy
-
 from parla.cpu_impl import cpu
-from parla.cuda import gpu
 from parla.tasks import get_current_devices
 from parla.device import Device
+
+import numpy
+try:  # if the system has no GPU
+    import cupy
+    from parla.cuda import gpu
+except (ImportError, AttributeError):
+    cupy = numpy  # work around of cupy.ndarray
+    gpu = None
 
 class PArray:
     """Multi-dimensional array on a CPU or CUDA device.
@@ -25,7 +29,9 @@ class PArray:
         """
         True if the array is on GPU
         """
-        return isinstance(self.array, cupy.ndarray)
+        # cannot check cupy if the system has no GPU
+        # return isinstance(self.array, cupy.ndarray)
+        return not isinstance(self.array, numpy.ndarray)
 
     @property
     def _current_device_index(self) -> int:
@@ -41,12 +47,16 @@ class PArray:
     def _get_current_device() -> Device:
         """
         Get current device from task environment.
+
+        Note: should not be called outside of task context
         """
         return get_current_devices()[0]
 
     def _auto_move(self) -> None:
         """
         Automatically move array to current device.
+
+        Note: should not be called outside of task context
         """
         device = PArray._get_current_device()
         if device.architecture == gpu:
@@ -59,6 +69,8 @@ class PArray:
     def _to_current_gpu(self) -> None:
         """
         Move the array to current GPU, do nothing if already on the device.
+
+        Note: should not be called when the system has no GPU
         """
         self.array = cupy.asarray(self.array)  # asarray by default copy to current device
 
@@ -66,6 +78,8 @@ class PArray:
         """
         Move the array to GPU, do nothing if already on the device.
         `index` is the index of GPU copied to
+
+        Note: should not be called when the system has no GPU
         """
         if self._current_device_index == index:
             return
@@ -420,7 +434,7 @@ class PArray:
         ret = self.array.__getitem__(slices)
 
         # ndarray.__getitem__() may return a ndarray
-        if isinstance(ret, numpy.ndarray) or isinstance(ret, cupy.ndarray):
+        if isinstance(ret, (numpy.ndarray, cupy.ndarray)):
             return PArray(ret)
         else:
             return ret
