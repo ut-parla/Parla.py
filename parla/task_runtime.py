@@ -7,6 +7,7 @@ import threading
 import time
 from itertools import combinations
 from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar, Deque
+from itertools import chain
 
 from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
@@ -225,6 +226,8 @@ class Task(TaskBase):
 
             self._state = TaskRunning(func, args, None)
             self._dependees = []
+            # Track data movement tasks created from this task.
+            self._datamove_tasks = []
             # Maintain dependenceis as a list object.
             # Therefore, bi-directional edges exist among
             # dependent tasks.
@@ -242,6 +245,9 @@ class Task(TaskBase):
             # Enqueue this task right after spawning on the spawend queue.
             # The task could have dependencies.
             get_scheduler_context().enqueue_spawned_task(self)
+
+    def add_new_datamove_task(self, t):
+        self._datamove_tasks.append(t)
 
     @property
     def result(self):
@@ -310,6 +316,16 @@ class Task(TaskBase):
         for dep in dependencies:
             if not dep._add_dependee(self):
                 self._remaining_dependencies -= 1
+
+    def _add_dependency(self, dependency):
+        self._remaining_dependencies += 1
+        # TODO(lhc): Is there any better way? Why do we need
+        #            a tuple format?
+        self._dependencies = list(self.dependencies)
+        self._dependencies.append(dependency)
+        self._dependencies = tuple(self._dependencies)
+        if not dependency._add_dependee(self):
+            self._remaining_dependencies -= 1
 
     def _complete_dependency(self):
         with self._mutex:
@@ -385,8 +401,6 @@ class Task(TaskBase):
                 assert isinstance(self._state, TaskRunning)
                 # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
                 with _scheduler_locals._environment_scope(self.req.environment), self.req.environment:
-                    # move data to current device
-                    self.dataflow.auto_move()
                     task_state = self._state.func(self, *self._state.args)
                 if task_state is None:
                     task_state = TaskCompleted(None)
@@ -424,9 +438,8 @@ class DataMovementTask(TaskBase):
     #            For now, this class performs no-op.
     def __init__(self, dependencies: Collection["TaskBase"],
             computation_task: Task, taskid,
-             req: ResourceRequirements,
-            in_data_list: List[str],
-            out_data_list: List[str], name: Optional[str] = None):
+            req: ResourceRequirements,
+            target_data, name: Optional[str] = None):
         self._mutex = threading.Lock()
         with self._mutex:
             self._name = name
@@ -436,26 +449,16 @@ class DataMovementTask(TaskBase):
             # which is created at mapping task subgraph
             # construction. This task is always assigned the target task.
             self.assigned = True
+            self._target_data = target_data
             # The source (computation) task becomes a dependee of
             # this data movement task.
             # The dependees are set by `_set_dependencies()`.
             self._dependees = []
-            # Data movement task gets dependencies of the
-            # source (computation) task.
-            # TODO(lhc): Both a data movement task and a kernel
-            #            task are dependees of the dependent tasks.
-            #            Therefore, when the dependent tasks are completed,
-            #            they iterate both type tasks, which is inefficient.
-            #            This is because I don't want to touch data race
-            #            until this inefficient version works stable.
+            # Data movement task gets subsets of dependency of the
+            # source (computation) task depending on data dependency.
+            self._dependencies = []
             self._set_dependencies(dependencies)
 
-            # Input and output data should be passed to move data
-            # if necessary.
-            # TODO(lhc): For now, it is unclear how data is managed.
-            #            For now, use a string list tmporarily.
-            self.in_data_list = in_data_list
-            self.out_data_list = out_data_list
             # TODO(lhc): temporary task running state.
             #            This would be a data movement kernel.
             self._state = TaskRunning(None, None, dependencies)
@@ -501,6 +504,12 @@ class DataMovementTask(TaskBase):
             else:
                 return False
 
+    def _add_dependency(self, dependency):
+        self._remaining_dependencies += 1
+        self._dependencies.append(dependency)
+        if not dependency._add_dependee(self):
+            self._remaining_dependencies -= 1
+
     def _complete_dependency(self):
         with self._mutex:
             self._remaining_dependencies -= 1
@@ -543,8 +552,7 @@ class DataMovementTask(TaskBase):
     def run(self):
         logger.debug(f"[DataMovementTask %s] Starting", self.name)
         ctx = get_scheduler_context()
-        task_state = None
-        # XXX(lhc)
+        # TODO(lhc)
         #task_state = TaskException(RuntimeError("Unknown fatal error"))
         assert self.assigned, "Task was not assigned before running."
         assert isinstance(self.req, EnvironmentRequirements), \
@@ -556,18 +564,19 @@ class DataMovementTask(TaskBase):
                 ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
             # Run the task and assign the new task state
             try:
-                assert isinstance(self._state, TaskRunning)
-                # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
-                with _scheduler_locals._environment_scope(self.req.environment), self.req.environment:
-                    # TODO(lhc): func() is not yet implemented.
-                    #            we should create data movement kernel manually.
+                # TODO(lhc): don't know how to handle this correctly.
+                #assert isinstance(self._state, TaskRunning)
 
-                    #task_state = self._state.func(self, *self._state.args)
-                    logger.debug(f"[DatamovementTask %s] Move from %s to %s", \
-                        self.name, self.in_data_list, self.out_data_list)
+                # We both set the environment as a thread local using _environment_scope,
+                # and enter the environment itself.
+                with _scheduler_locals._environment_scope(self.req.environment), \
+                     self.req.environment:
+                    # Move data to current device
+                    self._target_data._auto_move()
 
-                if task_state is None:
-                    task_state = TaskCompleted(None)
+                # TODO(lhc):
+                #if task_state is None:
+                task_state = TaskCompleted(None)
             except Exception as e:
                 task_state = TaskException(e)
                 logger.exception("Exception in task")
@@ -861,7 +870,6 @@ class WorkerThread(ControllableThread, SchedulerContext):
                     # Thread wakes up without a task (should only happen at end of program)
                     elif not self.task and self._should_run:
                         raise WorkerThreadException("%r woke up without a valid task.", self)
-
         except Exception as e:
             logger.exception("Unexpected exception in Task handling")
             self.scheduler.stop()
@@ -1098,29 +1106,12 @@ class Scheduler(ControllableThread, SchedulerContext):
         """
         with self._monitor:
             # Try to dequeue a task and if there is no
-            # remaining task, returns None.
-            # TODO(lhc): if a task is spawned later
-            #            than this function,
-            #            when that will be popped?
-            #            scheduler is busy waiting this queue?
             try:
                 task = self._spawned_task_queue.pop()
                 logger.debug(f"[Scheduler] Popped %r from spawn queue.", task)
                 return task
             except IndexError:
                 return None
-
-    def enqueue_mapped_task(self, task: Task):
-        """Enqueue a task on the mapped subgraph queue.
-           Note that this enqueueing has no data race.
-        """
-        self._new_mapped_task_queue.appendleft(task)
-
-    def _dequeue_mapped_task(self) -> Optional[Task]:
-        try:
-            return self._mapped_task_queue.pop()
-        except IndexError:
-            return None
 
     def enqueue_task(self, task: Task):
         """Enqueue a task on the resource allocation queue.
@@ -1195,7 +1186,12 @@ class Scheduler(ControllableThread, SchedulerContext):
             new_q = self._new_spawned_task_queue
             new_tasks = [new_q.popleft() for _ in range(len(new_q))]
             if len(new_tasks) > 0:
-                self._spawned_task_queue.extendleft(new_tasks)
+                # Newly added tasks should be enqueued onto the
+                # right to guarantee FIFO manners.
+                # It is efficient to map higher priority tasks to devices
+                # first since Applications generally spawn
+                # tasks in priority orders.
+                self._spawned_task_queue.extend(new_tasks)
 
     def fill_curr_mapped_task_queue(self):
         """ It moves tasks on the new mapped task queue to
@@ -1206,6 +1202,52 @@ class Scheduler(ControllableThread, SchedulerContext):
             new_tasks = [new_q.popleft() for _ in range(len(new_q))]
             if len(new_tasks) > 0:
                 self._mapped_task_queue.extendleft(new_tasks)
+
+    def _construct_datamove_task(self, target_data, compute_task):
+        """
+          This function constructs data movement task for target data.
+          This function consists of two steps.
+          First, it iterates all operand data of the dependency tasks
+          of the computation task (original task).
+          If any of the dependency tasks' data is overlapped with the
+          target data, then add the dependency task to the new data
+          movement task's dependency list.
+          Second, construct a data movement task.
+        """
+        dep_for_datamovement_task = []
+        is_overlapped = False
+        for dep in compute_task.dependencies:
+            if not isinstance(dep, Task):
+                continue
+            # Iterate data movement tasks of the compute_task.
+            for dep_data in dep.dataflow:
+                if id(target_data) == id(dep_data):
+                    # If any data of the dependent tasks is
+                    # overlapped with the target data,
+                    # add the corresponding computation task
+                    # to the data movement task's dependency list.
+                    is_overlapped = True
+                    break
+            if is_overlapped == True:
+                dep_for_datamovement_task.append(dep)
+        # Construct data movement task.
+        taskid = TaskID("global_" + str(len(task_locals.global_tasks)),
+                        (len(task_locals.global_tasks),))
+        taskid.dependencies = dep_for_datamovement_task
+        task_locals.global_tasks += [taskid]
+        datamove_task = DataMovementTask(dep_for_datamovement_task,
+                                         compute_task, taskid,
+                                         compute_task.req, target_data,
+                                         str(compute_task.taskid) + "." +
+                                         str(hex(id(target_data))) + ".dmt")
+        self.incr_active_tasks()
+        compute_task._add_dependency(datamove_task)
+        compute_task.add_new_datamove_task(datamove_task)
+        # If a task has no dependency after it is assigned to devices,
+        # immediately enqueue a corresponding data movement task to
+        # the ready queue.
+        if not datamove_task.bool_check_remaining_dependencies():
+            self.enqueue_task(datamove_task)
 
     def _map_tasks(self):
         # The first loop iterates a spawned task queue
@@ -1221,44 +1263,22 @@ class Scheduler(ControllableThread, SchedulerContext):
                     if not is_assigned:
                         self.enqueue_spawned_task(task)
                     else:
-                        # Create data movement task
-                        # This step consists of five steps.
-                        #
-                        # 1. Get alive dependencies of the task.
-                        # 2. Reset dependency lists of the task.
-                        #    (Therefore, we can reduce unnecessary
-                        #     dependee iterations when higher priority tasks
-                        #     are done)
-                        # 3. Remove that task from dependencies' dependee list.
-                        # 4. Create data movement task with the depdencies.
-                        # 5. Set the original task as the data task's dependee.
-                        # 6. Set the data task as the original task's denpdency.
-                        remaining_deps = task._reset_dependencies()
-                        # TODO(lhc): I am not confident if this task id and
-                        #            local/global tasks work correctly.
-                        taskid = TaskID("global_" +
-                                        str(len(task_locals.global_tasks)),
-                                        (len(task_locals.global_tasks),))
-                        task_locals.global_tasks += [taskid]
-                        taskid.dependencies = remaining_deps
-                        datamove_task = DataMovementTask(remaining_deps, task,
-                                             taskid, task.req,
-                                             ["in1 processing", "in2 processing"],
-                                             ["out processing"],
-                                             task.name + ".datamovement"
-                                             );
-                        logger.debug(f"[Scheduler] Spawned %r.", datamove_task)
-                        self.incr_active_tasks()
-                        task._set_dependencies([datamove_task])
+                        # Create data movement tasks for each data
+                        # operands of this task.
+                        for data in chain(task.dataflow._input,
+                                          task.dataflow._output,
+                                          task.dataflow._inout):
+                            self._construct_datamove_task(data, task)
+
                         # Only computation needs to set a assigned flag.
                         # Data movement task is set as assigned when it is created.
                         task.set_assigned()
                         # If a task has no dependency after it is assigned to devices,
                         # immediately enqueue a corresponding data movement task to
                         # the ready queue.
-                        if not datamove_task.bool_check_remaining_dependencies():
-                            self.enqueue_task(datamove_task)
-                            logger.debug(f"[Scheduler] Enqueued %r on ready queue", datamove_task)
+                        if not task.bool_check_remaining_dependencies():
+                            self.enqueue_task(task)
+                            logger.debug(f"[Scheduler] Enqueued %r on ready queue", task)
                 else:
                     logger.exception("[Scheduler] Tasks on the spawned queue ", \
                                      "should be not assigned any device.")

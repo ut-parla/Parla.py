@@ -74,7 +74,12 @@ class PArray:
 
         Note: should not be called when the system has no GPU
         """
-        self.array = cupy.asarray(self.array)  # asarray by default copy to current device
+        if isinstance(self.array, numpy.ndarray):
+            self.array = cupy.asarray(self.array)
+        elif isinstance(self.array, cupy.ndarray):
+            dst = cupy.empty_like(self.array)
+            dst.data.copy_from_device_async(self.array.data, self.array.nbytes)
+            self.array = dst
 
     def _to_gpu(self, index: int) -> None:
         """
