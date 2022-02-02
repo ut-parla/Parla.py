@@ -168,6 +168,7 @@ class MultiloadContext():
         #set VECID so that open shim can see and open correct file
         self.setenv("VECID", str(self.nsid))
         lower_cpu = min(self.allowed_cpus)
+        print(f"Setting VECID_CPU_OFFSET of VEC {self.nsid} to {lower_cpu}")
         self.setenv("VECID_CPU_OFFSET", str(lower_cpu))
 
         fname = f"cpuinfo_{self.nsid}"

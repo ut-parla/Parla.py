@@ -62,6 +62,8 @@ CONTEXT_CALLER_VOID("libparla_context.so", void, set_pid_mutilation_number, (i),
 
 void context_affinity_override_set_allowed_cpus_py (Lmid_t context, size_t ncpus, const int *cpus) {
     cpu_set_t tmp;
+    
+    printf("size of cpu_set_t:  %d\n", sizeof(cpu_set_t));
     CPU_ZERO(&tmp);
     for (int i=0; i < ncpus; i++) {
         CPU_SET(cpus[i], &tmp);

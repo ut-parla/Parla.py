@@ -19,7 +19,11 @@ def py_bfs(unsigned long self, int source, int slot):
         bfs(g, c_source, c_slot)
 
 def py_load_file(str fn):
-    r = <unsigned long>load_file(bytes(fn, "utf-8"))
+    cdef bytes bytestring = fn.encode()
+    cdef char *c_string = bytestring
+    cdef unsigned long r
+    with nogil:
+        r = <unsigned long>load_file(c_string)
     return r
 
 def py_init_galois(int nThreads):
