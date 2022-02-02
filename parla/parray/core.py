@@ -9,7 +9,9 @@ try:  # if the system has no GPU
     import cupy
     from parla.cuda import gpu
 except (ImportError, AttributeError):
-    cupy = numpy  # work around of cupy.ndarray
+    # PArray only considers numpy or cupy array
+    # work around of checking cupy.ndarray when cupy could not be imported
+    cupy = numpy
     gpu = None
 
 class PArray:
