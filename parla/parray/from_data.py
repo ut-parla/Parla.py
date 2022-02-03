@@ -1,7 +1,10 @@
-import numpy
-import cupy
-
 from .core import PArray
+
+import numpy
+try:  # if the system has no GPU
+    import cupy
+except ImportError:
+    cupy = numpy  # work around of cupy.ndarray
 
 
 def array(object, dtype=None, copy=True, order='K', subok=False, ndmin=0, like=None, on_gpu=False):
