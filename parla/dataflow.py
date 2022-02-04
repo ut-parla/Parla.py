@@ -22,5 +22,8 @@ class Dataflow:
         Move all data to the current device (of the corresponding tasks).
         Only PArray is supported.
         """
-        for array in chain(self._input, self._output, self._inout):
-            array._auto_move()
+        for array in self._input:
+            array._auto_move(do_write=False)
+
+        for array in chain(self._output, self._inout):
+            array._auto_move(do_write=True)

@@ -4,7 +4,7 @@ from parla.cpu_impl import cpu
 from parla.tasks import get_current_devices
 from parla.device import Device
 
-from typing import List
+from .coherence import MemoryOperation, Coherence
 
 import numpy
 try:  # if the system has no GPU
@@ -18,238 +18,6 @@ except (ImportError, AttributeError):
 
 
 CPU_INDEX = -1
-
-
-class MemoryOperation:
-    """
-    A memory operation representation.
-    """
-    ERROR = -1  # there is an error
-    NOOP = 0    # no operation
-    LOAD = 1    # load data from src to dst
-    EVICT = 2   # clear the data in src
-
-    def __init__(self, operation: int = NOOP, dst: int = -1, src: int = -1):
-        self.operation = operation
-        self.dst = dst
-        self.src = src
-
-    @staticmethod
-    def noop() -> MemoryOperation:
-        return MemoryOperation()
-
-    @staticmethod
-    def error() -> MemoryOperation:
-        return MemoryOperation(MemoryOperation.ERROR)
-
-    @staticmethod
-    def load(dst, src) -> MemoryOperation:
-        return MemoryOperation(MemoryOperation.LOAD, dst, src)
-
-    @staticmethod
-    def evict(src) -> MemoryOperation:
-        return MemoryOperation(MemoryOperation.EVICT, src=src)
-
-
-class Coherence:
-    """
-    A memory coherence protocol between devices.
-
-    Implements MSI protocol.
-    """
-    INVALID = 0
-    SHARED = 1
-    MODIFIED = 2
-
-    def __init__(self, init_owner: int):
-        """
-        Args:
-            init_owner: the owner of the first copy in the system
-        """
-        self._coherence_states = {init_owner: self.SHARED}  # states of each device
-        self._owner = init_owner  # owner id when MODIFIED / smallest valid device id when SHARED
-        self._overall_state = self.SHARED  # state of the whole system
-
-    def register_device(self, operator):
-        """ Register a new device to the protocol.
-
-        Should be called before do other operations as an operator.
-
-        Args:
-            operator: device id of the new device
-        """
-        self._coherence_states[operator] = self.INVALID
-
-    def update(self, operator, do_write=False) -> List[MemoryOperation]:
-        """ Tell the protocol that operator get a new copy (e.g. from user).
-
-        Should be called before do other operations as an operator.
-
-        Args:
-            operator: device id of the new device
-            do_write: if True, the operator will be MODIFIED, otherwise SHARED
-        """
-        operator_state = self._coherence_states[operator]
-
-        if operator_state == self.MODIFIED:  # already have the right to write data
-            return [MemoryOperation.noop()]
-        else:
-            if self._overall_state == self.INVALID:  # the system doesn't hold a copy before
-                self._coherence_states[operator] = self.MODIFIED if do_write else self.SHARED
-                self._owner = operator
-                self._overall_state = self.MODIFIED if do_write else self.SHARED
-                return [MemoryOperation.noop()]
-            else:  # the system already hold a copy
-                # evict others
-                operations = []
-                for device, state in self._coherence_states.items():
-                    if state != self.INVALID and device != operator:  # should not include operator itself
-                        self._coherence_states[device] = self.INVALID
-                    operations.append(MemoryOperation.evict(device))
-
-                self._coherence_states[operator] = self.MODIFIED if do_write else self.SHARED
-                self._owner = operator
-                self._overall_state = self.MODIFIED if do_write else self.SHARED
-                return operations
-
-    def read(self, operator: int) -> MemoryOperation:
-        """ Tell the protocol that operator read from the copy.
-
-        The operator should already be registered in the protocol.
-
-        Args:
-            operator: device id of the operator
-
-        Return:
-            MemoryOperation, so the caller could move data following the operation
-        """
-        operator_state = self._coherence_states[operator]
-
-        if operator_state == self.INVALID:  # need to load data from somewhere
-            if self._overall_state == self.SHARED:
-                # load data from owner
-                return MemoryOperation.load(dst=operator, src=self._owner)
-            elif self._overall_state == self.MODIFIED:
-                prev_owner = self._owner
-                self._coherence_states[prev_owner] = self.SHARED
-                self._coherence_states[operator] = self.SHARED
-                self._overall_state = self.SHARED
-
-                # Trick: smaller one becomes owner, so will always load from CPU (-1) when possible
-                self._owner = min(self._owner, operator)
-
-                return MemoryOperation.load(dst=operator, src=prev_owner)
-            else:   # overall_state should not be INVALID here
-                return MemoryOperation.error()
-        else:
-            return MemoryOperation.noop()  # do nothing
-
-    def write(self, operator: int) -> List[MemoryOperation]:
-        """ Tell the protocol that operator write to the copy.
-
-        The operator should already be registered in the protocol.
-
-        Args:
-            operator: device id of the operator
-
-        Return:
-            List[MemoryOperation], different to _read, write could return several MemoryOperations.
-                And the order operations matter.
-        """
-        operator_state = self._coherence_states[operator]
-
-        if operator_state == self.INVALID:  # need to load data from somewhere
-            if self._overall_state == self.SHARED:
-                # load data from previous owner
-                prev_owner = self._owner
-                operations = [MemoryOperation.load(dst=operator, src=prev_owner)]
-
-                # evict data from other devices
-                for device, state in self._coherence_states.items():
-                    if state == self.SHARED:
-                        self._coherence_states[device] = self.INVALID
-                    operations.append(MemoryOperation.evict(device))
-
-                # update operator state
-                self._overall_state = self.MODIFIED
-                self._coherence_states[operator] = self.MODIFIED
-                self._owner = operator
-
-                return operations
-            elif self._overall_state == self.MODIFIED:
-                # load data from previous owner
-                prev_owner = self._owner
-                operations = [MemoryOperation.load(dst=operator, src=prev_owner)]
-
-                # evict data from previous owner
-                self._coherence_states[prev_owner] = self.INVALID
-                operations.append(MemoryOperation.evict(prev_owner))
-
-                # update operator state
-                self._overall_state = self.MODIFIED
-                self._coherence_states[operator] = self.MODIFIED
-                self._owner = operator
-
-                return operations
-            else:   # overall_state should not be INVALID here
-                return [MemoryOperation.error()]
-        elif operator_state == self.SHARED:  # already have the latest copy
-            operations = []
-
-            # evict data from other devices
-            for device, state in self._coherence_states.items():
-                if state == self.SHARED and device != operator:  # should not include operator itself
-                    self._coherence_states[device] = self.INVALID
-                operations.append(MemoryOperation.evict(device))
-
-            # update operator state
-            self._overall_state = self.MODIFIED
-            self._coherence_states[operator] = self.MODIFIED
-            self._owner = operator
-
-            return operations
-        else: # operator is the owner in MODIFIED state
-            return [MemoryOperation.noop()] # do nothing
-
-    def evict(self, operator: int) -> MemoryOperation:
-        """ Tell the protocol that operator want to clear the copy.
-
-        The operator should already be registered in the protocol.
-
-        Args:
-            operator: device id of the operator
-
-        Return:
-            MemoryOperation, so the caller could move data following the operation
-
-        Note: if the operator is the last copy, the whole protocol state will be INVALID then.
-            And the system will lose the copy. So careful when evict the last copy.
-        """
-        operator_state = self._coherence_states[operator]
-
-        if operator_state == self.INVALID: # already evicted, do nothing
-            return MemoryOperation.noop()
-        elif operator_state == self.SHARED:
-            # find a new owner
-            if operator == self._owner:
-                new_owner = None
-                for device, state in self._coherence_states.items():
-                    if state == self.SHARED and device != operator:  # should not include operator itself
-                        new_owner = device
-                        break
-                if new_owner is None:  # operator owns the last copy
-                    self._overall_state = self.INVALID  # the system lose the last copy
-                self._owner = new_owner
-
-            # update states
-            self._coherence_states[operator] = self.INVALID
-            return MemoryOperation.evict(operator)
-        else:  # Modified
-            self._overall_state = self.INVALID  # the system lose the last copy
-            self._coherence_states[operator] = self.INVALID
-            self._owner = None
-            return MemoryOperation.evict(operator)
-
 
 class PArray:
     """Multi-dimensional array on a CPU or CUDA device.
@@ -306,22 +74,130 @@ class PArray:
         elif device.architecture == cpu:
             return CPU_INDEX
 
+    # Public API:
+
+    def update(self, array) -> None:
+        """ Update the copy on current device.
+
+        Args:
+            array: :class:`cupy.ndarray` or :class:`numpy.array` object
+
+        Note: should not be called outside of task context
+        Note: this method will also update the coherence protocol
+        """
+        this_device = self._current_device_index
+
+        # check if this array matches the device
+        # and copy data to this device
+        if isinstance(array, numpy.ndarray):
+            if this_device != CPU_INDEX:  # CPU to GPU
+                self._array[this_device] = cupy.array(array)
+            else: # data already in CPU
+                self._array[this_device] = array
+        else:
+            if this_device != CPU_INDEX: # GPU to CPU
+                self._array[this_device] = cupy.asnumpy(array)
+            else: # GPU to GPU
+                if array.device == this_device: # data already in this device
+                    self._array[this_device] = array
+                else:  # GPU to GPU
+                    self._array[this_device] = cupy.copy(array)
+
+        # update coherence protocol
+        operations = self._coherence.update(this_device, do_write=True)
+        for op in operations:
+            self._process_operation(op, this_device)
+
     # Coherence update operations:
 
-    def _coherence_read(self):
-        """
-        Tell the coherence protocol a read happened on current device.
-        """
-        pass
+    def _coherence_read(self, operator: int = None) -> None:
+        """ Tell the coherence protocol a read happened on a device.
 
+        And do data movement based on the operations given by protocol.
 
-    def _coherence_write(self):
+        Args:
+            operator: if is this not None, data will be moved to operator,
+                    else move to current device
+
+        Note: should not be called outside of task context
         """
-        Tell the coherence protocol a write happened on current device.
+        this_device = self._current_device_index
+
+        if not operator:
+            operator = this_device
+
+        # register the device if it is not already
+        if not self._coherence.is_registered(operator):
+            self._coherence.register_device(operator)
+
+        # update protocol and get operation
+        operation = self._coherence.read(operator)
+        self._process_operation(operation, this_device)
+
+    def _coherence_write(self, operator: int = None) -> None:
+        """Tell the coherence protocol a write happened on a device.
+
+        And do data movement based on the operations given by protocol.
+
+        Args:
+            operator: if is this not None, data will be moved to operator,
+                    else move to current device
+
+        Note: should not be called outside of task context
         """
-        pass
+        this_device = self._current_device_index
+
+        if not operator:
+            operator = this_device
+
+        # register the device if it is not already
+        if not self._coherence.is_registered(operator):
+            self._coherence.register_device(operator)
+
+        # update protocol and get list of operations
+        operations = self._coherence.write(operator)
+        for op in operations:
+            self._process_operation(op, this_device)
 
     # Device management methods:
+
+    def _process_operation(self, operation: MemoryOperation, current_device: int) -> None:
+        """
+        Process the given memory operations.
+        Data will be moved, and protocol states is kept unchanged.
+        """
+        if operation.inst == MemoryOperation.ERROR:
+            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
+                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
+        elif operation.inst == MemoryOperation.NOOP:
+            return  # do nothing
+        elif operation.inst == MemoryOperation.LOAD:
+            self._copy_data_between_device(operation.dst, operation.src, current_device)
+        elif operation.inst == MemoryOperation.EVICT:
+            self._array[operation.src] = None  # decrement the reference counter, relying on GC to free the memory
+        else:
+            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
+                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
+
+    def _copy_data_between_device(self, dst, src, current_device) -> None:
+        """
+        Copy data from src to dst.
+        #TODO: support P2P copy and Stream
+        """
+        if src != CPU_INDEX: # copy from CPU to GPU
+            if dst == current_device:
+                self._array[dst] = cupy.array(self._array[src])
+            else:
+                with cupy.cuda.Device(dst):
+                    self._array[dst] = cupy.array(self._array[src])
+        elif dst != CPU_INDEX: # copy from GPU to GPU
+            if dst == current_device:
+                self._array[dst] = cupy.copy(self._array[src])
+            else:
+                with cupy.cuda.Device(dst):
+                    self._array[dst] = cupy.copy(self._array[src])
+        else: # copy from GPU to CPU
+            self._array[CPU_INDEX] = cupy.asnumpy(self._array[src])
 
     @staticmethod
     def _get_current_device() -> Device:
@@ -332,57 +208,30 @@ class PArray:
         """
         return get_current_devices()[0]
 
-    def _auto_move(self) -> None:
-        """
-        Automatically move array to current device.
+    def _auto_move(self, index: int = None, do_write: bool = False) -> None:
+        """ Automatically move data to current device.
+
+        Multiple copies on different devices will be made based on coherence protocol.
+
+        Args:
+            do_write: True if want make the data writable in coherence protocol
+                False if this is only for read only in current task
+
 
         Note: should not be called outside of task context
         """
-        device = PArray._get_current_device()
-        if device.architecture == gpu:
-            if self._current_device_index == device.index:
-                return
-            self._to_current_gpu()
-        elif device.architecture == cpu:
-            self._to_cpu()
-
-    def _to_current_gpu(self) -> None:
-        """
-        Move the array to current GPU, do nothing if already on the device.
-
-        Note: should not be called when the system has no GPU
-        """
-        self.array = cupy.asarray(self.array)  # asarray by default copy to current device
-
-    def _to_gpu(self, index: int) -> None:
-        """
-        Move the array to GPU, do nothing if already on the device.
-        `index` is the index of GPU copied to
-
-        Note: should not be called when the system has no GPU
-        """
-        if self._current_device_index == index:
-            return
-
-        with cupy.cuda.Device(index):
-            self.array = cupy.asarray(self.array)
-
-    def _to_cpu(self) -> None:
-        """
-        Move the array to CPU, do nothing if already on CPU.
-        """
-        if not self._on_gpu:
-            return
-        self.array = cupy.asnumpy(self.array)
+        if do_write:
+            self._coherence_write(index)
+        else:
+            self._coherence_read(index)
 
     def _on_same_device(self, other: PArray) -> bool:
         """
         Return True if the two PArrays are in the same device.
         Note: other has to be a PArray object.
         """
-        if self._on_gpu == other._on_gpu:
-            return self._on_gpu == False or self.array.device == other.array.device
-        return False
+        this_device = self._current_device_index
+        return this_device in other._array and other._array[this_device] is not None
 
     # NumPy/CuPy methods redirection
 
