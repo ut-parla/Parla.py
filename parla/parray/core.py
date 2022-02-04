@@ -594,10 +594,10 @@ class PArray:
     # String representations:
 
     def __repr__(self):
-        return repr(self.array)
+        return repr(self._array)
 
     def __str__(self):
-        return str(self.array)
+        return str(self._array)
 
     def __format__(self, format_spec):
-        return self.array().__format__(format_spec)
+        return self._array.__format__(format_spec)
