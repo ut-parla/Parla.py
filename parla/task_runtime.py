@@ -9,7 +9,8 @@ import time
 from itertools import combinations
 from numbers import Number
 from threading import Thread, Condition
-from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar
+from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar, Deque
+import concurrent.futures
 
 from parla.device import get_all_devices, Device, Architecture
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
@@ -305,7 +306,7 @@ class Task(TaskBase):
         with self._mutex:
             self._remaining_dependencies -= 1
             self._check_remaining_dependencies()
-            print("Computation task, ", self.name, "'s one dependency is completed. [remaining:", \
+            print(f"[Task {self.name}] Data movement dependency completed. [remaining:", \
                   self._remaining_dependencies, "]", sep='')
 
     def _check_remaining_dependencies(self):
@@ -379,6 +380,8 @@ class Task(TaskBase):
                 # the scheduler.
                 for d in self.req.devices:
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
+                    # TODO: This is part of the easy launcher hack, fix it
+                    ctx.scheduler._available_resources._occupancy_dict[d] = False
                 self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
@@ -483,8 +486,8 @@ class DataMovementTask(TaskBase):
         with self._mutex:
             self._remaining_dependencies -= 1
             self._check_remaining_dependencies()
-            print("Data-movement task, ", self.name, "'s one dependency is " \
-                  "completed. [remaining:", self._remaining_dependencies, sep='')
+            #print("Data-movement task, ", self.name, "'s one dependency is " \
+            #      "completed. [remaining:", self._remaining_dependencies, sep='')
 
     def _check_remaining_dependencies(self):
         if not self._remaining_dependencies and self.assigned:
@@ -519,6 +522,7 @@ class DataMovementTask(TaskBase):
             ctx.decr_active_tasks()
 
     def run(self):
+        print(f"[DataMovementTask {self.name}] Starting")
         ctx = get_scheduler_context()
         task_state = None
         # XXX(lhc)
@@ -540,12 +544,13 @@ class DataMovementTask(TaskBase):
                     #            we should create data movement kernel manually.
 
                     #task_state = self._state.func(self, *self._state.args)
-                    print("Data movement start: move from ", self.in_data_list, \
+                    print(f"[DatamovementTask {self.name}] Move from ", self.in_data_list, \
                             " to ", self.out_data_list, sep='')
 
                 if task_state is None:
                     task_state = TaskCompleted(None)
             except Exception as e:
+                print(f"STATE: {self._state}")
                 task_state = TaskException(e)
                 logger.exception("Exception in task")
             finally:
@@ -554,6 +559,8 @@ class DataMovementTask(TaskBase):
                 # the scheduler.
                 for d in self.req.devices:
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
+                    # TODO: This is part of the easy launcher hack, fix it
+                    ctx.scheduler._available_resources._occupancy_dict[d] = False
                 self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
@@ -565,7 +572,7 @@ class DataMovementTask(TaskBase):
             if self._state.is_terminal:
                 return False
             else:
-                print("Data-movement task, ", self.name, ", added a dependee, ", dependee, sep='')
+                #print("Data-movement task, ", self.name, ", added a dependee, ", dependee, sep='')
                 self._dependees.append(dependee)
                 return True
 
@@ -670,7 +677,6 @@ class TaskID:
 class InvalidSchedulerAccessException(RuntimeError):
     pass
 
-
 class SchedulerContext(metaclass=ABCMeta):
     def spawn_task(self, function, args, deps, taskid, req, dataflow, name: Optional[str] = None):
         return Task(function, args, deps, taskid, req, dataflow, name)
@@ -760,6 +766,8 @@ class ControllableThread(Thread, metaclass=ABCMeta):
     def run(self):
         pass
 
+class WorkerThreadException(RuntimeError):
+    pass
 
 class WorkerThread(ControllableThread, SchedulerContext):
     def __init__(self, scheduler, index):
@@ -767,10 +775,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
         self._monitor = threading.Condition(threading.Lock())
         self.index = index
         self._scheduler = scheduler
-        # Use a deque to store local tasks (a high-performance implementation would a work stealing optimized deque).
-        # In this implementation the right is the "local-end", so append/pop are used by this worker and
-        # appendleft/popleft are used by the scheduler or other workers.
-        self._queue = deque()
+        self.task = None
         self._status = "Initializing"
 
     @property
@@ -782,51 +787,6 @@ class WorkerThread(ControllableThread, SchedulerContext):
 
     def decr_active_tasks(self):
         self.scheduler.decr_active_tasks()
-
-    def estimated_queue_depth(self):
-        """Return the current estimated depth of this workers local queue.
-
-        This should be considered immediately stale and may in fact be slightly wrong (+/- 1 element) w.r.t. to any
-        real value of the queue depth. These limitations are to allow high-performance queue implementations that
-        don't provide an atomic length operation.
-        """
-        # Assume this will not FAIL due to concurrent access, slightly incorrect results are not an issue.
-        return len(self._queue)
-
-    def _pop_task(self):
-        """Pop a task from the queue head.
-        """
-        with self._monitor:
-            while True:
-                try:
-                    if self._should_run:
-                        logger.debug("Getting a task: %r", self)
-                        return self._queue.pop()
-                    else:
-                        return None
-                except IndexError:
-                    logger.debug("Blocking for a task: %r (%s)", self, self._monitor)
-                    print("[WorkerThread ", self.index,"] Blocking for a task.", sep='')
-                    self._monitor.wait()
-                    print("[WorkerThread ", self.index,"] Waking up.", sep='')
-
-    def steal_task_nonblocking(self):
-        """Pop a task from the queue tail.
-
-        :return: The task for None if no task was available to steal.
-        """
-        with self._monitor:
-            try:
-                return self._queue.popleft()
-            except IndexError:
-                return None
-
-    def _push_task(self, task):
-        """Push a local task on the queue head.
-        """
-        with self._monitor:
-            self._queue.append(task)
-            self._monitor.notify()
 
     def enqueue_spawned_task(self, task: Task):
         self.scheduler.enqueue_spawned_task(task)
@@ -847,10 +807,18 @@ class WorkerThread(ControllableThread, SchedulerContext):
         #     self._push_task(task)
         # This would need to fail over to the scheduler level enqueue if the resources is not available for assignment.
 
-    def _enqueue_task_local(self, task):
+    def assign_task(self, task):
         with self._monitor:
-            self._queue.appendleft(task)
+            if self.task:
+                raise WorkerThreadException("Tried to assign task to WorkerThread that already had one.")
+            self.task = task
             self._monitor.notify()
+
+    def _remove_task(self):
+        with self._monitor:
+            if not self.task:
+                raise WorkerThreadException("Tried to remove a nonexistent task.")
+            self.task = None
 
     def run(self) -> None:
         try:
@@ -859,12 +827,19 @@ class WorkerThread(ControllableThread, SchedulerContext):
                     component.initialize_thread()
                 while self._should_run:
                     self._status = "Getting Task"
-                    task: Task = self._pop_task()
-                    if not task:
-                        break
-                    print("Worker thread start:", task.name, sep='')
-                    self._status = "Running Task {}".format(task)
-                    task.run()
+                    if not self.task:
+                        logger.debug("Blocking for a task: %r (%s)", self, self._monitor)
+                        print("[WorkerThread ", self.index,"] Blocking for a task.", sep='')
+                        with self._monitor:
+                            self._monitor.wait()
+                        print("[WorkerThread ", self.index,"] Waking up.", sep='')
+                    if not self.task:
+                        break # TODO: Properly raise exception here
+                    print(f"[WorkerThread {self.index}] Starting:", self.task.name, sep='')
+                    self._status = "Running Task {}".format(self.task)
+                    self.task.run()
+                    self._remove_task()
+                    self.scheduler.free_thread(self)
         except Exception as e:
             logger.exception("Unexpected exception in Task handling")
             self.scheduler.stop()
@@ -881,6 +856,7 @@ class ResourcePool:
     _monitor: Condition
     _devices: Dict[Device, Dict[str, float]]
 
+
     # Resource pools track device resources. Environments are a separate issue and are not tracked here. Instead,
     # tasks will consume resources based on their devices even though those devices are bundled into an environment.
 
@@ -888,6 +864,12 @@ class ResourcePool:
         self._multiplier = multiplier
         self._monitor = threading.Condition(threading.Lock())
         self._devices = self._initial_resources(multiplier)
+
+        # NOTE: Hack to make launching easier for now.
+        # Holds a bool per device to determine whether or not it is "free"
+        # The right way to do this is check device resources
+        # TODO: Do it right
+        self._occupancy_dict = {dev: False for dev in get_all_devices()}
 
     @staticmethod
     def _initial_resources(multiplier):
@@ -961,6 +943,9 @@ class ResourcePool:
     def __repr__(self):
         return "ResourcePool(devices={})".format(self._devices)
 
+    def get_resources(self):
+        return [dev for dev in self._devices]
+
 
 class AssignmentFailed(Exception):
     pass
@@ -976,9 +961,9 @@ class Scheduler(ControllableThread, SchedulerContext):
     # See __init__ function below for comments on the functionality of these members
     _environments: TaskEnvironmentRegistry
     _worker_threads: List[WorkerThread]
+    _free_worker_threads: Deque[WorkerThread]
     _available_resources: ResourcePool
     period: float # TODO: Figure out what this is for
-    max_worker_queue_depth: int # TODO: Delete this
 
     def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 0.01,
                  max_worker_queue_depth: int = 2):
@@ -1008,6 +993,9 @@ class Scheduler(ControllableThread, SchedulerContext):
         # TODO: Figure out what this is for
         self._monitor = threading.Condition(threading.Lock())
 
+        # Track, allocate, and deallocate resources (devices)
+        self._available_resources = ResourcePool(multiplier=1.0)
+
         # Spawned task queues
         # Tasks that have been spawned but not mapped are stored here.
         # Tasks are removed once they are mapped.
@@ -1031,15 +1019,13 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._ready_queue = deque()
 
         # The device queues where scheduled tasks go to be launched from
-        self._device_queues = [deque() for n in range(0, n_threads)]
+        self._device_queues = {dev: deque() for dev in self._available_resources.get_resources()}
 
-        # Track, allocate, and deallocate resources (devices)
-        self._available_resources = ResourcePool(multiplier=1.0)
-
-        # Worker threads for each device (probably removing these)
+        # Worker threads for each device
         self._worker_threads = [WorkerThread(self, i) for i in range(n_threads)]
         for t in self._worker_threads:
             t.start()
+        self._free_worker_threads = deque(self._worker_threads)
 
         # Start the scheduler thread (likely to change later)
         self.start()
@@ -1068,6 +1054,10 @@ class Scheduler(ControllableThread, SchedulerContext):
         if self._exceptions:
             # TODO: Should combine all of them into a single exception.
             raise self._exceptions[0]
+
+    def free_thread(self, thread: WorkerThread):
+        with self._monitor:
+            self._free_worker_threads.append(thread)
 
     def incr_active_tasks(self):
         with self._monitor:
@@ -1101,7 +1091,9 @@ class Scheduler(ControllableThread, SchedulerContext):
             #            when that will be popped?
             #            scheduler is busy waiting this queue?
             try:
-                return self._spawned_task_queue.pop()
+                task = self._spawned_task_queue.pop()
+                print(f"[Scheduler] Popped {task.name} from spawn queue.")
+                return task
             except IndexError:
                 return None
 
@@ -1129,7 +1121,9 @@ class Scheduler(ControllableThread, SchedulerContext):
         while True:
             try:
                 if self._should_run:
-                    return self._ready_queue.pop()
+                    task = self._ready_queue.pop()
+                    print(f"[Scheduler] Popped {task.name} from ready queue.")
+                    return task
                 else:
                     return None
             except IndexError:
@@ -1144,6 +1138,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         :return: True if the assignment succeeded, False otherwise.
         """
+        print(f"[Scheduler] Mapping {task.name}.")
         # Build a list of environments with "qualities" assigned based on how well they match a possible
         # option for the task
         env_match_quality = defaultdict(lambda: 0)
@@ -1174,7 +1169,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                     break
             if is_res_constraint_satisifed:
                 task.req = EnvironmentRequirements(task.req.resources, env, task.req.tags)
+                print(f"[Scheduler] Mapped {task.name}.")
                 return True
+        print(f"[Scheduler] Failed to map {task.name}.")
         return False
 
     def fill_curr_spawned_task_queue(self):
@@ -1197,15 +1194,15 @@ class Scheduler(ControllableThread, SchedulerContext):
             if len(new_tasks) > 0:
                 self._mapped_task_queue.extendleft(new_tasks)
 
-    def run_mapper(self):
+    def _map_tasks(self):
         # The first loop iterates a spawned task queue
         # and constructs a mapped task subgrpah.
+        print("[Scheduler] Map Phase")
+        self.fill_curr_spawned_task_queue()
         while True:
-            self.fill_curr_spawned_task_queue()
             task: Optional[Task] = self._dequeue_spawned_task()
             if task:
                 if not task.assigned:
-                    print("\n[Scheduler] Spawned task, ", task.name, ", is mapped.", sep='')
                     is_assigned = self._assignment_policy(task)
                     assert isinstance(is_assigned, bool)
                     if not is_assigned:
@@ -1236,6 +1233,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                                              ["out processing"],
                                              task.name + ".datamovement"
                                              );
+                        print(f"[Scheduler] Spawned {datamove_task.name}.")
                         self.incr_active_tasks()
                         task._set_dependencies([datamove_task])
                         # Only computation needs to set a assigned flag.
@@ -1246,6 +1244,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # the ready queue.
                         if not datamove_task.bool_check_remaining_dependencies():
                             self.enqueue_task(datamove_task)
+                            print(f"[Scheduler] Enqueued {datamove_task.name} on ready queue")
                 else:
                     logger.exception("[Scheduler] Tasks on the spawned Q ", \
                                      "should be not assigned any device.")
@@ -1255,23 +1254,54 @@ class Scheduler(ControllableThread, SchedulerContext):
                 # move to the mapped task scheduling.
                 break
 
-    def run_deviceq_mapper(self):
+    def _schedule_tasks(self):
+        """ Currently this doesn't do any intelligent scheduling (ordering).
+            Dequeue all ready tasks and send them to device queues in order.
+        """
+        print("[Scheduler] Schedule Phase")
         while True:
             task: Optional[TaskBase] = self._dequeue_task()
             if not task or not task.assigned:
                 logger.debug("Task %r: Failed to assign", task)
                 break
             for d in task.req.devices:
-                print("[Scheduler] Task, ", task.name, ", is enqueued onto a device Q.", sep='')
-                worker = self._worker_threads[task.req.env_no]
-                worker._enqueue_task_local(task)
+                print(f"[Scheduler] Enqueuing {task.name} to device {d}")
+                self._device_queues[d].append(task)
+
+    def _launch_tasks(self):
+        """ Iterate through free devices and launch tasks on them
+        """
+        print("[Scheduler] Launch Phase")
+        with self._monitor:
+            for dev, queue in self._device_queues.items():
+                # Make sure there's an available WorkerThread
+                if len(self._free_worker_threads) == 0:
+                    break
+
+                # Hack to make launching work for now
+                # Only works for single-device tasks, and only one task at a time on each device
+                # TODO: Make this not terrible
+                if self._available_resources._occupancy_dict[dev] == False: # if not occupied
+                    if len(queue) > 0: # if there are tasks on the queue
+                        task = queue.pop() # grab a task
+                        worker = self._free_worker_threads.pop() # grab a worker
+                        print(f"[Scheduler] Launching {task.name} on WorkerThread {worker.index}")
+                        self._available_resources._occupancy_dict[dev] = True # mark the device as occupied
+                        worker.assign_task(task) # assign the task to the worker (this notifies the worker's monitor)
+                        print(f"[Scheduler] Launched {worker.task.name}")
 
     def run(self) -> None:
         # noinspection PyBroadException
         try: # Catch all exception to report them usefully
+            i = 0
             while self._should_run:
-                self.run_mapper()
-                self.run_deviceq_mapper()
+                self._map_tasks()
+                self._schedule_tasks()
+                self._launch_tasks()
+                print("[Scheduler] Sleeping!")
+                time.sleep(1) # TODO: Delete this. Why the fuck doesn't this release the GIL.
+                print("[Scheduler] Awake!")
+
         except Exception:
             logger.exception("Unexpected exception in Scheduler")
             self.stop()
