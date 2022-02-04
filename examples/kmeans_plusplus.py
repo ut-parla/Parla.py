@@ -108,7 +108,8 @@ def kmeans(data: cp.ndarray, K: int, centroids: cp.ndarray):
 
         # NEW: keep the reference unchanged
         # LHS: PArray / RHS: return a numpy.ndarray
-        centroids.array = np.copy(new_centroids)
+        # centroids = np.copy(new_centroids)
+        centroids.update(np.copy(new_centroids))
 
     print(f"K-means done with {loop} loops.")
     for k in range(K):
