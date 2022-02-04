@@ -234,11 +234,18 @@ class Task(TaskBase):
             # These dependencies are moved to a data movement
             # task.
             self._set_dependencies(dependencies)
-            #self.in_data_list = in_data_list
-            #self.out_data_list = out_data_list
             # Expose the self reference to other threads as late as possible, but not after potentially getting
             # scheduled.
             taskid.task = self
+
+            # List of parent tasks for nested tasks.
+            # TODO(lhc): This is useful if we want to hide nested tasks
+            #            from outer tasks.
+            #            If we allow the visibility, semantic should be
+            #            chnaged.
+            # TODO(lhc): Decided to follow dependency orders for mapping.
+            #            This will be deprecated soon.
+            self._parent_tasks = []
             
             logger.debug("Task %r: Creating", self)
             get_scheduler_context().incr_active_tasks()
@@ -386,6 +393,15 @@ class Task(TaskBase):
             self._notify_dependees()
             ctx.decr_active_tasks()
 
+    def _add_parent_tasks(self, parent_task):
+        self._parent_tasks.append(parent_task)
+
+    def _get_parent_tasks(self):
+        return self._parent_tasks
+
+    def _get_task_level(self):
+        return len(self._parent_tasks)
+
     def run(self):
         ctx = get_scheduler_context()
         task_state = TaskException(RuntimeError("Unknown fatal error"))
@@ -457,7 +473,10 @@ class DataMovementTask(TaskBase):
             # Data movement task gets subsets of dependency of the
             # source (computation) task depending on data dependency.
             self._dependencies = []
-            self._set_dependencies(dependencies)
+            if (dependencies is not None):
+                self._set_dependencies(dependencies)
+            else:
+                self._remaining_dependencies = 0
 
             # TODO(lhc): temporary task running state.
             #            This would be a data movement kernel.
@@ -509,6 +528,9 @@ class DataMovementTask(TaskBase):
         self._dependencies.append(dependency)
         if not dependency._add_dependee(self):
             self._remaining_dependencies -= 1
+            return False
+        else:
+            return True
 
     def _complete_dependency(self):
         with self._mutex:
@@ -804,6 +826,9 @@ class WorkerThread(ControllableThread, SchedulerContext):
         self._scheduler = scheduler
         self.task = None
         self._status = "Initializing"
+        # Maintain list of the running tasks by this thread.
+        # It gives information of task hierarchy.
+        self._runningtasks = []
 
     @property
     def scheduler(self) -> "Scheduler":
@@ -864,7 +889,9 @@ class WorkerThread(ControllableThread, SchedulerContext):
                     if self.task:
                         logger.debug(f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
                         self._status = "Running Task {}".format(self.task)
+                        self._runningtasks.append(self.task.taskid)
                         self.task.run()
+                        self._runningtasks.remove(self.task.taskid)
                         self._remove_task()
                         self.scheduler.append_free_thread(self)
                     # Thread wakes up without a task (should only happen at end of program)
@@ -1041,12 +1068,19 @@ class Scheduler(ControllableThread, SchedulerContext):
         # The device queues where scheduled tasks go to be launched from
         self._device_queues = {dev: deque() for dev in self._available_resources.get_resources()}
 
-        # Worker threads for each device
-        self._worker_threads = [WorkerThread(self, i) for i in range(n_threads)]
-        for t in self._worker_threads:
-            t.start()
-        self._free_worker_threads = deque(self._worker_threads)
+        # Dictinary mapping data block to task lists.
+        self._datablock_dict = defaultdict(list)
 
+        self._worker_threads = [WorkerThread(self, i) for i in range(n_threads)]
+        # Mapping thread index of _worker_threads and thread id.
+        # Through this, the runtime could expoit thread local information.
+        self._worker_thread_ids = [None for _ in range(n_threads)]
+        for i in range(n_threads):
+            t = self._worker_threads[i]
+            t.start()
+            self._worker_thread_ids[i] = t.ident
+        self._free_worker_threads = deque(self._worker_threads)
+        self._main_thread_id = threading.get_ident()
         # Start the scheduler thread (likely to change later)
         self.start()
 
@@ -1093,12 +1127,26 @@ class Scheduler(ControllableThread, SchedulerContext):
         if done:
             self.stop()
 
+    def enqueue_spawned_task(self, task: Task, parent_task_list: List):
+        with self._monitor:
+            self._new_mapped_task_queue.appendleft((task, parent_task_list))
+
     def enqueue_spawned_task(self, task: Task):
         """Enqueue a spawned task on the spawned task queue.
            Scheduler iterates the queue and assigns resources
            regardless of remaining dependencies.
         """
         with self._monitor:
+            # The main thread never spawns nested tasks.
+            # TODO(lhc): not confident about this.
+            #            I now think that it is possible if only one core
+            #            is used to run. Let me leave this for now
+            #            since we may not need thread local data soon.
+            #            (because we may not need to track task hierarchy)
+            if (not self._main_thread_id == threading.get_ident()):
+                t_id = self._worker_thread_ids.index(threading.get_ident())
+                for p_t in self._worker_threads[t_id]._runningtasks:
+                    task._add_parent_tasks(p_t)
             self._new_spawned_task_queue.appendleft(task)
 
     def _dequeue_spawned_task(self) -> Optional[Task]:
@@ -1183,9 +1231,9 @@ class Scheduler(ControllableThread, SchedulerContext):
             the current queue.
         """
         with self._monitor:
-            new_q = self._new_spawned_task_queue
-            new_tasks = [new_q.popleft() for _ in range(len(new_q))]
-            if len(new_tasks) > 0:
+            if (len(self._new_spawned_task_queue) > 0):
+                new_q = self._new_spawned_task_queue
+                new_tasks = [new_q.popleft() for _ in range(len(new_q))]
                 # Newly added tasks should be enqueued onto the
                 # right to guarantee FIFO manners.
                 # It is efficient to map higher priority tasks to devices
@@ -1214,28 +1262,10 @@ class Scheduler(ControllableThread, SchedulerContext):
           movement task's dependency list.
           Second, construct a data movement task.
         """
-        dep_for_datamovement_task = []
-        is_overlapped = False
-        for dep in compute_task.dependencies:
-            if not isinstance(dep, Task):
-                continue
-            # Iterate data movement tasks of the compute_task.
-            for dep_data in dep.dataflow:
-                if id(target_data) == id(dep_data):
-                    # If any data of the dependent tasks is
-                    # overlapped with the target data,
-                    # add the corresponding computation task
-                    # to the data movement task's dependency list.
-                    is_overlapped = True
-                    break
-            if is_overlapped == True:
-                dep_for_datamovement_task.append(dep)
         # Construct data movement task.
-        taskid = TaskID("global_" + str(len(task_locals.global_tasks)),
-                        (len(task_locals.global_tasks),))
-        taskid.dependencies = dep_for_datamovement_task
+        taskid = TaskID(str(compute_task.taskid)+"."+str(hex(id(target_data)))+".dmt."+str(len(task_locals.global_tasks)), (len(task_locals.global_tasks),))
         task_locals.global_tasks += [taskid]
-        datamove_task = DataMovementTask(dep_for_datamovement_task,
+        datamove_task = DataMovementTask(None,
                                          compute_task, taskid,
                                          compute_task.req, target_data,
                                          str(compute_task.taskid) + "." +
@@ -1243,6 +1273,21 @@ class Scheduler(ControllableThread, SchedulerContext):
         self.incr_active_tasks()
         compute_task._add_dependency(datamove_task)
         compute_task.add_new_datamove_task(datamove_task)
+        target_data_id = id(target_data)
+        is_overlapped = False
+        if target_data_id in self._datablock_dict:
+            dep_task_list = self._datablock_dict[target_data_id]
+            completed_tasks = []
+            for dep_task_tuple in dep_task_list:
+                dep_task_id = dep_task_tuple[0]
+                dep_task = dep_task_tuple[1]
+                if dep_task_id in compute_task._get_parent_tasks():
+                    continue
+                if dep_task._get_task_level() >= compute_task._get_task_level():
+                    if not datamove_task._add_dependency(dep_task):
+                        completed_tasks.append(dep_task_id)
+            dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
+        self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
         # If a task has no dependency after it is assigned to devices,
         # immediately enqueue a corresponding data movement task to
         # the ready queue.
