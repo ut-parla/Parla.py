@@ -95,7 +95,7 @@ class Coherence:
                 for device, state in self._coherence_states.items():
                     if state != self.INVALID and device != operator:  # should not include operator itself
                         self._coherence_states[device] = self.INVALID
-                    operations.append(MemoryOperation.evict(device))
+                        operations.append(MemoryOperation.evict(device))
 
                 self._coherence_states[operator] = self.MODIFIED if do_write else self.SHARED
                 self._owner = operator
@@ -158,7 +158,7 @@ class Coherence:
                 for device, state in self._coherence_states.items():
                     if state == self.SHARED:
                         self._coherence_states[device] = self.INVALID
-                    operations.append(MemoryOperation.evict(device))
+                        operations.append(MemoryOperation.evict(device))
 
                 # update operator state
                 self._overall_state = self.MODIFIED
@@ -190,7 +190,7 @@ class Coherence:
             for device, state in self._coherence_states.items():
                 if state == self.SHARED and device != operator:  # should not include operator itself
                     self._coherence_states[device] = self.INVALID
-                operations.append(MemoryOperation.evict(device))
+                    operations.append(MemoryOperation.evict(device))
 
             # update operator state
             self._overall_state = self.MODIFIED

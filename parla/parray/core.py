@@ -38,7 +38,7 @@ class PArray:
         if isinstance(array, numpy.ndarray):
             location = CPU_INDEX
         else:
-            location = array.device
+            location = int(array.device)
 
         self._array[location] = array
         self._coherence = Coherence(location)
@@ -95,10 +95,10 @@ class PArray:
             else: # data already in CPU
                 self._array[this_device] = array
         else:
-            if this_device != CPU_INDEX: # GPU to CPU
+            if this_device == CPU_INDEX: # GPU to CPU
                 self._array[this_device] = cupy.asnumpy(array)
             else: # GPU to GPU
-                if array.device == this_device: # data already in this device
+                if int(array.device) == this_device: # data already in this device
                     self._array[this_device] = array
                 else:  # GPU to GPU
                     self._array[this_device] = cupy.copy(array)
@@ -184,7 +184,7 @@ class PArray:
         Copy data from src to dst.
         #TODO: support P2P copy and Stream
         """
-        if src != CPU_INDEX: # copy from CPU to GPU
+        if src == CPU_INDEX: # copy from CPU to GPU
             if dst == current_device:
                 self._array[dst] = cupy.array(self._array[src])
             else:
