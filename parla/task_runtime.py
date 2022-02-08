@@ -837,7 +837,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
                         self._status = "Running Task {}".format(self.task)
                         self.task.run()
                         self._remove_task()
-                        self.scheduler.free_thread(self)
+                        self.scheduler.append_free_thread(self)
                     # Thread wakes up without a task (should only happen at end of program)
                     elif not self.task and self._should_run:
                         raise WorkerThreadException("%r woke up without a valid task.", self)
@@ -857,7 +857,6 @@ class ResourcePool:
     _multiplier: float
     _monitor: threading.Condition
     _devices: Dict[Device, Dict[str, float]]
-
 
     # Resource pools track device resources. Environments are a separate issue and are not tracked here. Instead,
     # tasks will consume resources based on their devices even though those devices are bundled into an environment.
@@ -965,10 +964,9 @@ class Scheduler(ControllableThread, SchedulerContext):
     _worker_threads: List[WorkerThread]
     _free_worker_threads: Deque[WorkerThread]
     _available_resources: ResourcePool
-    period: float # TODO: Figure out what this is for
+    period: float
 
-    def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 0.01,
-                 max_worker_queue_depth: int = 2):
+    def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 0.01):
         # ControllableThread: __init__ sets it to run
         # SchedulerContext: No __init__
         super().__init__()
@@ -986,13 +984,9 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Start with one count that is removed when the scheduler is "exited"
         self._active_task_count = 1
 
-        # TODO: Delete this
-        self.max_worker_queue_depth = max_worker_queue_depth
-
-        # TODO: Figure out what this is for
+        # Period scheduler sleeps between loops (see run function)
         self.period = period
 
-        # TODO: Figure out what this is for
         self._monitor = threading.Condition(threading.Lock())
 
         # Track, allocate, and deallocate resources (devices)
@@ -1011,10 +1005,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         # tasks spawn as it runs
         self._spawned_task_queue = deque()
         self._new_spawned_task_queue = deque()
-
-        # TODO: Delete these since they're not used I think
-        self._mapped_task_queue = deque()
-        self._new_mapped_task_queue = deque()
 
         # This is where tasks go when they have been mapped and their
         # dependencies are complete, but they have not been scheduled.
@@ -1058,7 +1048,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             # TODO: Should combine all of them into a single exception.
             raise self._exceptions[0]
 
-    def free_thread(self, thread: WorkerThread):
+    def append_free_thread(self, thread: WorkerThread):
         with self._monitor:
             self._free_worker_threads.append(thread)
 
@@ -1302,7 +1292,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 self._schedule_tasks()
                 self._launch_tasks()
                 logger.debug("[Scheduler] Sleeping!")
-                time.sleep(1) # TODO: Delete this. Why the fuck doesn't this release the GIL.
+                time.sleep(self.period)
                 logger.debug("[Scheduler] Awake!")
 
         except Exception:
