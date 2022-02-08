@@ -1,4 +1,3 @@
-import abc
 import logging
 import random
 from abc import abstractmethod, ABCMeta
@@ -7,12 +6,9 @@ from contextlib import contextmanager
 import threading
 import time
 from itertools import combinations
-from numbers import Number
-from threading import Thread, Condition
 from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar, Deque
-import concurrent.futures
 
-from parla.device import get_all_devices, Device, Architecture
+from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
 from parla.dataflow import Dataflow
 
@@ -33,7 +29,7 @@ _ASSIGNMENT_FAILURE_WARNING_LIMIT = 32
 TaskAwaitTasks = namedtuple("AwaitTasks", ("dependencies", "value_task"))
 
 
-class TaskState(object, metaclass=abc.ABCMeta):
+class TaskState(object, metaclass=ABCMeta):
     __slots__ = []
 
     @property
@@ -95,7 +91,7 @@ class TaskException(TaskState):
 ResourceDict = Dict[str, Union[float, int]]
 
 
-class ResourceRequirements(object, metaclass=abc.ABCMeta):
+class ResourceRequirements(object, metaclass=ABCMeta):
     __slots__ = ["resources", "ndevices", "tags"]
 
     tags: FrozenSet[Any]
@@ -749,7 +745,7 @@ def get_devices() -> Collection[Device]:
     return _scheduler_locals.environment.placement
 
 
-class ControllableThread(Thread, metaclass=ABCMeta):
+class ControllableThread(threading.Thread, metaclass=ABCMeta):
     _should_run: bool
     _monitor: threading.Condition
 
@@ -853,7 +849,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
 
 class ResourcePool:
     _multiplier: float
-    _monitor: Condition
+    _monitor: threading.Condition
     _devices: Dict[Device, Dict[str, float]]
 
 
