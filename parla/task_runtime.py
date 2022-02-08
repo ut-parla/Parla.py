@@ -830,13 +830,18 @@ class WorkerThread(ControllableThread, SchedulerContext):
                         with self._monitor:
                             self._monitor.wait()
                         logger.debug("[WorkerThread %d] Waking up.", self.index)
-                    if not self.task:
-                        break # TODO: Properly raise exception here
-                    logger.debug(f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
-                    self._status = "Running Task {}".format(self.task)
-                    self.task.run()
-                    self._remove_task()
-                    self.scheduler.free_thread(self)
+
+                    # Thread wakes up with a task
+                    if self.task:
+                        logger.debug(f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
+                        self._status = "Running Task {}".format(self.task)
+                        self.task.run()
+                        self._remove_task()
+                        self.scheduler.free_thread(self)
+                    # Thread wakes up without a task (should only happen at end of program)
+                    elif not self.task and self._should_run:
+                        raise WorkerThreadException("%r woke up without a valid task.", self)
+
         except Exception as e:
             logger.exception("Unexpected exception in Task handling")
             self.scheduler.stop()
@@ -1047,7 +1052,8 @@ class Scheduler(ControllableThread, SchedulerContext):
             while self._should_run:
                 self._monitor.wait()
         for t in self._worker_threads:
-            t.join()
+            #t.stop() # This is needed to gracefully end the threads without throwing missing task exceptions
+            t.join() # This is what actually rejoins the threads
         if self._exceptions:
             # TODO: Should combine all of them into a single exception.
             raise self._exceptions[0]
