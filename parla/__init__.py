@@ -22,7 +22,6 @@ class Parla:
         i = 0
         task_envs = []
         for d in get_all_devices():
-            print("env_no:", i, " is added to Parla environments")
             task_envs.append(TaskEnvironment(placement=[d], env_no=i))
             i+=1
         self.environments = task_envs

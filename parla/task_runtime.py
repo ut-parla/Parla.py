@@ -57,7 +57,10 @@ class TaskRunning(TaskState):
         self.dependencies = None
 
     def __repr__(self):
-        return "TaskRunning({}, {}, {})".format(self.func.__name__, self.args, self.dependencies)
+        if self.func:
+            return "TaskRunning({}, {}, {})".format(self.func.__name__, self.args, self.dependencies)
+        else:
+            return "Functionless task"
 
 
 class TaskCompleted(TaskState):
@@ -302,8 +305,8 @@ class Task(TaskBase):
         with self._mutex:
             self._remaining_dependencies -= 1
             self._check_remaining_dependencies()
-            print(f"[Task {self.name}] Data movement dependency completed. [remaining:", \
-                  self._remaining_dependencies, "]", sep='')
+            logger.info(f"[Task %s] Data movement dependency completed. \
+                (remaining: %d)", self.name, self._remaining_dependencies)
 
     def _check_remaining_dependencies(self):
         if not self._remaining_dependencies and self.assigned:
@@ -322,7 +325,7 @@ class Task(TaskBase):
             if self._state.is_terminal:
                 return False
             else:
-                print("Computation task, ", self.name, ", added a dependee, ", dependee, sep='')
+                logger.debug("Computation task, %s added a dependee, %s", self.name, dependee)
                 self._dependees.append(dependee)
                 return True
 
@@ -435,7 +438,7 @@ class DataMovementTask(TaskBase):
             self.out_data_list = out_data_list
             # TODO(lhc): temporary task running state.
             #            This would be a data movement kernel.
-            self._state = TaskRunning(None, None, None)
+            self._state = TaskRunning(None, None, dependencies)
 
     @property
     def taskid(self) -> TaskID:
@@ -518,7 +521,7 @@ class DataMovementTask(TaskBase):
             ctx.decr_active_tasks()
 
     def run(self):
-        print(f"[DataMovementTask {self.name}] Starting")
+        logger.debug(f"[DataMovementTask %s] Starting", self.name)
         ctx = get_scheduler_context()
         task_state = None
         # XXX(lhc)
@@ -540,13 +543,12 @@ class DataMovementTask(TaskBase):
                     #            we should create data movement kernel manually.
 
                     #task_state = self._state.func(self, *self._state.args)
-                    print(f"[DatamovementTask {self.name}] Move from ", self.in_data_list, \
-                            " to ", self.out_data_list, sep='')
+                    logger.debug(f"[DatamovementTask %s] Move from %s to %s", \
+                        self.name, self.in_data_list, self.out_data_list)
 
                 if task_state is None:
                     task_state = TaskCompleted(None)
             except Exception as e:
-                print(f"STATE: {self._state}")
                 task_state = TaskException(e)
                 logger.exception("Exception in task")
             finally:
@@ -824,14 +826,13 @@ class WorkerThread(ControllableThread, SchedulerContext):
                 while self._should_run:
                     self._status = "Getting Task"
                     if not self.task:
-                        logger.debug("Blocking for a task: %r (%s)", self, self._monitor)
-                        print("[WorkerThread ", self.index,"] Blocking for a task.", sep='')
+                        logger.debug("[%r] Blocking for a task: (%s)", self, self._monitor)
                         with self._monitor:
                             self._monitor.wait()
-                        print("[WorkerThread ", self.index,"] Waking up.", sep='')
+                        logger.debug("[WorkerThread %d] Waking up.", self.index)
                     if not self.task:
                         break # TODO: Properly raise exception here
-                    print(f"[WorkerThread {self.index}] Starting:", self.task.name, sep='')
+                    logger.debug(f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
                     self._status = "Running Task {}".format(self.task)
                     self.task.run()
                     self._remove_task()
@@ -1088,7 +1089,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             #            scheduler is busy waiting this queue?
             try:
                 task = self._spawned_task_queue.pop()
-                print(f"[Scheduler] Popped {task.name} from spawn queue.")
+                logger.debug(f"[Scheduler] Popped %r from spawn queue.", task)
                 return task
             except IndexError:
                 return None
@@ -1118,7 +1119,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             try:
                 if self._should_run:
                     task = self._ready_queue.pop()
-                    print(f"[Scheduler] Popped {task.name} from ready queue.")
+                    logger.debug(f"[Scheduler] Popped %r from ready queue.", task)
                     return task
                 else:
                     return None
@@ -1134,7 +1135,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         :return: True if the assignment succeeded, False otherwise.
         """
-        print(f"[Scheduler] Mapping {task.name}.")
+        logger.debug(f"[Scheduler] Mapping %r.", task)
         # Build a list of environments with "qualities" assigned based on how well they match a possible
         # option for the task
         env_match_quality = defaultdict(lambda: 0)
@@ -1165,9 +1166,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                     break
             if is_res_constraint_satisifed:
                 task.req = EnvironmentRequirements(task.req.resources, env, task.req.tags)
-                print(f"[Scheduler] Mapped {task.name}.")
+                logger.debug(f"[Scheduler] Mapped %r.", task)
                 return True
-        print(f"[Scheduler] Failed to map {task.name}.")
+        logger.debug(f"[Scheduler] Failed to map %r.", task)
         return False
 
     def fill_curr_spawned_task_queue(self):
@@ -1193,7 +1194,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     def _map_tasks(self):
         # The first loop iterates a spawned task queue
         # and constructs a mapped task subgrpah.
-        print("[Scheduler] Map Phase")
+        logger.debug("[Scheduler] Map Phase")
         self.fill_curr_spawned_task_queue()
         while True:
             task: Optional[Task] = self._dequeue_spawned_task()
@@ -1229,7 +1230,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                                              ["out processing"],
                                              task.name + ".datamovement"
                                              );
-                        print(f"[Scheduler] Spawned {datamove_task.name}.")
+                        logger.debug(f"[Scheduler] Spawned %r.", datamove_task)
                         self.incr_active_tasks()
                         task._set_dependencies([datamove_task])
                         # Only computation needs to set a assigned flag.
@@ -1240,9 +1241,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # the ready queue.
                         if not datamove_task.bool_check_remaining_dependencies():
                             self.enqueue_task(datamove_task)
-                            print(f"[Scheduler] Enqueued {datamove_task.name} on ready queue")
+                            logger.debug(f"[Scheduler] Enqueued %r on ready queue", datamove_task)
                 else:
-                    logger.exception("[Scheduler] Tasks on the spawned Q ", \
+                    logger.exception("[Scheduler] Tasks on the spawned queue ", \
                                      "should be not assigned any device.")
                     self.stop()
             else:
@@ -1254,20 +1255,20 @@ class Scheduler(ControllableThread, SchedulerContext):
         """ Currently this doesn't do any intelligent scheduling (ordering).
             Dequeue all ready tasks and send them to device queues in order.
         """
-        print("[Scheduler] Schedule Phase")
+        logger.debug("[Scheduler] Schedule Phase")
         while True:
             task: Optional[TaskBase] = self._dequeue_task()
             if not task or not task.assigned:
                 logger.debug("Task %r: Failed to assign", task)
                 break
             for d in task.req.devices:
-                print(f"[Scheduler] Enqueuing {task.name} to device {d}")
+                logger.info(f"[Scheduler] Enqueuing %r to device %r", task, d)
                 self._device_queues[d].append(task)
 
     def _launch_tasks(self):
         """ Iterate through free devices and launch tasks on them
         """
-        print("[Scheduler] Launch Phase")
+        logger.debug("[Scheduler] Launch Phase")
         with self._monitor:
             for dev, queue in self._device_queues.items():
                 # Make sure there's an available WorkerThread
@@ -1281,10 +1282,10 @@ class Scheduler(ControllableThread, SchedulerContext):
                     if len(queue) > 0: # if there are tasks on the queue
                         task = queue.pop() # grab a task
                         worker = self._free_worker_threads.pop() # grab a worker
-                        print(f"[Scheduler] Launching {task.name} on WorkerThread {worker.index}")
+                        logger.info(f"[Scheduler] Launching %r on %r", task, worker)
                         self._available_resources._occupancy_dict[dev] = True # mark the device as occupied
                         worker.assign_task(task) # assign the task to the worker (this notifies the worker's monitor)
-                        print(f"[Scheduler] Launched {worker.task.name}")
+                        logger.debug(f"[Scheduler] Launched %r", task)
 
     def run(self) -> None:
         # noinspection PyBroadException
@@ -1294,9 +1295,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                 self._map_tasks()
                 self._schedule_tasks()
                 self._launch_tasks()
-                print("[Scheduler] Sleeping!")
+                logger.debug("[Scheduler] Sleeping!")
                 time.sleep(1) # TODO: Delete this. Why the fuck doesn't this release the GIL.
-                print("[Scheduler] Awake!")
+                logger.debug("[Scheduler] Awake!")
 
         except Exception:
             logger.exception("Unexpected exception in Scheduler")
@@ -1309,7 +1310,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def report_exception(self, e: BaseException):
         with self._monitor:
-            print("Report exception:", e)
+            logger.exception("Report exception:", e)
             self._exceptions.append(e)
 
     def dump_status(self, lg=logger):
