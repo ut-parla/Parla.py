@@ -251,7 +251,17 @@ class Task(TaskBase):
             raise self._state.exc
 
     def _reset_dependencies(self):
+        """ Reset dependencies of this task. This should also remove
+            this task from dependencie's dependee list.
+            This function is called to spawn a new task and
+            inherits its dependencies to that. The new task is
+            generally a data movement task. """
+        _remaining_dependencies = []
+        for dep in self._dependencies:
+            if dep._remove_dependee(self):
+                _remaining_dependencies.append(dep)
         self._dependencies = []
+        return _remaining_dependencies
 
     @property
     def taskid(self) -> TaskID:
@@ -327,6 +337,16 @@ class Task(TaskBase):
             else:
                 logger.debug("Computation task, %s added a dependee, %s", self.name, dependee)
                 self._dependees.append(dependee)
+                return True
+
+    def _remove_dependee(self, dependee: "TaskBase"):
+        """Remove the dependee and return true if this task is alive.
+           Otherwise, return false. """
+        with self._mutex:
+            if self._state.is_terminal:
+                return False
+            else:
+                self._dependees.remove(dependee)
                 return True
 
     def _notify_dependees(self):
@@ -1204,23 +1224,24 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # Create data movement task
                         # This step consists of five steps.
                         #
-                        # 1. Get dependencies of the task.
+                        # 1. Get alive dependencies of the task.
                         # 2. Reset dependency lists of the task.
                         #    (Therefore, we can reduce unnecessary
                         #     dependee iterations when higher priority tasks
                         #     are done)
-                        # 3. Create data movement task with the depdencies.
-                        # 4. Set the original task as the data task's dependee.
-                        # 5. Set the data task as the original task's denpdency.
-                        deps = task.dependencies
+                        # 3. Remove that task from dependencies' dependee list.
+                        # 4. Create data movement task with the depdencies.
+                        # 5. Set the original task as the data task's dependee.
+                        # 6. Set the data task as the original task's denpdency.
+                        remaining_deps = task._reset_dependencies()
                         # TODO(lhc): I am not confident if this task id and
                         #            local/global tasks work correctly.
-                        taskid = TaskID("global_" + str(len(task_locals.global_tasks)),
+                        taskid = TaskID("global_" +
+                                        str(len(task_locals.global_tasks)),
                                         (len(task_locals.global_tasks),))
                         task_locals.global_tasks += [taskid]
-                        taskid.dependencies = deps
-                        task._reset_dependencies()
-                        datamove_task = DataMovementTask(deps, task,
+                        taskid.dependencies = remaining_deps
+                        datamove_task = DataMovementTask(remaining_deps, task,
                                              taskid, task.req,
                                              ["in1 processing", "in2 processing"],
                                              ["out processing"],
