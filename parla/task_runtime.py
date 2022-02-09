@@ -1310,9 +1310,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                     else:
                         # Create data movement tasks for each data
                         # operands of this task.
-                        for data in chain(task.dataflow._input,
-                                          task.dataflow._output,
-                                          task.dataflow._inout):
+                        for data in chain(task.dataflow):
                             self._construct_datamove_task(data, task)
 
                         # Only computation needs to set a assigned flag.
