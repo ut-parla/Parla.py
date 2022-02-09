@@ -10,3 +10,6 @@ docs/build
 # IDE
 .idea
 .vscode
+
+# Vim temp files
+*.swp
