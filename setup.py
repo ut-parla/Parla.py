@@ -15,8 +15,9 @@ for i in range(128):
       cache_filler_modules.append(module)
 
 setup(name = "parla",
-      version = "0.1",
+      version = "0.2",
+      url = "https://github.com/ut-parla/Parla.py",
       description = "The parla Python frontend.",
-      packages = ['parla'],
+      packages = ['parla', 'parla.parray'],
       ext_modules = cache_filler_modules + cython_modules,
       )
