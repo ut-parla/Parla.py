@@ -2,6 +2,8 @@ from __future__ import annotations # To support self references in type checking
 
 from typing import List
 
+CPU_INDEX = -1
+
 class MemoryOperation:
     """
     A memory operation representation.
@@ -43,37 +45,21 @@ class Coherence:
     SHARED = 1
     MODIFIED = 2
 
-    def __init__(self, init_owner: int):
+    def __init__(self, init_owner: int, num_gpu: int):
         """
         Args:
             init_owner: the owner of the first copy in the system
+            num_gpu: number of GPU devices in the system
         """
-        self._coherence_states = {init_owner: self.SHARED}  # states of each device
+        self._coherence_states = {n: self.INVALID for n in range(num_gpu)}  # init GPU status
+        self._coherence_states[CPU_INDEX] = self.INVALID  # init CPU status
+
+        self._coherence_states[init_owner] = self.SHARED  # update states of current device
         self._owner = init_owner  # owner id when MODIFIED / smallest valid device id when SHARED
         self._overall_state = self.SHARED  # state of the whole system
 
-    def is_registered(self, operator: int):
-        """ Return True is the operator is already registered in the protocol
-
-        Args:
-            operator: id of the device
-        """
-        return operator in self._coherence_states
-
-    def register_device(self, operator: int):
-        """ Register a new device to the protocol.
-
-        Should be called before do other operations as an operator.
-
-        Args:
-            operator: device id of the new device
-        """
-        self._coherence_states[operator] = self.INVALID
-
     def update(self, operator: int, do_write: bool =False) -> List[MemoryOperation]:
         """ Tell the protocol that operator get a new copy (e.g. from user).
-
-        Should be called before do other operations as an operator.
 
         Args:
             operator: device id of the new device
@@ -105,8 +91,6 @@ class Coherence:
     def read(self, operator: int) -> MemoryOperation:
         """ Tell the protocol that operator read from the copy.
 
-        The operator should already be registered in the protocol.
-
         Args:
             operator: device id of the operator
 
@@ -136,8 +120,6 @@ class Coherence:
 
     def write(self, operator: int) -> List[MemoryOperation]:
         """ Tell the protocol that operator write to the copy.
-
-        The operator should already be registered in the protocol.
 
         Args:
             operator: device id of the operator
@@ -203,8 +185,6 @@ class Coherence:
 
     def evict(self, operator: int) -> MemoryOperation:
         """ Tell the protocol that operator want to clear the copy.
-
-        The operator should already be registered in the protocol.
 
         Args:
             operator: device id of the operator

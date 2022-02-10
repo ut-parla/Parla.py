@@ -4,7 +4,7 @@ from parla.cpu_impl import cpu
 from parla.tasks import get_current_devices
 from parla.device import Device
 
-from .coherence import MemoryOperation, Coherence
+from .coherence import MemoryOperation, Coherence, CPU_INDEX
 
 import numpy
 try:  # if the system has no GPU
@@ -16,8 +16,6 @@ except (ImportError, AttributeError):
     cupy = numpy
     gpu = None
 
-
-CPU_INDEX = -1
 
 class PArray:
     """Multi-dimensional array on a CPU or CUDA device.
@@ -31,8 +29,11 @@ class PArray:
     Note: some methods are not allowed to be called outside of a Parla task context
     """
     def __init__(self, array) -> None:
-        self._array = {}
-        self._coherence = None
+        num_devices = gpu.num_devices if gpu else 0
+
+        # _array works as a per device buffer of data
+        self._array = {n: None for n in range(num_devices)}  # add gpu id
+        self._array[CPU_INDEX] = None  # add cpu id
 
         # get the array's location
         if isinstance(array, numpy.ndarray):
@@ -41,7 +42,7 @@ class PArray:
             location = int(array.device)
 
         self._array[location] = array
-        self._coherence = Coherence(location)
+        self._coherence = Coherence(location, num_devices)  # coherence protocol for managing data among multi device
 
     # Properties:
 
@@ -126,10 +127,6 @@ class PArray:
         if not operator:
             operator = this_device
 
-        # register the device if it is not already
-        if not self._coherence.is_registered(operator):
-            self._coherence.register_device(operator)
-
         # update protocol and get operation
         operation = self._coherence.read(operator)
         self._process_operation(operation, this_device)
@@ -149,10 +146,6 @@ class PArray:
 
         if not operator:
             operator = this_device
-
-        # register the device if it is not already
-        if not self._coherence.is_registered(operator):
-            self._coherence.register_device(operator)
 
         # update protocol and get list of operations
         operations = self._coherence.write(operator)
