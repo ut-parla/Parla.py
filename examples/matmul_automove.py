@@ -49,19 +49,20 @@ def main():
         c_dim = b_part[-1].shape[0]
         c_part.append(np.empty((c_dim, n), np.float32, order = 'F'))
 
-    previous = None
-
     # 1. NEW: convert to parray in batch
     a_part, b_part, c_part = asarray_batch(a_part, b_part, c_part)
 
+    previous = None
+    matmul = TaskSpace("matmul")
+    outer = TaskSpace("outer")
     for repetition in range(repetitions):
+        offset = blocks * repetition
         # Now compute a @ b.T and write the output to c
-        deps = [previous] if previous is not None else []
+        deps = [previous, matmul[offset-1, blocks-1]] if previous is not None else []
         # 2. NEW: input/inout
-        @spawn(placement = cpu, dependencies = deps, input=[*a_part, *b_part], inout=[*c_part])
+        @spawn(outer[repetition], placement = cpu, dependencies = deps, input=[*a_part, *b_part], inout=[*c_part])
         async def run_matmul():
             start = time.perf_counter()
-            matmul = TaskSpace("matmul")
             for i in range(blocks):
                 for j in range(blocks):
                     a_block = a_part[i]
@@ -71,8 +72,9 @@ def main():
                     if i != j:
                         memsize += b_block.nbytes
 
+                    k = i + offset
                     # 3. NEW: input/output
-                    @spawn(matmul[i, j], dependencies=[matmul[0:i, j], matmul[i, 0:j]], placement = gpu, memory=memsize, input=[a_block, b_block], output=[c_block])
+                    @spawn(matmul[k, j], dependencies=[matmul[0:k, j], matmul[k, 0:j]], placement = gpu, memory=memsize, input=[a_block, b_block], output=[c_block])
                     def matmul_task():
                         c_block[:] = (a_block @ b_block.T).array
                         # TODO(lhc): For now, do not copy back to cpu memory.

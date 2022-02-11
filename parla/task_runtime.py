@@ -30,6 +30,50 @@ _ASSIGNMENT_FAILURE_WARNING_LIMIT = 32
 TaskAwaitTasks = namedtuple("AwaitTasks", ("dependencies", "value_task"))
 
 
+class TaskID:
+    pass
+
+
+class WaitDependeesCollection:
+    """ If a task has dependent tasks which are not spawned yet,
+        this class stores the task until all of them are spawned.
+        This class exploits dictionary of TaskID key for a task
+        which is not yet created and makes dependees wait,
+        and a list of TaskID value, which is a list of tasks
+        which are dependees of and are waiting for the task
+        corresponding to the key.
+
+        When a task corresponding a key is spawned,
+        it iterates a value, the list of the dependee tasks,
+        and notifes them their one dependency is spawned.
+
+        If all dependencies of a dependee task are spawned,
+        it is also spawned.
+    """
+    _wait_dependees_dict: Dict[TaskID, List[TaskID]]
+    def __init__(self):
+        self._mutex = threading.Lock()
+        self._wait_dependees_dict = {}
+
+    def append_wait_task(self, dependency: TaskID, dependee: TaskID):
+        """ Append or accumulate a dependee task for a dependency task key """
+        with self._mutex:
+            if dependency in self._wait_dependees_dict:
+                self._wait_dependees_dict[dependency].append(dependee)
+            else:
+                self._wait_dependees_dict[dependency] = [dependee]
+
+    def get_wait_tasks(self, tid: TaskID):
+        """ Return all tasks waiting for the task of tid. """
+        with self._mutex:
+            if tid in self._wait_dependees_dict:
+                return self._wait_dependees_dict[tid];
+            return None
+
+
+wait_dependees_collection = WaitDependeesCollection()
+
+
 class TaskState(object, metaclass=ABCMeta):
     __slots__ = []
 
@@ -37,6 +81,14 @@ class TaskState(object, metaclass=ABCMeta):
     @abstractmethod
     def is_terminal(self):
         raise NotImplementedError()
+
+
+class TaskWaiting(TaskState):
+    """ This state specifies that a task is waiting for dependencies' spawnings
+    """
+    @property
+    def is_terminal(self):
+        return False
 
 
 class TaskRunning(TaskState):
@@ -47,9 +99,25 @@ class TaskRunning(TaskState):
         return False
 
     def __init__(self, func, args, dependencies):
-        if dependencies is not None and (
-                not isinstance(dependencies, Collection) or not all(isinstance(d, Task) for d in dependencies)):
-            raise ValueError("dependencies must be a collection of Tasks")
+        if dependencies is not None:
+            for d in list(dependencies):
+                if not isinstance(d, Task) and \
+                   not isinstance(d, DataMovementTask):
+                    # d could be one of four types: Task, DataMovementTask,
+                    # TaskID or other types.
+                    # Task and DataMovementTask are expected types and
+                    # are OK to be in the dependency list.
+                    # TaskID is not yet spawned, and will be added as a
+                    # Task when it is spawned.
+                    # (Please refer to tasks.py:_task_callback() for detiailed
+                    #  information)
+                    #
+                    # Other types are not allowed and not expected.
+                    # Raise an error.
+                    dependencies.remove(d);
+                    if not isinstance(d, TaskID):
+                        raise ValueError(
+                            "Dependencies must be a collection of Tasks")
         self.dependencies = dependencies
         self.args = args
         self.func = func
@@ -199,10 +267,6 @@ class OptionsRequirements(ResourceRequirements):
         return "OptionsRequirements({}, {}, {})".format(self.resources, self.ndevices, self.options)
 
 
-class TaskID:
-    pass
-
-
 class TaskBase:
     pass
 
@@ -215,16 +279,21 @@ class Task(TaskBase):
     assigned: bool
 
     def __init__(self, func, args, dependencies: Collection["Task"], taskid,
-                 req: ResourceRequirements, dataflow: Dataflow, name: Optional[str] = None):
+                 req: ResourceRequirements, dataflow: Dataflow,
+                 name: Optional[str] = None,
+                 num_unspawned_deps: int = 0):
         self._mutex = threading.Lock()
         with self._mutex:
             self._name = name
             self._taskid = taskid
             self._req = req
+            # This task could be spawend when it is ready.
+            # To set its state Running when it is running later,
+            # store functions and arguments as member variables.
+            self._func = func
+            self._args = args
             self.assigned = False
             self.dataflow = dataflow  # input/output/inout of the task
-
-            self._state = TaskRunning(func, args, None)
             self._dependees = []
             # Track data movement tasks created from this task.
             self._datamove_tasks = []
@@ -233,25 +302,26 @@ class Task(TaskBase):
             # dependent tasks.
             # These dependencies are moved to a data movement
             # task.
-            self._set_dependencies(dependencies)
+            self._set_dependencies_nomutex(dependencies)
             # Expose the self reference to other threads as late as possible, but not after potentially getting
             # scheduled.
             taskid.task = self
-
-            # List of parent tasks for nested tasks.
-            # TODO(lhc): This is useful if we want to hide nested tasks
-            #            from outer tasks.
-            #            If we allow the visibility, semantic should be
-            #            chnaged.
-            # TODO(lhc): Decided to follow dependency orders for mapping.
-            #            This will be deprecated soon.
-            self._parent_tasks = []
             
             logger.debug("Task %r: Creating", self)
-            get_scheduler_context().incr_active_tasks()
-            # Enqueue this task right after spawning on the spawend queue.
-            # The task could have dependencies.
-            get_scheduler_context().enqueue_spawned_task(self)
+
+            self.num_unspawned_deps = num_unspawned_deps
+            # If this task is not waiting for any dependent tasks,
+            # enqueue onto the spawned queue.
+            if not self.num_unspawned_deps > 0:
+                self.notify_wait_dependees()
+                self._state = TaskRunning(func, args, None)
+                get_scheduler_context().incr_active_tasks()
+                # Enqueue this task right after spawning on the spawend queue.
+                # The task could have dependencies.
+                get_scheduler_context().enqueue_spawned_task(self)
+            else:
+                self._state = TaskWaiting()
+
 
     def add_new_datamove_task(self, t):
         self._datamove_tasks.append(t)
@@ -269,12 +339,13 @@ class Task(TaskBase):
             This function is called to spawn a new task and
             inherits its dependencies to that. The new task is
             generally a data movement task. """
-        _remaining_dependencies = []
-        for dep in self._dependencies:
-            if dep._remove_dependee(self):
-                _remaining_dependencies.append(dep)
-        self._dependencies = []
-        return _remaining_dependencies
+        with self._mutex: 
+            _remaining_dependencies = []
+            for dep in self._dependencies:
+                if dep._remove_dependee(self):
+                    _remaining_dependencies.append(dep)
+            self._dependencies = []
+            return _remaining_dependencies
 
     @property
     def taskid(self) -> TaskID:
@@ -294,7 +365,8 @@ class Task(TaskBase):
 
     @property
     def dependencies(self) -> Tuple["TaskBase"]:
-        return tuple(self._dependencies)
+        with self._mutex:
+            return self._dependencies
 
     @property
     def dependees(self) -> Tuple["TaskBase"]:
@@ -317,22 +389,38 @@ class Task(TaskBase):
             else:
                 return False
 
-    def _set_dependencies(self, dependencies):
+    # TODO(lhc): Is this fine??
+    def _set_dependencies_nomutex(self, dependencies):
         self._dependencies = dependencies
         self._remaining_dependencies = len(dependencies)
         for dep in dependencies:
+            # If a dependency is TaskID, not Task object,
+            # it implies that it is not yet spawned.
+            # Ignore it.
+            if isinstance(dep, TaskID):
+                continue
             if not dep._add_dependee(self):
                 self._remaining_dependencies -= 1
 
+    def _set_dependencies(self, dependencies):
+        with self._mutex:
+            self._dependencies = dependencies
+            self._remaining_dependencies = len(dependencies)
+            for dep in dependencies:
+                # If a dependency is TaskID, not Task object,
+                # it implies that it is not yet spawned.
+                # Ignore it.
+                if isinstance(dep, TaskID):
+                    continue
+                if not dep._add_dependee(self):
+                    self._remaining_dependencies -= 1
+
     def _add_dependency(self, dependency):
-        self._remaining_dependencies += 1
-        # TODO(lhc): Is there any better way? Why do we need
-        #            a tuple format?
-        self._dependencies = list(self.dependencies)
-        self._dependencies.append(dependency)
-        self._dependencies = tuple(self._dependencies)
-        if not dependency._add_dependee(self):
-            self._remaining_dependencies -= 1
+        with self._mutex:
+            self._remaining_dependencies += 1
+            self._dependencies.append(dependency)
+            if not dependency._add_dependee(self):
+                self._remaining_dependencies -= 1
 
     def _complete_dependency(self):
         with self._mutex:
@@ -341,10 +429,37 @@ class Task(TaskBase):
             logger.info(f"[Task %s] Data movement dependency completed. \
                 (remaining: %d)", self.name, self._remaining_dependencies)
 
+    def check_if_task_dependency(self, cand: "Task"):
+        with self._mutex:
+            if cand in self._dependencies:
+                return True
+            else:
+                return False
+
     def _check_remaining_dependencies(self):
         if not self._remaining_dependencies and self.assigned:
             logger.info("Task %r: Scheduling", self)
             get_scheduler_context().enqueue_task(self)
+
+    def notify_wait_dependees(self):
+        """ Notify all dependees who wait for this task.
+         Note that this is not thread-safe.
+         This should be called WITHIN ITS MUTEX.
+         (The reason why it does not have mutex even though
+          it accesses thread-shared objects is because it
+          should be called from __init__() which is wrapped by
+          mutex.) """
+        # Get all the waiting dependee list from the global collection.
+        deps = wait_dependees_collection.get_wait_tasks(self.taskid)
+        if deps is None:
+            return
+        for d_tid in deps:
+            dep = d_tid.task
+            if dep is None:
+                raise ValueError("The dependee task is None:",
+                                 str(d_tid))
+            dep.decr_num_unspawned_deps(self)
+            self._dependees.append(dep)
 
     def bool_check_remaining_dependencies(self):
         if not self._remaining_dependencies:
@@ -393,14 +508,18 @@ class Task(TaskBase):
             self._notify_dependees()
             ctx.decr_active_tasks()
 
-    def _add_parent_tasks(self, parent_task):
-        self._parent_tasks.append(parent_task)
-
-    def _get_parent_tasks(self):
-        return self._parent_tasks
-
-    def _get_task_level(self):
-        return len(self._parent_tasks)
+    def decr_num_unspawned_deps(self, dep: "Task"):
+        with self._mutex:
+            self.num_unspawned_deps -= 1
+            self._remaining_dependencies += 1
+            self._dependencies.append(dep)
+            if self.num_unspawned_deps == 0:
+                self.notify_wait_dependees()
+                self._state = TaskRunning(self._func, self._args, None)
+                get_scheduler_context().incr_active_tasks()
+                # Enqueue this task right after spawning on the spawend queue.
+                # The task could have dependencies.
+                get_scheduler_context().enqueue_spawned_task(self)
 
     def run(self):
         ctx = get_scheduler_context()
@@ -474,7 +593,7 @@ class DataMovementTask(TaskBase):
             # source (computation) task depending on data dependency.
             self._dependencies = []
             if (dependencies is not None):
-                self._set_dependencies(dependencies)
+                self._set_dependencies_nomutex(dependencies)
             else:
                 self._remaining_dependencies = 0
 
@@ -687,7 +806,9 @@ class TaskID:
         :raises ValueError: if there is no such task.
         """
         if not self._task:
-            raise ValueError("This task has not yet been spawned so it cannot be used.")
+            # If its task is not yet spawned,
+            # return None.
+            return None
         return self._task
 
     @task.setter
@@ -713,6 +834,9 @@ class TaskID:
         """
         return "_".join(str(i) for i in (self._name, *self._id))
 
+    def __hash__(self):
+        return hash(self._id);
+
     def __repr__(self):
         return "TaskID({}, task={})".format(self.full_name, self._task)
 
@@ -727,8 +851,15 @@ class InvalidSchedulerAccessException(RuntimeError):
     pass
 
 class SchedulerContext(metaclass=ABCMeta):
-    def spawn_task(self, function, args, deps, taskid, req, dataflow, name: Optional[str] = None):
+    def spawn_task(self, function, args, deps, taskid,
+                   req, dataflow, name: Optional[str] = None):
         return Task(function, args, deps, taskid, req, dataflow, name)
+
+    def create_wait_task(self, function, args, deps, taskid,
+                         req, dataflow, num_unspawned_deps,
+                         name: Optional[str] = None):
+        return Task(function, args, deps, taskid, req,
+                    dataflow, name, num_unspawned_deps) 
 
     @abstractmethod
     def enqueue_task(self, task):
@@ -826,9 +957,6 @@ class WorkerThread(ControllableThread, SchedulerContext):
         self._scheduler = scheduler
         self.task = None
         self._status = "Initializing"
-        # Maintain list of the running tasks by this thread.
-        # It gives information of task hierarchy.
-        self._runningtasks = []
 
     @property
     def scheduler(self) -> "Scheduler":
@@ -889,9 +1017,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
                     if self.task:
                         logger.debug(f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
                         self._status = "Running Task {}".format(self.task)
-                        self._runningtasks.append(self.task.taskid)
                         self.task.run()
-                        self._runningtasks.remove(self.task.taskid)
                         self._remove_task()
                         self.scheduler.append_free_thread(self)
                     # Thread wakes up without a task (should only happen at end of program)
@@ -1072,15 +1198,9 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._datablock_dict = defaultdict(list)
 
         self._worker_threads = [WorkerThread(self, i) for i in range(n_threads)]
-        # Mapping thread index of _worker_threads and thread id.
-        # Through this, the runtime could expoit thread local information.
-        self._worker_thread_ids = [None for _ in range(n_threads)]
-        for i in range(n_threads):
-            t = self._worker_threads[i]
+        for t in self._worker_threads:
             t.start()
-            self._worker_thread_ids[i] = t.ident
         self._free_worker_threads = deque(self._worker_threads)
-        self._main_thread_id = threading.get_ident()
         # Start the scheduler thread (likely to change later)
         self.start()
 
@@ -1127,26 +1247,12 @@ class Scheduler(ControllableThread, SchedulerContext):
         if done:
             self.stop()
 
-    def enqueue_spawned_task(self, task: Task, parent_task_list: List):
-        with self._monitor:
-            self._new_mapped_task_queue.appendleft((task, parent_task_list))
-
     def enqueue_spawned_task(self, task: Task):
         """Enqueue a spawned task on the spawned task queue.
            Scheduler iterates the queue and assigns resources
            regardless of remaining dependencies.
         """
         with self._monitor:
-            # The main thread never spawns nested tasks.
-            # TODO(lhc): not confident about this.
-            #            I now think that it is possible if only one core
-            #            is used to run. Let me leave this for now
-            #            since we may not need thread local data soon.
-            #            (because we may not need to track task hierarchy)
-            if (not self._main_thread_id == threading.get_ident()):
-                t_id = self._worker_thread_ids.index(threading.get_ident())
-                for p_t in self._worker_threads[t_id]._runningtasks:
-                    task._add_parent_tasks(p_t)
             self._new_spawned_task_queue.appendleft(task)
 
     def _dequeue_spawned_task(self) -> Optional[Task]:
@@ -1276,14 +1382,14 @@ class Scheduler(ControllableThread, SchedulerContext):
         target_data_id = id(target_data)
         is_overlapped = False
         if target_data_id in self._datablock_dict:
+            # Get task lists using the target data block.
             dep_task_list = self._datablock_dict[target_data_id]
             completed_tasks = []
             for dep_task_tuple in dep_task_list:
                 dep_task_id = dep_task_tuple[0]
                 dep_task = dep_task_tuple[1]
-                if dep_task_id in compute_task._get_parent_tasks():
-                    continue
-                if dep_task._get_task_level() >= compute_task._get_task_level():
+                # Only checks dependent tasks if they use the same data blocks.
+                if compute_task.check_if_task_dependency(dep_task):
                     if not datamove_task._add_dependency(dep_task):
                         completed_tasks.append(dep_task_id)
             dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
@@ -1310,7 +1416,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                     else:
                         # Create data movement tasks for each data
                         # operands of this task.
-                        for data in chain(task.dataflow):
+                        for data in task.dataflow:
                             self._construct_datamove_task(data, task)
 
                         # Only computation needs to set a assigned flag.

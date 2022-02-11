@@ -48,13 +48,15 @@ def main():
         c_part.append(np.empty((c_dim, n), np.float32, order = 'F'))
 
     previous = None
+    matmul = TaskSpace("matmul")
+    outer = TaskSpace("outer")
     for repetition in range(repetitions):
+        offset = blocks * repetition
         # Now compute a @ b.T and write the output to c
-        deps = [previous] if previous is not None else []
-        @spawn(placement = cpu, dependencies = deps)
+        deps = [previous, matmul[offset-1, blocks-1]] if previous is not None else []
+        @spawn(outer[repetition], placement = cpu, dependencies = deps)
         async def run_matmul():
             start = time.perf_counter()
-            matmul = TaskSpace("matmul")
             for i in range(blocks):
                 for j in range(blocks):
                     a_block = a_part[i]
@@ -63,7 +65,9 @@ def main():
                     memsize = c_block.nbytes
                     if i != j:
                         memsize += b_block.nbytes
-                    @spawn(matmul[i, j], dependencies=[matmul[0:i, j], matmul[i, 0:j]], placement = gpu, memory = memsize)
+
+                    k = i + offset
+                    @spawn(matmul[k, j], dependencies=[matmul[0:k, j], matmul[k, 0:j]], placement = gpu, memory = memsize)
                     def matmul_task():
                         b_block_local = clone_here(b_block)
                         c_block_local = clone_here(c_block)
