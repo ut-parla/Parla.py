@@ -1147,7 +1147,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     _available_resources: ResourcePool
     period: float
 
-    def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 0.01):
+    def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 1.4012985e-20):
         # ControllableThread: __init__ sets it to run
         # SchedulerContext: No __init__
         super().__init__()
