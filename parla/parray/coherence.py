@@ -1,4 +1,4 @@
-from __future__ import annotations # To support self references in type checking, must be first line
+from __future__ import annotations
 
 from typing import List
 
