@@ -7,6 +7,7 @@ import threading
 import time
 from itertools import combinations
 from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar, Deque
+from itertools import chain
 
 from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
@@ -28,6 +29,50 @@ _ASSIGNMENT_FAILURE_WARNING_LIMIT = 32
 TaskAwaitTasks = namedtuple("AwaitTasks", ("dependencies", "value_task"))
 
 
+class TaskID:
+    pass
+
+
+class WaitDependeesCollection:
+    """ If a task has dependent tasks which are not spawned yet,
+        this class stores the task until all of them are spawned.
+        This class exploits dictionary of TaskID key for a task
+        which is not yet created and makes dependees wait,
+        and a list of TaskID value, which is a list of tasks
+        which are dependees of and are waiting for the task
+        corresponding to the key.
+
+        When a task corresponding a key is spawned,
+        it iterates a value, the list of the dependee tasks,
+        and notifes them their one dependency is spawned.
+
+        If all dependencies of a dependee task are spawned,
+        it is also spawned.
+    """
+    _wait_dependees_dict: Dict[TaskID, List[TaskID]]
+    def __init__(self):
+        self._mutex = threading.Lock()
+        self._wait_dependees_dict = {}
+
+    def append_wait_task(self, dependency: TaskID, dependee: TaskID):
+        """ Append or accumulate a dependee task for a dependency task key """
+        with self._mutex:
+            if dependency in self._wait_dependees_dict:
+                self._wait_dependees_dict[dependency].append(dependee)
+            else:
+                self._wait_dependees_dict[dependency] = [dependee]
+
+    def get_wait_tasks(self, tid: TaskID):
+        """ Return all tasks waiting for the task of tid. """
+        with self._mutex:
+            if tid in self._wait_dependees_dict:
+                return self._wait_dependees_dict[tid];
+            return None
+
+
+wait_dependees_collection = WaitDependeesCollection()
+
+
 class TaskState(object, metaclass=ABCMeta):
     __slots__ = []
 
@@ -35,6 +80,14 @@ class TaskState(object, metaclass=ABCMeta):
     @abstractmethod
     def is_terminal(self):
         raise NotImplementedError()
+
+
+class TaskWaiting(TaskState):
+    """ This state specifies that a task is waiting for dependencies' spawnings
+    """
+    @property
+    def is_terminal(self):
+        return False
 
 
 class TaskRunning(TaskState):
@@ -45,9 +98,25 @@ class TaskRunning(TaskState):
         return False
 
     def __init__(self, func, args, dependencies):
-        if dependencies is not None and (
-                not isinstance(dependencies, Collection) or not all(isinstance(d, Task) for d in dependencies)):
-            raise ValueError("dependencies must be a collection of Tasks")
+        if dependencies is not None:
+            for d in list(dependencies):
+                if not isinstance(d, Task) and \
+                   not isinstance(d, DataMovementTask):
+                    # d could be one of four types: Task, DataMovementTask,
+                    # TaskID or other types.
+                    # Task and DataMovementTask are expected types and
+                    # are OK to be in the dependency list.
+                    # TaskID is not yet spawned, and will be added as a
+                    # Task when it is spawned.
+                    # (Please refer to tasks.py:_task_callback() for detiailed
+                    #  information)
+                    #
+                    # Other types are not allowed and not expected.
+                    # Raise an error.
+                    dependencies.remove(d);
+                    if not isinstance(d, TaskID):
+                        raise ValueError(
+                            "Dependencies must be a collection of Tasks")
         self.dependencies = dependencies
         self.args = args
         self.func = func
@@ -197,10 +266,6 @@ class OptionsRequirements(ResourceRequirements):
         return "OptionsRequirements({}, {}, {})".format(self.resources, self.ndevices, self.options)
 
 
-class TaskID:
-    pass
-
-
 class TaskBase:
     pass
 
@@ -213,34 +278,52 @@ class Task(TaskBase):
     assigned: bool
 
     def __init__(self, func, args, dependencies: Collection["Task"], taskid,
-                 req: ResourceRequirements, dataflow: Dataflow, name: Optional[str] = None):
+                 req: ResourceRequirements, dataflow: Dataflow,
+                 name: Optional[str] = None,
+                 num_unspawned_deps: int = 0):
         self._mutex = threading.Lock()
         with self._mutex:
             self._name = name
             self._taskid = taskid
             self._req = req
+            # This task could be spawend when it is ready.
+            # To set its state Running when it is running later,
+            # store functions and arguments as member variables.
+            self._func = func
+            self._args = args
             self.assigned = False
             self.dataflow = dataflow  # input/output/inout of the task
-
-            self._state = TaskRunning(func, args, None)
             self._dependees = []
+            # Track data movement tasks created from this task.
+            self._datamove_tasks = []
             # Maintain dependenceis as a list object.
             # Therefore, bi-directional edges exist among
             # dependent tasks.
             # These dependencies are moved to a data movement
             # task.
-            self._set_dependencies(dependencies)
-            #self.in_data_list = in_data_list
-            #self.out_data_list = out_data_list
+            self._set_dependencies_nomutex(dependencies)
             # Expose the self reference to other threads as late as possible, but not after potentially getting
             # scheduled.
             taskid.task = self
             
             logger.debug("Task %r: Creating", self)
-            get_scheduler_context().incr_active_tasks()
-            # Enqueue this task right after spawning on the spawend queue.
-            # The task could have dependencies.
-            get_scheduler_context().enqueue_spawned_task(self)
+
+            self.num_unspawned_deps = num_unspawned_deps
+            # If this task is not waiting for any dependent tasks,
+            # enqueue onto the spawned queue.
+            if not self.num_unspawned_deps > 0:
+                self.notify_wait_dependees()
+                self._state = TaskRunning(func, args, None)
+                get_scheduler_context().incr_active_tasks()
+                # Enqueue this task right after spawning on the spawend queue.
+                # The task could have dependencies.
+                get_scheduler_context().enqueue_spawned_task(self)
+            else:
+                self._state = TaskWaiting()
+
+
+    def add_new_datamove_task(self, t):
+        self._datamove_tasks.append(t)
 
     @property
     def result(self):
@@ -255,12 +338,13 @@ class Task(TaskBase):
             This function is called to spawn a new task and
             inherits its dependencies to that. The new task is
             generally a data movement task. """
-        _remaining_dependencies = []
-        for dep in self._dependencies:
-            if dep._remove_dependee(self):
-                _remaining_dependencies.append(dep)
-        self._dependencies = []
-        return _remaining_dependencies
+        with self._mutex: 
+            _remaining_dependencies = []
+            for dep in self._dependencies:
+                if dep._remove_dependee(self):
+                    _remaining_dependencies.append(dep)
+            self._dependencies = []
+            return _remaining_dependencies
 
     @property
     def taskid(self) -> TaskID:
@@ -280,7 +364,8 @@ class Task(TaskBase):
 
     @property
     def dependencies(self) -> Tuple["TaskBase"]:
-        return tuple(self._dependencies)
+        with self._mutex:
+            return self._dependencies
 
     @property
     def dependees(self) -> Tuple["TaskBase"]:
@@ -303,11 +388,37 @@ class Task(TaskBase):
             else:
                 return False
 
-    def _set_dependencies(self, dependencies):
+    # TODO(lhc): Is this fine??
+    def _set_dependencies_nomutex(self, dependencies):
         self._dependencies = dependencies
         self._remaining_dependencies = len(dependencies)
         for dep in dependencies:
+            # If a dependency is TaskID, not Task object,
+            # it implies that it is not yet spawned.
+            # Ignore it.
+            if isinstance(dep, TaskID):
+                continue
             if not dep._add_dependee(self):
+                self._remaining_dependencies -= 1
+
+    def _set_dependencies(self, dependencies):
+        with self._mutex:
+            self._dependencies = dependencies
+            self._remaining_dependencies = len(dependencies)
+            for dep in dependencies:
+                # If a dependency is TaskID, not Task object,
+                # it implies that it is not yet spawned.
+                # Ignore it.
+                if isinstance(dep, TaskID):
+                    continue
+                if not dep._add_dependee(self):
+                    self._remaining_dependencies -= 1
+
+    def _add_dependency(self, dependency):
+        with self._mutex:
+            self._remaining_dependencies += 1
+            self._dependencies.append(dependency)
+            if not dependency._add_dependee(self):
                 self._remaining_dependencies -= 1
 
     def _complete_dependency(self):
@@ -317,10 +428,37 @@ class Task(TaskBase):
             logger.info(f"[Task %s] Data movement dependency completed. \
                 (remaining: %d)", self.name, self._remaining_dependencies)
 
+    def check_if_task_dependency(self, cand: "Task"):
+        with self._mutex:
+            if cand in self._dependencies:
+                return True
+            else:
+                return False
+
     def _check_remaining_dependencies(self):
         if not self._remaining_dependencies and self.assigned:
             logger.info("Task %r: Scheduling", self)
             get_scheduler_context().enqueue_task(self)
+
+    def notify_wait_dependees(self):
+        """ Notify all dependees who wait for this task.
+         Note that this is not thread-safe.
+         This should be called WITHIN ITS MUTEX.
+         (The reason why it does not have mutex even though
+          it accesses thread-shared objects is because it
+          should be called from __init__() which is wrapped by
+          mutex.) """
+        # Get all the waiting dependee list from the global collection.
+        deps = wait_dependees_collection.get_wait_tasks(self.taskid)
+        if deps is None:
+            return
+        for d_tid in deps:
+            dep = d_tid.task
+            if dep is None:
+                raise ValueError("The dependee task is None:",
+                                 str(d_tid))
+            dep.decr_num_unspawned_deps(self)
+            self._dependees.append(dep)
 
     def bool_check_remaining_dependencies(self):
         if not self._remaining_dependencies:
@@ -369,6 +507,19 @@ class Task(TaskBase):
             self._notify_dependees()
             ctx.decr_active_tasks()
 
+    def decr_num_unspawned_deps(self, dep: "Task"):
+        with self._mutex:
+            self.num_unspawned_deps -= 1
+            self._remaining_dependencies += 1
+            self._dependencies.append(dep)
+            if self.num_unspawned_deps == 0:
+                self.notify_wait_dependees()
+                self._state = TaskRunning(self._func, self._args, None)
+                get_scheduler_context().incr_active_tasks()
+                # Enqueue this task right after spawning on the spawend queue.
+                # The task could have dependencies.
+                get_scheduler_context().enqueue_spawned_task(self)
+
     def run(self):
         ctx = get_scheduler_context()
         task_state = TaskException(RuntimeError("Unknown fatal error"))
@@ -384,8 +535,6 @@ class Task(TaskBase):
                 assert isinstance(self._state, TaskRunning)
                 # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
                 with _scheduler_locals._environment_scope(self.req.environment), self.req.environment:
-                    # move data to current device
-                    self.dataflow.auto_move()
                     task_state = self._state.func(self, *self._state.args)
                 if task_state is None:
                     task_state = TaskCompleted(None)
@@ -423,9 +572,8 @@ class DataMovementTask(TaskBase):
     #            For now, this class performs no-op.
     def __init__(self, dependencies: Collection["TaskBase"],
             computation_task: Task, taskid,
-             req: ResourceRequirements,
-            in_data_list: List[str],
-            out_data_list: List[str], name: Optional[str] = None):
+            req: ResourceRequirements,
+            target_data, name: Optional[str] = None):
         self._mutex = threading.Lock()
         with self._mutex:
             self._name = name
@@ -435,26 +583,19 @@ class DataMovementTask(TaskBase):
             # which is created at mapping task subgraph
             # construction. This task is always assigned the target task.
             self.assigned = True
+            self._target_data = target_data
             # The source (computation) task becomes a dependee of
             # this data movement task.
             # The dependees are set by `_set_dependencies()`.
             self._dependees = []
-            # Data movement task gets dependencies of the
-            # source (computation) task.
-            # TODO(lhc): Both a data movement task and a kernel
-            #            task are dependees of the dependent tasks.
-            #            Therefore, when the dependent tasks are completed,
-            #            they iterate both type tasks, which is inefficient.
-            #            This is because I don't want to touch data race
-            #            until this inefficient version works stable.
-            self._set_dependencies(dependencies)
+            # Data movement task gets subsets of dependency of the
+            # source (computation) task depending on data dependency.
+            self._dependencies = []
+            if (dependencies is not None):
+                self._set_dependencies_nomutex(dependencies)
+            else:
+                self._remaining_dependencies = 0
 
-            # Input and output data should be passed to move data
-            # if necessary.
-            # TODO(lhc): For now, it is unclear how data is managed.
-            #            For now, use a string list tmporarily.
-            self.in_data_list = in_data_list
-            self.out_data_list = out_data_list
             # TODO(lhc): temporary task running state.
             #            This would be a data movement kernel.
             self._state = TaskRunning(None, None, dependencies)
@@ -500,6 +641,15 @@ class DataMovementTask(TaskBase):
             else:
                 return False
 
+    def _add_dependency(self, dependency):
+        self._remaining_dependencies += 1
+        self._dependencies.append(dependency)
+        if not dependency._add_dependee(self):
+            self._remaining_dependencies -= 1
+            return False
+        else:
+            return True
+
     def _complete_dependency(self):
         with self._mutex:
             self._remaining_dependencies -= 1
@@ -542,8 +692,7 @@ class DataMovementTask(TaskBase):
     def run(self):
         logger.debug(f"[DataMovementTask %s] Starting", self.name)
         ctx = get_scheduler_context()
-        task_state = None
-        # XXX(lhc)
+        # TODO(lhc)
         #task_state = TaskException(RuntimeError("Unknown fatal error"))
         assert self.assigned, "Task was not assigned before running."
         assert isinstance(self.req, EnvironmentRequirements), \
@@ -555,18 +704,19 @@ class DataMovementTask(TaskBase):
                 ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
             # Run the task and assign the new task state
             try:
-                assert isinstance(self._state, TaskRunning)
-                # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
-                with _scheduler_locals._environment_scope(self.req.environment), self.req.environment:
-                    # TODO(lhc): func() is not yet implemented.
-                    #            we should create data movement kernel manually.
+                # TODO(lhc): don't know how to handle this correctly.
+                #assert isinstance(self._state, TaskRunning)
 
-                    #task_state = self._state.func(self, *self._state.args)
-                    logger.debug(f"[DatamovementTask %s] Move from %s to %s", \
-                        self.name, self.in_data_list, self.out_data_list)
+                # We both set the environment as a thread local using _environment_scope,
+                # and enter the environment itself.
+                with _scheduler_locals._environment_scope(self.req.environment), \
+                     self.req.environment:
+                    # Move data to current device
+                    self._target_data._auto_move()
 
-                if task_state is None:
-                    task_state = TaskCompleted(None)
+                # TODO(lhc):
+                #if task_state is None:
+                task_state = TaskCompleted(None)
             except Exception as e:
                 task_state = TaskException(e)
                 logger.exception("Exception in task")
@@ -655,7 +805,9 @@ class TaskID:
         :raises ValueError: if there is no such task.
         """
         if not self._task:
-            raise ValueError("This task has not yet been spawned so it cannot be used.")
+            # If its task is not yet spawned,
+            # return None.
+            return None
         return self._task
 
     @task.setter
@@ -681,6 +833,9 @@ class TaskID:
         """
         return "_".join(str(i) for i in (self._name, *self._id))
 
+    def __hash__(self):
+        return hash(self._id);
+
     def __repr__(self):
         return "TaskID({}, task={})".format(self.full_name, self._task)
 
@@ -695,8 +850,15 @@ class InvalidSchedulerAccessException(RuntimeError):
     pass
 
 class SchedulerContext(metaclass=ABCMeta):
-    def spawn_task(self, function, args, deps, taskid, req, dataflow, name: Optional[str] = None):
+    def spawn_task(self, function, args, deps, taskid,
+                   req, dataflow, name: Optional[str] = None):
         return Task(function, args, deps, taskid, req, dataflow, name)
+
+    def create_wait_task(self, function, args, deps, taskid,
+                         req, dataflow, num_unspawned_deps,
+                         name: Optional[str] = None):
+        return Task(function, args, deps, taskid, req,
+                    dataflow, name, num_unspawned_deps) 
 
     @abstractmethod
     def enqueue_task(self, task):
@@ -866,7 +1028,6 @@ class WorkerThread(ControllableThread, SchedulerContext):
                     # Thread wakes up without a task (should only happen at end of program)
                     elif not self.task and self._should_run:
                         raise WorkerThreadException("%r woke up without a valid task.", self)
-
         except Exception as e:
             logger.exception("Unexpected exception in Task handling")
             self.scheduler.stop()
@@ -991,7 +1152,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     _available_resources: ResourcePool
     period: float
 
-    def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 0.01):
+    def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 1.4012985e-20):
         # ControllableThread: __init__ sets it to run
         # SchedulerContext: No __init__
         super().__init__()
@@ -1038,12 +1199,13 @@ class Scheduler(ControllableThread, SchedulerContext):
         # The device queues where scheduled tasks go to be launched from
         self._device_queues = {dev: deque() for dev in self._available_resources.get_resources()}
 
-        # Worker threads for each device
+        # Dictinary mapping data block to task lists.
+        self._datablock_dict = defaultdict(list)
+
         self._worker_threads = [WorkerThread(self, i) for i in range(n_threads)]
         for t in self._worker_threads:
             t.start()
         self._free_worker_threads = deque(self._worker_threads)
-
         # Start the scheduler thread (likely to change later)
         self.start()
 
@@ -1103,29 +1265,12 @@ class Scheduler(ControllableThread, SchedulerContext):
         """
         with self._monitor:
             # Try to dequeue a task and if there is no
-            # remaining task, returns None.
-            # TODO(lhc): if a task is spawned later
-            #            than this function,
-            #            when that will be popped?
-            #            scheduler is busy waiting this queue?
             try:
                 task = self._spawned_task_queue.pop()
                 logger.debug(f"[Scheduler] Popped %r from spawn queue.", task)
                 return task
             except IndexError:
                 return None
-
-    def enqueue_mapped_task(self, task: Task):
-        """Enqueue a task on the mapped subgraph queue.
-           Note that this enqueueing has no data race.
-        """
-        self._new_mapped_task_queue.appendleft(task)
-
-    def _dequeue_mapped_task(self) -> Optional[Task]:
-        try:
-            return self._mapped_task_queue.pop()
-        except IndexError:
-            return None
 
     def enqueue_task(self, task: Task):
         """Enqueue a task on the resource allocation queue.
@@ -1197,10 +1342,15 @@ class Scheduler(ControllableThread, SchedulerContext):
             the current queue.
         """
         with self._monitor:
-            new_q = self._new_spawned_task_queue
-            new_tasks = [new_q.popleft() for _ in range(len(new_q))]
-            if len(new_tasks) > 0:
-                self._spawned_task_queue.extendleft(new_tasks)
+            if (len(self._new_spawned_task_queue) > 0):
+                new_q = self._new_spawned_task_queue
+                new_tasks = [new_q.popleft() for _ in range(len(new_q))]
+                # Newly added tasks should be enqueued onto the
+                # right to guarantee FIFO manners.
+                # It is efficient to map higher priority tasks to devices
+                # first since Applications generally spawn
+                # tasks in priority orders.
+                self._spawned_task_queue.extend(new_tasks)
 
     def fill_curr_mapped_task_queue(self):
         """ It moves tasks on the new mapped task queue to
@@ -1211,6 +1361,49 @@ class Scheduler(ControllableThread, SchedulerContext):
             new_tasks = [new_q.popleft() for _ in range(len(new_q))]
             if len(new_tasks) > 0:
                 self._mapped_task_queue.extendleft(new_tasks)
+
+    def _construct_datamove_task(self, target_data, compute_task):
+        """
+          This function constructs data movement task for target data.
+          This function consists of two steps.
+          First, it iterates all operand data of the dependency tasks
+          of the computation task (original task).
+          If any of the dependency tasks' data is overlapped with the
+          target data, then add the dependency task to the new data
+          movement task's dependency list.
+          Second, construct a data movement task.
+        """
+        # Construct data movement task.
+        taskid = TaskID(str(compute_task.taskid)+"."+str(hex(id(target_data)))+".dmt."+str(len(task_locals.global_tasks)), (len(task_locals.global_tasks),))
+        task_locals.global_tasks += [taskid]
+        datamove_task = DataMovementTask(None,
+                                         compute_task, taskid,
+                                         compute_task.req, target_data,
+                                         str(compute_task.taskid) + "." +
+                                         str(hex(id(target_data))) + ".dmt")
+        self.incr_active_tasks()
+        compute_task._add_dependency(datamove_task)
+        compute_task.add_new_datamove_task(datamove_task)
+        target_data_id = id(target_data)
+        is_overlapped = False
+        if target_data_id in self._datablock_dict:
+            # Get task lists using the target data block.
+            dep_task_list = self._datablock_dict[target_data_id]
+            completed_tasks = []
+            for dep_task_tuple in dep_task_list:
+                dep_task_id = dep_task_tuple[0]
+                dep_task = dep_task_tuple[1]
+                # Only checks dependent tasks if they use the same data blocks.
+                if compute_task.check_if_task_dependency(dep_task):
+                    if not datamove_task._add_dependency(dep_task):
+                        completed_tasks.append(dep_task_id)
+            dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
+        self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
+        # If a task has no dependency after it is assigned to devices,
+        # immediately enqueue a corresponding data movement task to
+        # the ready queue.
+        if not datamove_task.bool_check_remaining_dependencies():
+            self.enqueue_task(datamove_task)
 
     def _map_tasks(self):
         # The first loop iterates a spawned task queue
@@ -1226,44 +1419,20 @@ class Scheduler(ControllableThread, SchedulerContext):
                     if not is_assigned:
                         self.enqueue_spawned_task(task)
                     else:
-                        # Create data movement task
-                        # This step consists of five steps.
-                        #
-                        # 1. Get alive dependencies of the task.
-                        # 2. Reset dependency lists of the task.
-                        #    (Therefore, we can reduce unnecessary
-                        #     dependee iterations when higher priority tasks
-                        #     are done)
-                        # 3. Remove that task from dependencies' dependee list.
-                        # 4. Create data movement task with the depdencies.
-                        # 5. Set the original task as the data task's dependee.
-                        # 6. Set the data task as the original task's denpdency.
-                        remaining_deps = task._reset_dependencies()
-                        # TODO(lhc): I am not confident if this task id and
-                        #            local/global tasks work correctly.
-                        taskid = TaskID("global_" +
-                                        str(len(task_locals.global_tasks)),
-                                        (len(task_locals.global_tasks),))
-                        task_locals.global_tasks += [taskid]
-                        taskid.dependencies = remaining_deps
-                        datamove_task = DataMovementTask(remaining_deps, task,
-                                             taskid, task.req,
-                                             ["in1 processing", "in2 processing"],
-                                             ["out processing"],
-                                             task.name + ".datamovement"
-                                             );
-                        logger.debug(f"[Scheduler] Spawned %r.", datamove_task)
-                        self.incr_active_tasks()
-                        task._set_dependencies([datamove_task])
+                        # Create data movement tasks for each data
+                        # operands of this task.
+                        for data in task.dataflow:
+                            self._construct_datamove_task(data, task)
+
                         # Only computation needs to set a assigned flag.
                         # Data movement task is set as assigned when it is created.
                         task.set_assigned()
                         # If a task has no dependency after it is assigned to devices,
                         # immediately enqueue a corresponding data movement task to
                         # the ready queue.
-                        if not datamove_task.bool_check_remaining_dependencies():
-                            self.enqueue_task(datamove_task)
-                            logger.debug(f"[Scheduler] Enqueued %r on ready queue", datamove_task)
+                        if not task.bool_check_remaining_dependencies():
+                            self.enqueue_task(task)
+                            logger.debug(f"[Scheduler] Enqueued %r on ready queue", task)
                 else:
                     logger.exception("[Scheduler] Tasks on the spawned queue ", \
                                      "should be not assigned any device.")

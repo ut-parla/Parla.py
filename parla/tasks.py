@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager, contextmanager, ExitStack
 from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, FrozenSet, Dict
 
 from parla.device import Device, Architecture, get_all_devices
-from parla.task_runtime import TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context, task_locals
+from parla.task_runtime import TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context, task_locals, wait_dependees_collection
 from parla.utils import parse_index
 from parla.dataflow import Dataflow
 
@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "TaskID", "TaskSpace", "spawn", "tasks", "finish", "CompletedTaskSpace", "Task", "reserve_persistent_memory"
 ]
-
 
 class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
     """
@@ -53,11 +52,12 @@ class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
                 ds = (ds,)
             for d in ds:
                 if hasattr(d, "task"):
-                    d = d.task
-                if not isinstance(d, task_runtime.Task):
-                    raise TypeError("Dependencies must be TaskIDs or Tasks: " + str(d))
+                    if d.task is not None:
+                        d = d.task
+                #if not isinstance(d, task_runtime.Task):
+                #    raise TypeError("Dependencies must be TaskIDs or Tasks: " + str(d))
                 deps.append(d)
-        return tuple(deps)
+        return deps
 
     def __await__(self):
         return (yield TaskAwaitTasks(self._flat_tasks, None))
@@ -213,6 +213,63 @@ def _task_callback(task, body) -> TaskState:
                 in_value = in_value_task and in_value_task.result
                 logger.debug("Executing coroutine task: %s with input %s from %r", task.taskid,
                              in_value_task, in_value)
+
+                # This body returns information of the function body, not task.
+                # It means that any task shares the same function body can use the
+                # same information. This should be handled in more detailed.
+                # For example, dependencies could include TaskID, not Task objects
+                # if threads try to spawn several tasks sharing the same body with
+                # different task space, and if one tries to make dependency with
+                # nested tasks of the previous task.
+                # This could happen since the nested tasks could be spawned in parallel.
+                # To be specific, let's consider the below case.
+                #
+                # outer_task = TaskSpace("outer")
+                # inner_task = TaskSpace("inner")
+                # for rep in range(reps):
+                #     dep = [inner_task[rep - 1]] if rep > 0 else []
+                #     @spawn(out_task[rep], dependencies=[dep])
+                #     def t:
+                #         @spawn(inner_task[rep]):
+                #         def inner_t:
+                #         ...
+                #
+                # In the above case, the main thread will try to spawn
+                # out_task[0], and out_task[1] immediately.
+                # (Note that there is no await statement in the above)
+                #
+                # Let's assume that threads try to spawn tasks in this order
+                # at the first round:
+                # by main thread             -> by another thread
+                # out_task[0] -> out_task[1] -> inner_task[0]
+                #
+                # out_task[1] needs inner_task[0].
+                # But inner_task[0] is not yet spawned.
+                # out_task[1] is waiting for inner_task[0]'s spawn.
+                # out_task[0] gets a thread who runs it.
+                # When the thread tries to run out_task[0], it gets meta information
+                # from body.
+                # Since out_task[1] already requests inner_task[0] as a dependent task,
+                # inner_task[0] exists on TaskAwaitTasks, as TaskID, not Task.
+                # (Note that Task is mapped to TaskID after the task is spawnd).
+                #
+                # In this case, Parla removes that unspawned task id from
+                # the current dependency list. (in this case, out_task[0])
+                # This does not cause a problem because,
+                #
+                # First, any task whose have unspawned dependencies will never get
+                # this place. Also this unspawned dependencies are removed and do not
+                # exist on the task's dependency list.
+                #
+                # Second, if any task is ready to run after all dependencies are spawned,
+                # it will re-adds those removed/late spawned dependencies to its dependency
+                # list. (which means that removing the dependency from body's
+                # dependency list is fine)
+                #
+                # Therefore, non-Task or DataMovementTask elements of dependencies
+                # are fine even though it removes them at HERE.
+                #
+                # TODO(lhc): if you think wrong, please let me know.
                 new_task_info = body.send(in_value)
                 task.value_task = None
                 if not isinstance(new_task_info, TaskAwaitTasks):
@@ -289,7 +346,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     The declared task (`t` above) can be used as a dependency for later tasks (in place of the tasks ID).
     This same value is stored into the task space used in `taskid`.
 
-    :see: :ref:`Fox's Algorithm` Example
+    :not see: :ref:`Fox's Algorithm` Example
 
     """
     # :param vcus: The amount of compute power this task uses. It is specified in "Virtual Compute Units".
@@ -323,6 +380,24 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         # Compute the flat dependency set (including unwrapping TaskID objects)
         deps = tasks(*dependencies)._flat_tasks
 
+        # _flat_tasks appends two types of objects to deps.
+        # If a task corresponding to a task id listed on the dependencies
+        # is already spawned (materialized), it appends the task object.
+        # Otherwise, a task corresponding to the task id is not yet spawned
+        # and, in this case, appends its id which is not spawned yet as a key,
+        # and the dependee task id which waits for the dependent task to the
+        # wait_dependees_collection dictionary wrapper.
+        # The tasks on that dictionary is not spawned until all
+        # dependent tasks are spawned.
+        num_unspawned_deps = 0
+        for dep in list(deps):
+            if type(dep) is TaskID:
+                # If the dep is not yet spawned, temporarily removes it from
+                # a task's dependency list.
+                deps.remove(dep)
+                num_unspawned_deps += 1
+                wait_dependees_collection.append_wait_task(dep, taskid)
+
         if inspect.iscoroutine(body):
             # An already running coroutine does not need changes since we assume
             # it was changed correctly when the original function was spawned.
@@ -345,15 +420,26 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         # gather input/output/inout, which is hint for data from or to the this task
         dataflow = Dataflow(input, output, inout)
 
-        # Spawn the task via the Parla runtime API
-        task = task_runtime.get_scheduler_context().spawn_task(
-            function=_task_callback,
-            args=(separated_body,),
-            deps=deps,
-            taskid=taskid,
-            req=req,
-            dataflow=dataflow,
-            name=getattr(body, "__name__", None))
+        if num_unspawned_deps == 0:
+          # Spawn the task via the Parla runtime API
+          task = task_runtime.get_scheduler_context().spawn_task(
+              function=_task_callback,
+              args=(separated_body,),
+              deps=deps,
+              taskid=taskid,
+              req=req,
+              dataflow=dataflow,
+              name=getattr(body, "__name__", None))
+        else:
+          task = task_runtime.get_scheduler_context().create_wait_task(
+              function=_task_callback,
+              args=(separated_body,),
+              deps=deps,
+              taskid=taskid,
+              req=req,
+              dataflow=dataflow,
+              num_unspawned_deps=num_unspawned_deps,
+              name=getattr(body, "__name__", None))
 
         logger.debug("Created: %s %r", taskid, body)
 

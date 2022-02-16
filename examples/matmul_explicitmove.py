@@ -14,9 +14,7 @@ from parla.cpu import cpu
 from parla.cuda import gpu
 from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
-from parla.tasks import spawn, TaskSpace, CompletedTaskSpace, reserve_persistent_memory
-from parla.parray import asarray_batch
-
+from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
 def main():
     ngpus = int(sys.argv[1])
     repetitions = int(sys.argv[2])
@@ -49,9 +47,6 @@ def main():
         c_dim = b_part[-1].shape[0]
         c_part.append(np.empty((c_dim, n), np.float32, order = 'F'))
 
-    # 1. NEW: convert to parray in batch
-    a_part, b_part, c_part = asarray_batch(a_part, b_part, c_part)
-
     previous = None
     matmul = TaskSpace("matmul")
     outer = TaskSpace("outer")
@@ -59,8 +54,7 @@ def main():
         offset = blocks * repetition
         # Now compute a @ b.T and write the output to c
         deps = [previous, matmul[offset-1, blocks-1]] if previous is not None else []
-        # 2. NEW: input/inout
-        @spawn(outer[repetition], placement = cpu, dependencies = deps, input=[*a_part, *b_part], inout=[*c_part])
+        @spawn(outer[repetition], placement = cpu, dependencies = deps)
         async def run_matmul():
             start = time.perf_counter()
             for i in range(blocks):
@@ -73,10 +67,12 @@ def main():
                         memsize += b_block.nbytes
 
                     k = i + offset
-                    # 3. NEW: input/output
-                    @spawn(matmul[k, j], dependencies=[matmul[0:k, j], matmul[k, 0:j]], placement = gpu, memory=memsize, input=[a_block, b_block], output=[c_block])
+                    @spawn(matmul[k, j], dependencies=[matmul[0:k, j], matmul[k, 0:j]], placement = gpu, memory = memsize)
                     def matmul_task():
-                        c_block[:] = (a_block @ b_block.T).array
+                        b_block_local = clone_here(b_block)
+                        c_block_local = clone_here(c_block)
+                        a_block_local = clone_here(a_block)
+                        c_block_local[:] = a_block_local @ b_block_local.T
                         # TODO(lhc): For now, do not copy back to cpu memory.
                         #            This is because I don't know how to move back to
                         #            PArray to CPU on nested task case.
