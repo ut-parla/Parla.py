@@ -111,44 +111,44 @@ class PArray:
 
     # Coherence update operations:
 
-    def _coherence_read(self, operator: int = None) -> None:
+    def _coherence_read(self, device_id: int = None) -> None:
         """ Tell the coherence protocol a read happened on a device.
 
         And do data movement based on the operations given by protocol.
 
         Args:
-            operator: if is this not None, data will be moved to operator,
+            device_id: if is this not None, data will be moved to this device,
                     else move to current device
 
         Note: should be called within the current task context
         """
         this_device = self._current_device_index
 
-        if not operator:
-            operator = this_device
+        if not device_id:
+            device_id = this_device
 
         # update protocol and get operation
-        operation = self._coherence.read(operator)
+        operation = self._coherence.read(device_id)
         self._process_operation(operation, this_device)
 
-    def _coherence_write(self, operator: int = None) -> None:
+    def _coherence_write(self, device_id: int = None) -> None:
         """Tell the coherence protocol a write happened on a device.
 
         And do data movement based on the operations given by protocol.
 
         Args:
-            operator: if is this not None, data will be moved to operator,
+            device_id: if is this not None, data will be moved to this device,
                     else move to current device
 
         Note: should be called within the current task context
         """
         this_device = self._current_device_index
 
-        if not operator:
-            operator = this_device
+        if not device_id:
+            device_id = this_device
 
         # update protocol and get list of operations
-        operations = self._coherence.write(operator)
+        operations = self._coherence.write(device_id)
         for op in operations:
             self._process_operation(op, this_device)
 

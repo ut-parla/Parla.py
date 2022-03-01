@@ -60,83 +60,83 @@ class Coherence:
         self._owner = init_owner  # owner id when MODIFIED / smallest valid device id when SHARED
         self._global_state = self.SHARED  # state of the whole system
 
-    def update(self, operator: int, do_write: bool = False) -> List[MemoryOperation]:
-        """ Tell the protocol that operator get a new copy (e.g. from user).
+    def update(self, device_id: int, do_write: bool = False) -> List[MemoryOperation]:
+        """ Tell the protocol that this device get a new copy (e.g. from user).
 
         Args:
-            operator: device id of the new device
-            do_write: if True, the operator will be MODIFIED, otherwise SHARED
+            device_id: id of the new device
+            do_write: if True, this device will be MODIFIED, otherwise SHARED
         """
-        operator_state = self._local_states[operator]
+        device_local_state = self._local_states[device_id]
 
-        if operator_state == self.MODIFIED:  # already have the right to write data
+        if device_local_state == self.MODIFIED:  # already have the right to write data
             return [MemoryOperation.noop()]
-        else:  # need to upgrade operator state to MODIFIED
+        else:  # need to upgrade device state to MODIFIED
             if self._global_state == self.INVALID:  # the system doesn't hold a copy before
-                self._local_states[operator] = self.MODIFIED if do_write else self.SHARED
-                self._owner = operator
+                self._local_states[device_id] = self.MODIFIED if do_write else self.SHARED
+                self._owner = device_id
                 self._global_state = self.MODIFIED if do_write else self.SHARED
                 return [MemoryOperation.noop()]
             else:  # the system already hold a copy
                 # evict others
                 operations = []
                 for device, state in self._local_states.items():
-                    if state != self.INVALID and device != operator:  # should not include operator itself
+                    if state != self.INVALID and device != device_id:  # should not include this device itself
                         self._local_states[device] = self.INVALID
                         operations.append(MemoryOperation.evict(device))
 
-                self._local_states[operator] = self.MODIFIED if do_write else self.SHARED
-                self._owner = operator
+                self._local_states[device_id] = self.MODIFIED if do_write else self.SHARED
+                self._owner = device_id
                 self._global_state = self.MODIFIED if do_write else self.SHARED
                 return operations
 
-    def read(self, operator: int) -> MemoryOperation:
-        """ Tell the protocol that operator read from the copy.
+    def read(self, device_id: int) -> MemoryOperation:
+        """ Tell the protocol that this device read from the copy.
 
         Args:
-            operator: device id of the operator
+            device_id: id of this device
 
         Return:
             MemoryOperation, which is a load operation with src and dst
         """
-        operator_state = self._local_states[operator]
+        device_local_state = self._local_states[device_id]
 
-        if operator_state == self.INVALID:  # need to load data from somewhere
+        if device_local_state == self.INVALID:  # need to load data from somewhere
             if self._global_state == self.SHARED:
                 # load data from owner
-                return MemoryOperation.load(dst=operator, src=self._owner)
+                return MemoryOperation.load(dst=device_id, src=self._owner)
             elif self._global_state == self.MODIFIED:
                 prev_owner = self._owner
                 self._local_states[prev_owner] = self.SHARED
-                self._local_states[operator] = self.SHARED
+                self._local_states[device_id] = self.SHARED
                 self._global_state = self.SHARED
 
                 # Trick: smaller one becomes owner, so will always load from CPU (-1) when possible
-                self._owner = min(self._owner, operator)
+                self._owner = min(self._owner, device_id)
 
-                return MemoryOperation.load(dst=operator, src=prev_owner)
+                return MemoryOperation.load(dst=device_id, src=prev_owner)
             else:   # overall_state should not be INVALID here
                 return MemoryOperation.error()
         else:
             return MemoryOperation.noop()  # do nothing
 
-    def write(self, operator: int) -> List[MemoryOperation]:
-        """ Tell the protocol that operator write to the copy.
+    def write(self, device_id: int) -> List[MemoryOperation]:
+        """ Tell the protocol that this device write to the copy.
 
         Args:
-            operator: device id of the operator
+            device_id: id of this device
 
         Return:
             List[MemoryOperation], different to _read, write could return several MemoryOperations.
                 And the order operations matter.
         """
-        operator_state = self._local_states[operator]
+        device_local_state = self._local_states[device_id]
 
-        if operator_state == self.INVALID:  # need to load data from somewhere
+        if device_local_state == self.INVALID:  # need to load data from somewhere
             if self._global_state == self.SHARED:
                 # load data from previous owner
                 prev_owner = self._owner
-                operations = [MemoryOperation.load(dst=operator, src=prev_owner)]
+                operations = [MemoryOperation.load(dst=device_id, src=prev_owner)]
 
                 # evict data from other devices
                 for device, state in self._local_states.items():
@@ -144,80 +144,80 @@ class Coherence:
                         self._local_states[device] = self.INVALID
                         operations.append(MemoryOperation.evict(device))
 
-                # update operator state
+                # update this device state
                 self._global_state = self.MODIFIED
-                self._local_states[operator] = self.MODIFIED
-                self._owner = operator
+                self._local_states[device_id] = self.MODIFIED
+                self._owner = device_id
 
                 return operations
             elif self._global_state == self.MODIFIED:
                 # load data from previous owner
                 prev_owner = self._owner
-                operations = [MemoryOperation.load(dst=operator, src=prev_owner)]
+                operations = [MemoryOperation.load(dst=device_id, src=prev_owner)]
 
                 # evict data from previous owner
                 self._local_states[prev_owner] = self.INVALID
                 operations.append(MemoryOperation.evict(prev_owner))
 
-                # update operator state
+                # update this device state
                 self._global_state = self.MODIFIED
-                self._local_states[operator] = self.MODIFIED
-                self._owner = operator
+                self._local_states[device_id] = self.MODIFIED
+                self._owner = device_id
 
                 return operations
             else:   # overall_state should not be INVALID here
                 return [MemoryOperation.error()]
-        elif operator_state == self.SHARED:  # already have the latest copy
+        elif device_local_state == self.SHARED:  # already have the latest copy
             operations = []
 
             # evict data from other devices
             for device, state in self._local_states.items():
-                if state == self.SHARED and device != operator:  # should not include operator itself
+                if state == self.SHARED and device != device_id:  # should not include this device itself
                     self._local_states[device] = self.INVALID
                     operations.append(MemoryOperation.evict(device))
 
-            # update operator state
+            # update this device state
             self._global_state = self.MODIFIED
-            self._local_states[operator] = self.MODIFIED
-            self._owner = operator
+            self._local_states[device_id] = self.MODIFIED
+            self._owner = device_id
 
             return operations
-        else: # operator is the owner in MODIFIED state
+        else: # this device is the owner in MODIFIED state
             return [MemoryOperation.noop()] # do nothing
 
-    def evict(self, operator: int) -> MemoryOperation:
-        """ Tell the protocol that operator want to clear the copy.
+    def evict(self, device_id: int) -> MemoryOperation:
+        """ Tell the protocol that this device want to clear the copy.
 
         Args:
-            operator: device id of the operator
+            device_id: id of this device
 
         Return:
             MemoryOperation, so the caller could move data following the operation
 
-        Note: if the operator is the last copy, the whole protocol state will be INVALID then.
+        Note: if this device has the last copy, the whole protocol state will be INVALID then.
             And the system will lose the copy. So careful when evict the last copy.
         """
-        operator_state = self._local_states[operator]
+        device_local_state = self._local_states[device_id]
 
-        if operator_state == self.INVALID: # already evicted, do nothing
+        if device_local_state == self.INVALID: # already evicted, do nothing
             return MemoryOperation.noop()
-        elif operator_state == self.SHARED:
+        elif device_local_state == self.SHARED:
             # find a new owner
-            if operator == self._owner:
+            if device_id == self._owner:
                 new_owner = None
                 for device, state in self._local_states.items():
-                    if state == self.SHARED and device != operator:  # should not include operator itself
+                    if state == self.SHARED and device != device_id:  # should not include this device itself
                         new_owner = device
                         break
-                if new_owner is None:  # operator owns the last copy
+                if new_owner is None:  # this device owns the last copy
                     self._global_state = self.INVALID  # the system lose the last copy
                 self._owner = new_owner
 
             # update states
-            self._local_states[operator] = self.INVALID
-            return MemoryOperation.evict(operator)
+            self._local_states[device_id] = self.INVALID
+            return MemoryOperation.evict(device_id)
         else:  # Modified
             self._global_state = self.INVALID  # the system lose the last copy
-            self._local_states[operator] = self.INVALID
+            self._local_states[device_id] = self.INVALID
             self._owner = None
-            return MemoryOperation.evict(operator)
+            return MemoryOperation.evict(device_id)
