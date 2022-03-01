@@ -7,7 +7,7 @@ from typing import Dict
 import numpy as np
 
 from parla.device import Memory
-from parla.tasks import get_current_devices
+import parla.task_runtime  # to avoid circular import
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ def clone_here(source, kind=None):
     """
     if is_array(source):
         # TODO: How to correctly handle multiple devices.
-        return get_current_devices()[0].memory(kind)(source)
+        return parla.task_runtime.get_current_devices()[0].memory(kind)(source)
     else:
         raise TypeError("Array required, given value of type {}".format(type(source)))
 

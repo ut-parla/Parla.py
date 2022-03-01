@@ -12,6 +12,7 @@ from parla import Parla
 from parla.cpu import *
 
 from parla.tasks import *
+from parla.task_runtime import get_current_devices
 from parla.ldevice import LDeviceGridBlocked
 
 

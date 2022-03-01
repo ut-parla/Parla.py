@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from parla.cpu_impl import cpu
-from parla.tasks import get_current_devices
+from parla.task_runtime import get_current_devices
 from parla.device import Device
 
 from .coherence import MemoryOperation, Coherence, CPU_INDEX

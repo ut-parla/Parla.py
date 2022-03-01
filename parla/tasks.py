@@ -30,7 +30,7 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaskID", "TaskSpace", "spawn", "get_current_devices", "tasks", "finish", "CompletedTaskSpace", "Task", "reserve_persistent_memory"
+    "TaskID", "TaskSpace", "spawn", "tasks", "finish", "CompletedTaskSpace", "Task", "reserve_persistent_memory"
 ]
 
 
@@ -449,16 +449,6 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         return task
 
     return decorator
-
-
-# TODO (bozhi): Why not put it in task_runtime? Remember to update __all__ and clean up imports to do so.
-def get_current_devices() -> List[Device]:
-    """
-    :return: A list of `devices<parla.device.Device>` assigned to the current task. This will have one element unless `ndevices` was \
-      provided when the task was `spawned<spawn>`.
-    """
-    return list(task_runtime.get_devices())
-
 
 @contextmanager
 def _reserve_persistent_memory(memsize, device):

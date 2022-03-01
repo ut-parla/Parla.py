@@ -1,6 +1,6 @@
 import functools
 
-from . import tasks
+from parla.task_runtime import get_current_devices
 
 __all__ = [
     "VariantDefinitionError", "specialized",
@@ -37,7 +37,7 @@ class _ArchitectureSpecializer:
 
     def __call__(self, *args, **kwds):
         # TODO: How to correctly handle multiple devices.
-        d = tasks.get_current_devices()[0]
+        d = get_current_devices()[0]
         f = self.get_variant(d.architecture)
         return f(*args, **kwds)
         # return self._default(*args, **kwds)

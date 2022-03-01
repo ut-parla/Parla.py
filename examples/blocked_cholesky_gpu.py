@@ -14,6 +14,7 @@ from parla.cpu import cpu
 
 from parla.function_decorators import specialized
 from parla.tasks import *
+from parla.task_runtime import get_current_devices
 from parla.ldevice import LDeviceGridBlocked
 
 import cupy as cp
