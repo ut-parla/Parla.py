@@ -7,17 +7,15 @@ from contextlib import contextmanager
 import threading
 import time
 from itertools import combinations
-from numbers import Number
 from threading import Thread, Condition
 from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar
 
-from parla.device import get_all_devices, Device, Architecture
+from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
-from parla.dataflow import Dataflow
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements"]
+__all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
 
 # TODO: This module is pretty massively over-engineered the actual use case could use a much simpler scheduler.
 
@@ -200,7 +198,7 @@ class Task:
     _state: TaskState
 
     def __init__(self, func, args, dependencies: Collection["Task"], taskid,
-                 req: ResourceRequirements, dataflow: Dataflow, name: Optional[str] = None):
+                 req: ResourceRequirements, dataflow: "Dataflow", name: Optional[str] = None):
         self.name = name
         self._mutex = threading.Lock()
         with self._mutex:
@@ -406,6 +404,12 @@ def get_scheduler_context() -> SchedulerContext:
 def get_devices() -> Collection[Device]:
     return _scheduler_locals.environment.placement
 
+def get_current_devices() -> List[Device]:
+    """
+    :return: A list of `devices<parla.device.Device>` assigned to the current task. This will have one element unless `ndevices` was \
+      provided when the task was `spawned<spawn>`.
+    """
+    return list(get_devices())
 
 class ControllableThread(Thread, metaclass=ABCMeta):
     _should_run: bool

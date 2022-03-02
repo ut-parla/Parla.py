@@ -1,8 +1,10 @@
-from __future__ import annotations # To support self references in type checking, must be first line
+from __future__ import annotations
 
 from parla.cpu_impl import cpu
-from parla.tasks import get_current_devices
+from parla.task_runtime import get_current_devices
 from parla.device import Device
+
+from .coherence import MemoryOperation, Coherence, CPU_INDEX
 
 import numpy
 try:  # if the system has no GPU
@@ -14,6 +16,7 @@ except (ImportError, AttributeError):
     cupy = numpy
     gpu = None
 
+
 class PArray:
     """Multi-dimensional array on a CPU or CUDA device.
 
@@ -22,89 +25,206 @@ class PArray:
 
     Args:
         array: :class:`cupy.ndarray` or :class:`numpy.array` object
+
+    Note: some methods should be called within the current task context
     """
-    def __init__(self, array=None) -> None:
-        self.array = array
+    def __init__(self, array) -> None:
+        num_devices = gpu.num_devices if gpu else 0
+
+        # _array works as a per device buffer of data
+        self._array = {n: None for n in range(num_devices)}  # add gpu id
+        self._array[CPU_INDEX] = None  # add cpu id
+
+        # get the array's location
+        if isinstance(array, numpy.ndarray):
+            location = CPU_INDEX
+        else:
+            location = int(array.device)
+
+        self._array[location] = array
+        self._coherence = Coherence(location, num_devices)  # coherence protocol for managing data among multi device
+
+    # Properties:
+
+    @property
+    def array(self):
+        """
+        The reference to cupy/numpy array on current device.
+        Note: should be called within the current task context
+        """
+        return self._array[self._current_device_index]
 
     @property
     def _on_gpu(self) -> bool:
         """
-        True if the array is on GPU
+        True if the array is on GPU.
+        Note: should be called within the current task context
         """
-        # cannot check cupy if the system has no GPU
-        # return isinstance(self.array, cupy.ndarray)
-        return not isinstance(self.array, numpy.ndarray)
+        return self._current_device_index != CPU_INDEX
 
     @property
     def _current_device_index(self) -> int:
         """
-        Return -1 if the current device is CPU.
-        Otherwise return GPU ID.
+        -1 if the current device is CPU.
+        Otherwise GPU ID.
+        Note: should be called within the current task context
         """
-        if self._on_gpu:
-            return self.array.device
-        return -1
+        device = PArray._get_current_device()
+        if device.architecture == gpu:
+            return device.index
+        elif device.architecture == cpu:
+            return CPU_INDEX
+
+    # Public API:
+
+    def update(self, array) -> None:
+        """ Update the copy on current device.
+
+        Args:
+            array: :class:`cupy.ndarray` or :class:`numpy.array` object
+
+        Note: should be called within the current task context
+        Note: this method will also update the coherence protocol
+        """
+        this_device = self._current_device_index
+
+        # check if this array matches the device
+        # and copy data to this device
+        if isinstance(array, numpy.ndarray):
+            if this_device != CPU_INDEX:  # CPU to GPU
+                self._array[this_device] = cupy.array(array)
+            else: # data already in CPU
+                self._array[this_device] = array
+        else:
+            if this_device == CPU_INDEX: # GPU to CPU
+                self._array[this_device] = cupy.asnumpy(array)
+            else: # GPU to GPU
+                if int(array.device) == this_device: # data already in this device
+                    self._array[this_device] = array
+                else:  # GPU to GPU
+                    self._array[this_device] = cupy.copy(array)
+
+        # update coherence protocol
+        operations = self._coherence.update(this_device, do_write=True)
+        for op in operations:
+            self._process_operation(op, this_device)
+
+    # Coherence update operations:
+
+    def _coherence_read(self, device_id: int = None) -> None:
+        """ Tell the coherence protocol a read happened on a device.
+
+        And do data movement based on the operations given by protocol.
+
+        Args:
+            device_id: if is this not None, data will be moved to this device,
+                    else move to current device
+
+        Note: should be called within the current task context
+        """
+        this_device = self._current_device_index
+
+        if not device_id:
+            device_id = this_device
+
+        # update protocol and get operation
+        operation = self._coherence.read(device_id)
+        self._process_operation(operation, this_device)
+
+    def _coherence_write(self, device_id: int = None) -> None:
+        """Tell the coherence protocol a write happened on a device.
+
+        And do data movement based on the operations given by protocol.
+
+        Args:
+            device_id: if is this not None, data will be moved to this device,
+                    else move to current device
+
+        Note: should be called within the current task context
+        """
+        this_device = self._current_device_index
+
+        if not device_id:
+            device_id = this_device
+
+        # update protocol and get list of operations
+        operations = self._coherence.write(device_id)
+        for op in operations:
+            self._process_operation(op, this_device)
+
+    # Device management methods:
+
+    def _process_operation(self, operation: MemoryOperation, current_device: int) -> None:
+        """
+        Process the given memory operations.
+        Data will be moved, and protocol states is kept unchanged.
+        """
+        if operation.inst == MemoryOperation.NOOP:
+            return  # do nothing
+        elif operation.inst == MemoryOperation.LOAD:
+            self._copy_data_between_device(operation.dst, operation.src, current_device)
+        elif operation.inst == MemoryOperation.EVICT:
+            self._array[operation.src] = None  # decrement the reference counter, relying on GC to free the memory
+        elif operation.inst == MemoryOperation.ERROR:
+            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
+                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
+        else:
+            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
+                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
+
+    def _copy_data_between_device(self, dst, src, current_device) -> None:
+        """
+        Copy data from src to dst.
+        TODO: check cupy.copy and cupy.array works stably
+        """
+        if src == CPU_INDEX: # copy from CPU to GPU
+            if dst == current_device:
+                self._array[dst] = cupy.array(self._array[src])
+            else:
+                with cupy.cuda.Device(dst):
+                    self._array[dst] = cupy.array(self._array[src])
+        elif dst != CPU_INDEX: # copy from GPU to GPU
+            if dst == current_device:
+                self._array[dst] = cupy.copy(self._array[src])
+            else:
+                with cupy.cuda.Device(dst):
+                    self._array[dst] = cupy.copy(self._array[src])
+        else: # copy from GPU to CPU
+            self._array[CPU_INDEX] = cupy.asnumpy(self._array[src])
 
     @staticmethod
     def _get_current_device() -> Device:
         """
         Get current device from task environment.
 
-        Note: should not be called outside of task context
+        Note: should be called within the current task context
         """
         return get_current_devices()[0]
 
-    def _auto_move(self) -> None:
-        """
-        Automatically move array to current device.
+    def _auto_move(self, device_id: int = None, do_write: bool = False) -> None:
+        """ Automatically move data to current device.
 
-        Note: should not be called outside of task context
-        """
-        device = PArray._get_current_device()
-        if device.architecture == gpu:
-            if self._current_device_index == device.index:
-                return
-            self._to_current_gpu()
-        elif device.architecture == cpu:
-            self._to_cpu()
+        Multiple copies on different devices will be made based on coherence protocol.
 
-    def _to_current_gpu(self) -> None:
-        """
-        Move the array to current GPU, do nothing if already on the device.
+        Args:
+            device_id: current device id. CPU use CPU_INDEX as id
+            do_write: True if want make the device MO in coherence protocol
+                False if this is only for read only in current task
 
-        Note: should not be called when the system has no GPU
+        Note: should be called within the current task context
         """
-        self.array = cupy.asarray(self.array)  # asarray by default copy to current device
-
-    def _to_gpu(self, index: int) -> None:
-        """
-        Move the array to GPU, do nothing if already on the device.
-        `index` is the index of GPU copied to
-
-        Note: should not be called when the system has no GPU
-        """
-        if self._current_device_index == index:
-            return
-
-        with cupy.cuda.Device(index):
-            self.array = cupy.asarray(self.array)
-
-    def _to_cpu(self) -> None:
-        """
-        Move the array to CPU, do nothing if already on CPU.
-        """
-        if not self._on_gpu:
-            return
-        self.array = cupy.asnumpy(self.array)
+        if do_write:
+            self._coherence_write(device_id)
+        else:
+            self._coherence_read(device_id)
 
     def _on_same_device(self, other: PArray) -> bool:
         """
         Return True if the two PArrays are in the same device.
         Note: other has to be a PArray object.
         """
-        if self._on_gpu == other._on_gpu:
-            return self._on_gpu == False or self.array.device == other.array.device
-        return False
+        this_device = self._current_device_index
+        return this_device in other._array and other._array[this_device] is not None
 
     # NumPy/CuPy methods redirection
 
@@ -467,10 +587,10 @@ class PArray:
     # String representations:
 
     def __repr__(self):
-        return repr(self.array)
+        return repr(self._array)
 
     def __str__(self):
-        return str(self.array)
+        return str(self._array)
 
     def __format__(self, format_spec):
-        return self.array().__format__(format_spec)
+        return self._array.__format__(format_spec)

@@ -135,6 +135,10 @@ class _GPUArchitecture(Architecture):
     def devices(self):
         return self._devices
 
+    @property
+    def num_devices(self):
+        return len(self._devices)
+
     def __call__(self, index, *args, **kwds):
         return _GPUDevice(self, index, *args, **kwds)
 
