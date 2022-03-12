@@ -6,6 +6,7 @@ from parla.device import Device
 
 from .coherence import MemoryOperation, Coherence, CPU_INDEX
 
+import threading
 import numpy
 try:  # if the system has no GPU
     import cupy
@@ -43,6 +44,8 @@ class PArray:
 
         self._array[location] = array
         self._coherence = Coherence(location, num_devices)  # coherence protocol for managing data among multi device
+
+        self._coherence_lock = threading.Lock()  # a lock to greb when update coherence and move data
 
     # Properties:
 
@@ -84,12 +87,10 @@ class PArray:
             array: :class:`cupy.ndarray` or :class:`numpy.array` object
 
         Note: should be called within the current task context
-        Note: this method will also update the coherence protocol
+        Note: data should be put in OUT/INOUT fields of spawn
         """
         this_device = self._current_device_index
 
-        # check if this array matches the device
-        # and copy data to this device
         if isinstance(array, numpy.ndarray):
             if this_device != CPU_INDEX:  # CPU to GPU
                 self._array[this_device] = cupy.array(array)
@@ -103,11 +104,6 @@ class PArray:
                     self._array[this_device] = array
                 else:  # GPU to GPU
                     self._array[this_device] = cupy.copy(array)
-
-        # update coherence protocol
-        operations = self._coherence.update(this_device, do_write=True)
-        for op in operations:
-            self._process_operation(op, this_device)
 
     # Coherence update operations:
 
@@ -128,8 +124,9 @@ class PArray:
             device_id = this_device
 
         # update protocol and get operation
-        operation = self._coherence.read(device_id)
-        self._process_operation(operation, this_device)
+        with self._coherence_lock:
+            operation = self._coherence.read(device_id)
+            self._process_operation(operation, this_device)
 
     def _coherence_write(self, device_id: int = None) -> None:
         """Tell the coherence protocol a write happened on a device.
@@ -148,9 +145,12 @@ class PArray:
             device_id = this_device
 
         # update protocol and get list of operations
-        operations = self._coherence.write(device_id)
-        for op in operations:
-            self._process_operation(op, this_device)
+        # use lock to avoid race in between data movement and protocol updating
+        # TODO(Yineng): improve the lock or propose a lock free protocol
+        with self._coherence_lock:
+            operations = self._coherence.write(device_id)
+            for op in operations:
+                self._process_operation(op, this_device)
 
     # Device management methods:
 
