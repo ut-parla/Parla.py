@@ -547,8 +547,6 @@ class Task(TaskBase):
                 # the scheduler.
                 for d in self.req.devices:
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
-                    # TODO: This is part of the easy launcher hack, fix it
-                    ctx.scheduler._available_resources._occupancy_dict[d] = False
                 self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
@@ -726,8 +724,6 @@ class DataMovementTask(TaskBase):
                 # the scheduler.
                 for d in self.req.devices:
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
-                    # TODO: This is part of the easy launcher hack, fix it
-                    ctx.scheduler._available_resources._occupancy_dict[d] = False
                 self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
@@ -1052,12 +1048,6 @@ class ResourcePool:
         self._monitor = threading.Condition(threading.Lock())
         self._devices = self._initial_resources(multiplier)
 
-        # NOTE: Hack to make launching easier for now.
-        # Holds a bool per device to determine whether or not it is "free"
-        # The right way to do this is check device resources
-        # TODO: Do it right
-        self._occupancy_dict = {dev: False for dev in get_all_devices()}
-
     @staticmethod
     def _initial_resources(multiplier):
         return {dev: {name: amt * multiplier for name, amt in dev.resources.items()} for dev in get_all_devices()}
@@ -1081,6 +1071,20 @@ class ResourcePool:
         """
         ret = self._atomically_update_resources(d, resources, 1, False)
         assert ret
+
+    def check_resources_availability(self, d: Device, resources: ResourceDict):
+        """Check if necessary resouces of the deviced is available.
+
+        :param d: The device on which resources exist.
+        :param resources: The resources to deallocate.
+        """
+        with self._monitor:
+            is_available = True
+            for name, amount in resources.items():
+               dres = self._devices[d]
+               if amount > dres[name]:
+                  is_available = False
+            return is_available
 
     def _atomically_update_resources(self, d: Device, resources: ResourceDict, multiplier, block: bool):
         with self._monitor:
@@ -1465,18 +1469,18 @@ class Scheduler(ControllableThread, SchedulerContext):
                 # Make sure there's an available WorkerThread
                 if len(self._free_worker_threads) == 0:
                     break
-
-                # Hack to make launching work for now
-                # Only works for single-device tasks, and only one task at a time on each device
-                # TODO: Make this not terrible
-                if self._available_resources._occupancy_dict[dev] == False: # if not occupied
-                    if len(queue) > 0: # if there are tasks on the queue
-                        task = queue.pop() # grab a task
-                        worker = self._free_worker_threads.pop() # grab a worker
-                        logger.info(f"[Scheduler] Launching %r on %r", task, worker)
-                        self._available_resources._occupancy_dict[dev] = True # mark the device as occupied
-                        worker.assign_task(task) # assign the task to the worker (this notifies the worker's monitor)
-                        logger.debug(f"[Scheduler] Launched %r", task)
+                if len(queue) > 0: # If there are tasks on the queue.
+                    try:
+                        task = queue.pop() # Grab a task.
+                        if self._available_resources.check_resources_availability(dev, task.req.resources):
+                            worker = self._free_worker_threads.pop() # grab a worker
+                            logger.info(f"[Scheduler] Launching %r on %r", task, worker)
+                            worker.assign_task(task) # assign the task to the worker (this notifies the worker's monitor)
+                            logger.debug(f"[Scheduler] Launched %r", task)
+                        else:
+                            queue.appendleft(task)
+                    finally:
+                        pass
 
     def run(self) -> None:
         # noinspection PyBroadException
