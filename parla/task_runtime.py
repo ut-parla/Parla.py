@@ -278,7 +278,7 @@ class Task(TaskBase):
     assigned: bool
 
     def __init__(self, func, args, dependencies: Collection["Task"], taskid,
-                 req: ResourceRequirements, dataflow: Dataflow,
+                 req: ResourceRequirements, dataflow: "Dataflow",
                  name: Optional[str] = None,
                  num_unspawned_deps: int = 0):
         self._mutex = threading.Lock()
