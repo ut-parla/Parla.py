@@ -121,7 +121,7 @@ class _GPUArchitecture(Architecture):
         if not cupy:
             self._devices = []
             return
-        for device_id in range(2**16):
+        for device_id in range(cupy.cuda.runtime.getDeviceCount()):
             cupy_device = cupy.cuda.Device(device_id)
             try:
                 cupy_device.compute_capability
