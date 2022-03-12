@@ -145,6 +145,8 @@ class PArray:
             device_id = this_device
 
         # update protocol and get list of operations
+        # use lock to avoid race in between data movement and protocol updating
+        # TODO(Yineng): improve the lock or propose a lock free protocol
         with self._coherence_lock:
             operations = self._coherence.write(device_id)
             for op in operations:
