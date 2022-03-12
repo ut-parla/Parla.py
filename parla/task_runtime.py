@@ -7,7 +7,6 @@ import threading
 import time
 from itertools import combinations
 from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar, Deque
-from itertools import chain
 
 from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
@@ -202,10 +201,6 @@ class EnvironmentRequirements(ResourceRequirements):
         return self.environment.placement
 
     @property
-    def env_no(self):
-        return self.environment.env_no
-
-    @property
     def exact(self):
         return True
 
@@ -320,7 +315,6 @@ class Task(TaskBase):
                 get_scheduler_context().enqueue_spawned_task(self)
             else:
                 self._state = TaskWaiting()
-
 
     def add_new_datamove_task(self, t):
         self._datamove_tasks.append(t)
