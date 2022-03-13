@@ -12,8 +12,7 @@ from .device import *
 from .environments import EnvironmentComponentInstance, TaskEnvironment, EnvironmentComponentDescriptor
 
 import numpy
-
-logger = logging.getLogger(__name__)
+import os
 
 try:
     import cupy
@@ -24,6 +23,31 @@ except (ImportError, AttributeError):
     if all("sphinx" not in f.filename for f in inspect.getouterframes(inspect.currentframe())):
         raise
     cupy = None
+
+logger = logging.getLogger(__name__)
+profile_flag = bool(os.getenv("PARLA_PROFILE_MEMORY", default=0))
+
+if profile_flag and cupy is not None:
+    print("MEMORY PROFILER IS: ACTIVE")
+    n_gpus = cupy.cuda.runtime.getDeviceCount()
+    mempool = cupy.get_default_memory_pool()
+else:
+    mempool = None
+
+#Note: Python lists are thread safe! I'm surprised too.
+#Extending this list may cause an overhead on runs with a lot of tasks.
+#Please don't use this system to profile memory usage on large applications
+#Use a tool design for the job like Nvidia Profilers or Remora. This is only for internal development and microbenchmark analysis.
+
+#TODO: Is a class static faster than accessing a global variable? This is arguably cleaner for the namespace though.
+class MemPoolLog():
+    log = list()
+
+    def append(self, a):
+        self.log.append(a)
+
+    def get(self):
+        return self.log
 
 __all__ = ["gpu", "GPUComponent", "MultiGPUComponent"]
 
@@ -236,6 +260,15 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         stream = self._stack.stream
         try:
             stream.synchronize()
+
+            if profile_flag:
+                mempool_log = MemPoolLog()
+                current_usage = 0
+                for i in range(n_gpus):
+                    with cupy.cuda.Device(i):
+                        current_usage += mempool.used_bytes()
+                mempool_log.append(current_usage)
+
             stream.__exit__(exc_type, exc_val, exc_tb)
             _gpu_locals._gpus = None
             ret = dev.__exit__(exc_type, exc_val, exc_tb)
@@ -326,6 +359,10 @@ class MultiGPUComponentInstance(EnvironmentComponentInstance):
                     stream.synchronize()
                     device.synchronize()
 
+
+def get_memory_log():
+    mempool_log = MemPoolLog()
+    return mempool_log.get()
 
 class MultiGPUComponent(EnvironmentComponentDescriptor):
     """A multi-GPU CUDA component which exposes the GPUs to the task via `get_gpus`.

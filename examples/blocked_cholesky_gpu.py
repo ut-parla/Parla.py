@@ -9,7 +9,7 @@ import time
 
 from parla import Parla, get_all_devices
 
-from parla.cuda import gpu
+from parla.cuda import gpu, get_memory_log
 from parla.cpu import cpu
 
 from parla.function_decorators import specialized
@@ -186,6 +186,13 @@ def main():
 
         end = time.perf_counter()
         print(end - start, "seconds")
+
+        def summarize_memory():
+            log = get_memory_log()
+            if len(log) > 0:
+                print("The max memory usage is: ", np.max(log), " bytes", flush=True)
+
+        summarize_memory()
 
         print("Truth", linalg.cholesky(a).T)
 
