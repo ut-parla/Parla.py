@@ -10,12 +10,12 @@ import threading
 import numpy
 try:  # if the system has no GPU
     import cupy
-    from parla.cuda import gpu
-except (ImportError, AttributeError):
+    num_devices = cupy.cuda.runtime.getDeviceCount()
+except (ImportError):
     # PArray only considers numpy or cupy array
     # work around of checking cupy.ndarray when cupy could not be imported
     cupy = numpy
-    gpu = None
+    num_devices = 0
 
 
 class PArray:
@@ -30,8 +30,6 @@ class PArray:
     Note: some methods should be called within the current task context
     """
     def __init__(self, array) -> None:
-        num_devices = gpu.num_devices if gpu else 0
-
         # _array works as a per device buffer of data
         self._array = {n: None for n in range(num_devices)}  # add gpu id
         self._array[CPU_INDEX] = None  # add cpu id
@@ -73,12 +71,14 @@ class PArray:
         Note: should be called within the current task context
         """
         device = PArray._get_current_device()
-        if device.architecture == gpu:
-            return device.index
-        elif device.architecture == cpu:
+        if device.architecture == cpu:
             return CPU_INDEX
+        else:
+            # assume GPU here, won't check device.architecture == gpu
+            # to avoid import `gpu`, which is slow to setup.
+            return device.index
 
-    # Public API:
+            # Public API:
 
     def update(self, array) -> None:
         """ Update the copy on current device.
