@@ -41,13 +41,16 @@ else:
 
 #TODO: Is a class static faster than accessing a global variable? This is arguably cleaner for the namespace though.
 class MemPoolLog():
-    log = list()
+    use_log = list()
+    alloc_log = list()
 
-    def append(self, a):
-        self.log.append(a)
+
+    def append(self, a, b):
+        self.use_log.append(a)
+        self.alloc_log.append(b)
 
     def get(self):
-        return self.log
+        return (self.use_log, self.alloc_log)
 
 __all__ = ["gpu", "GPUComponent", "MultiGPUComponent"]
 
@@ -259,15 +262,28 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         dev = self._stack.device
         stream = self._stack.stream
         try:
+
+            if profile_flag:
+                mempool_log = MemPoolLog()
+                current_usage = 0
+                current_alloc = 0
+                for i in range(n_gpus):
+                    with cupy.cuda.Device(i):
+                        current_usage += mempool.used_bytes()
+                        current_alloc += mempool.total_bytes()
+                mempool_log.append(current_usage, current_alloc)
+
             stream.synchronize()
 
             if profile_flag:
                 mempool_log = MemPoolLog()
                 current_usage = 0
+                current_alloc = 0
                 for i in range(n_gpus):
                     with cupy.cuda.Device(i):
                         current_usage += mempool.used_bytes()
-                mempool_log.append(current_usage)
+                        current_alloc += mempool.total_bytes()
+                mempool_log.append(current_usage, current_alloc)
 
             stream.__exit__(exc_type, exc_val, exc_tb)
             _gpu_locals._gpus = None
@@ -363,6 +379,14 @@ class MultiGPUComponentInstance(EnvironmentComponentInstance):
 def get_memory_log():
     mempool_log = MemPoolLog()
     return mempool_log.get()
+
+
+def summarize_memory():
+    import numpy as np
+    log, alloc = get_memory_log()
+    if len(log) > 0:
+        print("The max memory usage is: ", np.max(log), " bytes", flush=True)
+        print("The max memory alloc is: ", np.max(alloc), "bytes", flush=True)
 
 class MultiGPUComponent(EnvironmentComponentDescriptor):
     """A multi-GPU CUDA component which exposes the GPUs to the task via `get_gpus`.
