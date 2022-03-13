@@ -52,6 +52,19 @@ class MemPoolLog():
     def get(self):
         return (self.use_log, self.alloc_log)
 
+def log_memory():
+    if profile_flag:
+        mempool_log = MemPoolLog()
+        current_usage = 0
+        current_alloc = 0
+        for i in range(n_gpus):
+            with cupy.cuda.Device(i):
+                current_usage += mempool.used_bytes()
+                current_alloc += mempool.total_bytes()
+        mempool_log.append(current_usage, current_alloc)
+
+
+
 __all__ = ["gpu", "GPUComponent", "MultiGPUComponent"]
 
 
@@ -263,27 +276,11 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         stream = self._stack.stream
         try:
 
-            if profile_flag:
-                mempool_log = MemPoolLog()
-                current_usage = 0
-                current_alloc = 0
-                for i in range(n_gpus):
-                    with cupy.cuda.Device(i):
-                        current_usage += mempool.used_bytes()
-                        current_alloc += mempool.total_bytes()
-                mempool_log.append(current_usage, current_alloc)
+            log_memory()
 
             stream.synchronize()
 
-            if profile_flag:
-                mempool_log = MemPoolLog()
-                current_usage = 0
-                current_alloc = 0
-                for i in range(n_gpus):
-                    with cupy.cuda.Device(i):
-                        current_usage += mempool.used_bytes()
-                        current_alloc += mempool.total_bytes()
-                mempool_log.append(current_usage, current_alloc)
+            log_memory()
 
             stream.__exit__(exc_type, exc_val, exc_tb)
             _gpu_locals._gpus = None
