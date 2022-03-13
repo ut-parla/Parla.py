@@ -52,6 +52,10 @@ class MemPoolLog():
     def get(self):
         return (self.use_log, self.alloc_log)
 
+    def clean(self):
+        self.use_log.clear()
+        self.alloc_log.clear()
+
 def log_memory():
     if profile_flag:
         mempool_log = MemPoolLog()
@@ -377,6 +381,9 @@ def get_memory_log():
     mempool_log = MemPoolLog()
     return mempool_log.get()
 
+def clean_memory():
+    mempool_log = MemPoolLog()
+    mempool_log.clean()
 
 def summarize_memory():
     import numpy as np
