@@ -211,7 +211,7 @@ def _register_architecture(name, impl):
     _architectures[name] = impl
     _architectures_list.append(impl)
 
-
+@lru_cache(maxsize=1)
 def get_all_devices() -> List[Device]:
     """
     :return: A list of all Devices in all Architectures.

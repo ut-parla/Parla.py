@@ -1,3 +1,4 @@
+from functools import lru_cache
 import logging
 import random
 from abc import abstractmethod, ABCMeta
@@ -100,7 +101,7 @@ class TaskRunning(TaskState):
         if dependencies is not None:
             for d in list(dependencies):
                 if not isinstance(d, Task) and \
-                   not isinstance(d, DataMovementTask):
+                        not isinstance(d, DataMovementTask):
                     # d could be one of four types: Task, DataMovementTask,
                     # TaskID or other types.
                     # Task and DataMovementTask are expected types and
@@ -300,7 +301,7 @@ class Task(TaskBase):
             # Expose the self reference to other threads as late as possible, but not after potentially getting
             # scheduled.
             taskid.task = self
-            
+
             logger.debug("Task %r: Creating", self)
 
             self.num_unspawned_deps = num_unspawned_deps
@@ -332,7 +333,7 @@ class Task(TaskBase):
             This function is called to spawn a new task and
             inherits its dependencies to that. The new task is
             generally a data movement task. """
-        with self._mutex: 
+        with self._mutex:
             _remaining_dependencies = []
             for dep in self._dependencies:
                 if dep._remove_dependee(self):
@@ -563,9 +564,9 @@ class DataMovementTask(TaskBase):
     # TODO(lhc): For now, input and output data are string.
     #            For now, this class performs no-op.
     def __init__(self, dependencies: Collection["TaskBase"],
-            computation_task: Task, taskid,
-            req: ResourceRequirements,
-            target_data, name: Optional[str] = None):
+                 computation_task: Task, taskid,
+                 req: ResourceRequirements,
+                 target_data, name: Optional[str] = None):
         self._mutex = threading.Lock()
         with self._mutex:
             self._name = name
@@ -702,7 +703,7 @@ class DataMovementTask(TaskBase):
                 # We both set the environment as a thread local using _environment_scope,
                 # and enter the environment itself.
                 with _scheduler_locals._environment_scope(self.req.environment), \
-                     self.req.environment:
+                        self.req.environment:
                     # Move data to current device
                     self._target_data._auto_move()
 
@@ -848,7 +849,7 @@ class SchedulerContext(metaclass=ABCMeta):
                          req, dataflow, num_unspawned_deps,
                          name: Optional[str] = None):
         return Task(function, args, deps, taskid, req,
-                    dataflow, name, num_unspawned_deps) 
+                    dataflow, name, num_unspawned_deps)
 
     @abstractmethod
     def enqueue_task(self, task):
@@ -1075,9 +1076,9 @@ class ResourcePool:
         with self._monitor:
             is_available = True
             for name, amount in resources.items():
-               dres = self._devices[d]
-               if amount > dres[name]:
-                  is_available = False
+                dres = self._devices[d]
+                if amount > dres[name]:
+                    is_available = False
             return is_available
 
     def _atomically_update_resources(self, d: Device, resources: ResourceDict, multiplier, block: bool):
@@ -1208,6 +1209,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         self.start()
 
     @property
+    @lru_cache(maxsize=1)
     def components(self) -> List["EnvironmentComponentInstance"]:
         return [i for e in self._environments for i in e.components.values()]
 

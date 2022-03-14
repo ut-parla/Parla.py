@@ -12,7 +12,7 @@ from math import floor, ceil
 from typing import List, Tuple, Iterable, Collection, Mapping, Union, Any
 from warnings import warn
 
-from parla.device import get_all_devices, Device, Memory, MemoryKind
+from parla.device import Device, Memory, MemoryKind
 from parla.tasks import PlacementSource, get_placement_for_any
 from parla.array import is_array, copy, clone_here
 from parla.warning import PerformanceWarning
@@ -101,7 +101,7 @@ class LDeviceSequence(LDeviceCollection):
         if self.n_ldevices < len(self.devices):
             warn(PerformanceWarning(
                 "There are not enough partitions to cover the available devices in mapper: {} < {} (dropping {})"
-                .format(self.n_ldevices, len(self.devices), self._devices[:-self.n_ldevices])))
+                    .format(self.n_ldevices, len(self.devices), self._devices[:-self.n_ldevices])))
             self._devices = self._devices[-self.n_ldevices:]
 
     @property
@@ -129,7 +129,7 @@ class LDeviceSequence(LDeviceCollection):
         """
         data = _wrapper_for_partition_function(data)
         return PartitionedTensor([data(i, memory=self.memory(i, kind=memory_kind), device=self.device(i))
-                for i in range(self.n_ldevices)])
+                                  for i in range(self.n_ldevices)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
         """
@@ -183,7 +183,7 @@ class LDeviceGrid(LDeviceCollection):
         if self.n_ldevices < len(self.devices):
             warn(PerformanceWarning(
                 "There are not enough partitions to cover the available devices in mapper: {} < {} (dropping {})"
-                .format(self.n_ldevices, len(self.devices), self._devices[:-self.n_ldevices])))
+                    .format(self.n_ldevices, len(self.devices), self._devices[:-self.n_ldevices])))
             self._devices = self._devices[:self.n_ldevices]
 
     @property
@@ -212,7 +212,7 @@ class LDeviceGrid(LDeviceCollection):
         """
         data = _wrapper_for_partition_function(data)
         return PartitionedTensor([[data(i, j, memory=self.memory(i, j, kind=memory_kind), device=self.device(i, j))
-                 for j in range(self.n_ldevices_y)] for i in range(self.n_ldevices_x)])
+                                   for j in range(self.n_ldevices_y)] for i in range(self.n_ldevices_x)])
 
     def partition_tensor(self, data, overlap=0, memory_kind: MemoryKind = None):
         """
@@ -279,7 +279,7 @@ class LDeviceGridBlocked(LDeviceGrid):
         if self.n_ldevices_x < self._n or self.n_ldevices_y < self._m:
             warn(PerformanceWarning(
                 "The logical device grid is not large enough to cover the physical device grid: ({}, {}) < ({}, {})"
-                .format(self.n_ldevices_x, self.n_ldevices_y, self._n, self._m)))
+                    .format(self.n_ldevices_x, self.n_ldevices_y, self._n, self._m)))
         self._divisor_x = self.n_ldevices_x / self._n
         self._divisor_y = self.n_ldevices_y / self._m
 
@@ -382,7 +382,7 @@ class PartitionedTensor():
             index = (index,)
         ret = []
         parse_index(self._latest_view, index, step=lambda I, i: I[i],
-                stop=lambda x: ret.append(clone_here(x) if is_array(x) else x))
+                    stop=lambda x: ret.append(clone_here(x) if is_array(x) else x))
         if len(ret) == 1:
             if ret[0] is None: warn("Partition has been freed!")
             return ret[0]

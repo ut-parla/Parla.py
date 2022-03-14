@@ -18,8 +18,7 @@ class Parla:
 
     def __init__(self, environments: Collection[TaskEnvironment]=None, scheduler_class=task_runtime.Scheduler, **kwds):
         assert issubclass(scheduler_class, task_runtime.Scheduler)
-        environments = environments or [TaskEnvironment(placement=[d]) for d in get_all_devices()]
-        self.environments = environments
+        self.environments = environments or [TaskEnvironment(placement=[d]) for d in get_all_devices()]
         self.scheduler_class = scheduler_class
         self.kwds = kwds
 

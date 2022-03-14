@@ -137,8 +137,7 @@ class TaskEnvironmentRegistry(Collection[TaskEnvironment]):
     task_environments: List[TaskEnvironment]
 
     def __init__(self, *envs):
-        self.task_environments = []
-        self.register(*envs)
+        self.task_environments = list(envs)
 
     def __iter__(self) -> Iterator[TaskEnvironment]:
         return iter(self.task_environments)
@@ -149,13 +148,13 @@ class TaskEnvironmentRegistry(Collection[TaskEnvironment]):
     def __len__(self) -> int:
         return len(self.task_environments)
 
-    def register(self, *envs: "TaskEnvironment"):
-        env = None
-        for e in envs:
-            assert isinstance(e, TaskEnvironment)
-            self.task_environments.append(e)
-            env = e
-        return env
+    # def register(self, *envs: "TaskEnvironment"):
+    #     env = None
+    #     for e in envs:
+    #         assert isinstance(e, TaskEnvironment)
+    #         self.task_environments.append(e)
+    #         env = e
+    #     return env
 
     # def find(self, placement: Collection[Device], tags: Collection[Any], exact: bool) -> TaskEnvironment:
     #     return next(iter(self.find_all_ordered(placement, tags, exact)), None)
