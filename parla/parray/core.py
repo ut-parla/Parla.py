@@ -93,7 +93,7 @@ class PArray:
 
         if isinstance(array, numpy.ndarray):
             if this_device != CPU_INDEX:  # CPU to GPU
-                self._array[this_device] = cupy.array(array)
+                self._array[this_device] = cupy.asarray(array)
             else: # data already in CPU
                 self._array[this_device] = array
         else:
@@ -103,7 +103,9 @@ class PArray:
                 if int(array.device) == this_device: # data already in this device
                     self._array[this_device] = array
                 else:  # GPU to GPU
-                    self._array[this_device] = cupy.copy(array)
+                    dst_data = cupy.empty_like(array)
+                    dst_data.data.copy_from_device_async(array.data, array.nbytes)
+                    self._array[this_device] = dst_data
 
     # Coherence update operations:
 
@@ -118,15 +120,13 @@ class PArray:
 
         Note: should be called within the current task context
         """
-        this_device = self._current_device_index
-
         if not device_id:
-            device_id = this_device
+            device_id = self._current_device_index
 
         # update protocol and get operation
         with self._coherence_lock:
             operation = self._coherence.read(device_id)
-            self._process_operation(operation, this_device)
+            self._process_operation(operation)
 
     def _coherence_write(self, device_id: int = None) -> None:
         """Tell the coherence protocol a write happened on a device.
@@ -139,10 +139,8 @@ class PArray:
 
         Note: should be called within the current task context
         """
-        this_device = self._current_device_index
-
         if not device_id:
-            device_id = this_device
+            device_id = self._current_device_index
 
         # update protocol and get list of operations
         # use lock to avoid race in between data movement and protocol updating
@@ -150,11 +148,11 @@ class PArray:
         with self._coherence_lock:
             operations = self._coherence.write(device_id)
             for op in operations:
-                self._process_operation(op, this_device)
+                self._process_operation(op)
 
     # Device management methods:
 
-    def _process_operation(self, operation: MemoryOperation, current_device: int) -> None:
+    def _process_operation(self, operation: MemoryOperation) -> None:
         """
         Process the given memory operations.
         Data will be moved, and protocol states is kept unchanged.
@@ -162,7 +160,7 @@ class PArray:
         if operation.inst == MemoryOperation.NOOP:
             return  # do nothing
         elif operation.inst == MemoryOperation.LOAD:
-            self._copy_data_between_device(operation.dst, operation.src, current_device)
+            self._copy_data_between_device(operation.dst, operation.src)
         elif operation.inst == MemoryOperation.EVICT:
             self._array[operation.src] = None  # decrement the reference counter, relying on GC to free the memory
         elif operation.inst == MemoryOperation.ERROR:
@@ -172,23 +170,19 @@ class PArray:
             raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
                                f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
 
-    def _copy_data_between_device(self, dst, src, current_device) -> None:
+    def _copy_data_between_device(self, dst, src) -> None:
         """
         Copy data from src to dst.
-        TODO: check cupy.copy and cupy.array works stably
         """
-        if src == CPU_INDEX: # copy from CPU to GPU
-            if dst == current_device:
-                self._array[dst] = cupy.array(self._array[src])
-            else:
-                with cupy.cuda.Device(dst):
-                    self._array[dst] = cupy.array(self._array[src])
+        if src == dst:
+            return
+        elif src == CPU_INDEX: # copy from CPU to GPU
+            self._array[dst] = cupy.asarray(self._array[src])
         elif dst != CPU_INDEX: # copy from GPU to GPU
-            if dst == current_device:
-                self._array[dst] = cupy.copy(self._array[src])
-            else:
-                with cupy.cuda.Device(dst):
-                    self._array[dst] = cupy.copy(self._array[src])
+            src_data = self._array[src]
+            dst_data = cupy.empty_like(src_data)
+            dst_data.data.copy_from_device_async(src_data.data, src_data.nbytes)
+            self._array[dst] = dst_data
         else: # copy from GPU to CPU
             self._array[CPU_INDEX] = cupy.asnumpy(self._array[src])
 
