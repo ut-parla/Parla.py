@@ -103,6 +103,7 @@ class Coherence:
 
         if device_local_state == self.INVALID:  # need to load data from somewhere
             if self._global_state == self.SHARED:
+                self._local_states[device_id] = self.SHARED
                 # load data from owner
                 return MemoryOperation.load(dst=device_id, src=self._owner)
             elif self._global_state == self.MODIFIED:
