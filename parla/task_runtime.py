@@ -12,6 +12,8 @@ from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSe
 from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
 
+from parla.cpu_impl import cpu
+
 #logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 
