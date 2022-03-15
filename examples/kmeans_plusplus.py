@@ -4,14 +4,16 @@ A implementation of parallel k-means (init by k-means++) on CPU/GPU.
 
 from parla import Parla
 from parla.cpu import cpu
-from parla.cuda import gpu
+from parla.cuda import gpu, summarize_memory
 from parla.tasks import spawn, TaskSpace
 import numpy as np
 import cupy as cp
-import datetime
+from time import perf_counter
 import sys
 from parla.parray import asarray_batch
 
+
+DEBUG = False
 
 def vector_str(vector: list):
     return "[" + ", ".join(map(str, vector)) + "]"
@@ -47,7 +49,8 @@ async def kmeanspp(data: np.ndarray, K: int, centroids: np.ndarray):
 
     # the first centroid is chose randomly
     centroids[0] = data[np.random.randint(0, N - 1)]
-    print(f"Select centroid 0 randomly: {vector_str(centroids[0])}")
+    if DEBUG:
+        print(f"Select centroid 0 randomly: {vector_str(centroids[0])}")
 
     for i in range(K - 1):
         # compute distance to each centroid separately
@@ -55,7 +58,7 @@ async def kmeanspp(data: np.ndarray, K: int, centroids: np.ndarray):
             # Fact: it is faster if iteration is used rather than Parla tasks
             @spawn(task[task_counter], placement=cpu, input=[data, centroids])
             async def update_distance():
-                distance[j] = np.linalg.norm(data - centroids[j], axis=1)
+                distance[j] = np.linalg.norm((data - centroids[j]).array, axis=1)
 
             task_counter += 1
         await task
@@ -70,7 +73,8 @@ async def kmeanspp(data: np.ndarray, K: int, centroids: np.ndarray):
         next_centroid_idx = np.random.choice(range(N), p=normalized_distribution)
         centroids[i + 1] = data[next_centroid_idx]
 
-        print(f"Select centroid {i + 1}: {vector_str(centroids[i + 1])}")
+        if DEBUG:
+            print(f"Select centroid {i + 1}: {vector_str(centroids[i + 1])}")
 
     print("K-means++ done.")
 
@@ -112,8 +116,10 @@ def kmeans(data: cp.ndarray, K: int, centroids: cp.ndarray):
         centroids.update(np.copy(new_centroids))
 
     print(f"K-means done with {loop} loops.")
-    for k in range(K):
-        print(f"Predicted Centroid {k}: {vector_str(centroids[k])}")
+
+    if DEBUG:
+        for k in range(K):
+            print(f"Predicted Centroid {k}: {vector_str(centroids[k])}")
 
 
 def generate_random_dataset(K, D, N):
@@ -129,23 +135,31 @@ def generate_random_dataset(K, D, N):
     num_points_of_each_cluster = N // K
     points_left = N % K
 
-    data = np.full((N, D), 0.0)
+    if DEBUG:
+        data = np.full((N, D), 0.0)
+    else:
+        data = np.random.rand(N, D)
 
-    for k in range(K):
-        begin = num_points_of_each_cluster * k
-        end = num_points_of_each_cluster * (k + 1)
-        if k == K - 1:
-            end += points_left
+    if DEBUG:
+        for k in range(K):
+            begin = num_points_of_each_cluster * k
+            end = num_points_of_each_cluster * (k + 1)
+            if k == K - 1:
+                end += points_left
 
-        center_list = []
-        for d in range(D):
-            center = np.random.uniform(range_begin, range_end)
-            center_list.append(str(center))
-            for i in range(begin, end):
-                data[i][d] = center + np.random.uniform(-distance_to_center, distance_to_center)
 
-        center_str = ", ".join(center_list)
-        print(f"Cluster {k} center at [{center_str}]")
+            center_list = []
+
+            for d in range(D):
+                center = np.random.uniform(range_begin, range_end)
+                center_list.append(str(center))
+                for i in range(begin, end):
+                    data[i][d] = center + np.random.uniform(-distance_to_center, distance_to_center)
+
+            center_str = ", ".join(center_list)
+            print(f"Cluster {k} center at [{center_str}]")
+
+    print(f"Generated a random dataset with {N} points to {K} clusters at {D} dimensional")
     return data
 
 
@@ -173,11 +187,7 @@ def parse_input_file(file_path):
     return data
 
 
-def main(data, K):
-    """
-    Launch tasks.
-    """
-    task = TaskSpace("Task")
+async def start(data, K, task):
 
     D = data.shape[1]
     centroids = np.full((K, D), 0.0)
@@ -188,53 +198,70 @@ def main(data, K):
     # 2. NEW: input/output
     @spawn(task[0], placement=cpu, input=[data], output=[centroids])
     async def start_kmeanspp():
-        kmeanspp_timer_begin = datetime.datetime.now()
+        kmeanspp_timer_begin = perf_counter()
 
         await kmeanspp(data, K, centroids)
 
-        kmeanspp_timer_end = datetime.datetime.now()
-        print(f"K-Means plus plus takes {(kmeanspp_timer_end - kmeanspp_timer_begin).total_seconds()} seconds")
+        kmeanspp_timer_end = perf_counter()
+        print(f"K-Means plus plus takes {kmeanspp_timer_end - kmeanspp_timer_begin} seconds")
 
     # 3. NEW: input/inout
     @spawn(task[1], [task[0]], placement=gpu, input=[data], inout=[centroids])
     async def start_kmeans():
-        copy_timer_begin = datetime.datetime.now()
+        # copy_timer_begin = datetime.datetime.now()
 
         # 4. NEW: no need to copy data to device manually
         # data_d = cp.asarray(data)
         # centroids_d = cp.asarray(centroids)
 
-        copy_timer_end = datetime.datetime.now()
-        print(f"Copy data from host to device takes {(copy_timer_end - copy_timer_begin).total_seconds()} seconds")
+        # copy_timer_end = datetime.datetime.now()
+        # print(f"Copy data from host to device takes {(copy_timer_end - copy_timer_begin).total_seconds()} seconds")
 
         # run kmeans
+        kmeanspp_timer_begin = perf_counter()
+
         kmeans(data, K, centroids)
 
-        kmeanspp_timer_end = datetime.datetime.now()
-        print(f"K-Means Clustering takes {(kmeanspp_timer_end - copy_timer_end).total_seconds()} seconds")
+        kmeanspp_timer_end = perf_counter()
+        print(f"K-Means Clustering takes {kmeanspp_timer_end - kmeanspp_timer_begin} seconds")
+
+
+def main():
+    """
+    Launch tasks.
+    """
+    task = TaskSpace("Dummy")
+    @spawn(task[0])
+    async def main_task():
+        np.random.seed(30)
+        generate_timer_begin = perf_counter()
+
+        if len(sys.argv) == 1:  # no commend line argument
+            K = 10  # number of clusters
+            D = 10  # point dimension
+            N = 10000000 # number of points
+            data = generate_random_dataset(K, D, N)
+        elif len(sys.argv) == 3:  # the first argument is the input file
+            file_path = sys.argv[1]
+            K = int(sys.argv[2])
+            data = parse_input_file(file_path)
+        else:
+            raise Exception("Invalid arguments")
+
+        generate_timer_end = perf_counter()
+        print(f"Generate dataset takes {generate_timer_end - generate_timer_begin} seconds")
+
+        main_timer_begin = perf_counter()
+
+        ts = TaskSpace("Task")
+        await start(data, K, ts)
+
+        await ts
+        main_timer_end = perf_counter()
+        print(f"The whole program takes {main_timer_end - main_timer_begin} seconds")
 
 
 if __name__ == "__main__":
-    np.random.seed(30)
-    generate_timer_begin = datetime.datetime.now()
-
-    if len(sys.argv) == 1:  # no commend line argument
-        K = 5  # number of clusters
-        D = 2  # point dimension
-        N = 1000  # number of points
-        data = generate_random_dataset(K, D, N)
-    elif len(sys.argv) == 3:  # the first argument is the input file
-        file_path = sys.argv[1]
-        K = int(sys.argv[2])
-        data = parse_input_file(file_path)
-    else:
-        raise Exception("Invalid arguments")
-
-    generate_timer_end = datetime.datetime.now()
-    print(f"Generate dataset takes {(generate_timer_end - generate_timer_begin).total_seconds()} seconds")
-
-    main_timer_begin = datetime.datetime.now()
     with Parla():
-        main(data, K)
-    main_timer_end = datetime.datetime.now()
-    print(f"The whole program takes {(main_timer_end - main_timer_begin).total_seconds()} seconds")
+        main()
+    summarize_memory()
