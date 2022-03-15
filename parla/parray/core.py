@@ -35,15 +35,26 @@ class PArray:
         self._array[CPU_INDEX] = None  # add cpu id
 
         # get the array's location
-        if isinstance(array, numpy.ndarray):
-            location = CPU_INDEX
-        else:
+        if isinstance(array, cupy.ndarray):
             location = int(array.device)
+        else:
+            location = CPU_INDEX
 
         self._array[location] = array
         self._coherence = Coherence(location, num_devices)  # coherence protocol for managing data among multi device
 
         self._coherence_lock = threading.Lock()  # a lock to greb when update coherence and move data
+
+    def check_array(self):
+        """
+        Print where data is active.
+        """
+        print("Current device:", self._current_device_index, flush=True)
+        for n in range(num_devices):
+            if self._array[n] is not None:
+                print("Parray is valid on Device: ", n, flush=True)
+            else:
+                print("Parray is not valid on Device: ", n, flush=True)
 
     # Properties:
 
@@ -91,21 +102,23 @@ class PArray:
         """
         this_device = self._current_device_index
 
-        if isinstance(array, numpy.ndarray):
-            if this_device != CPU_INDEX:  # CPU to GPU
-                self._array[this_device] = cupy.asarray(array)
-            else: # data already in CPU
-                self._array[this_device] = array
-        else:
+        if isinstance(array, cupy.ndarray):
             if this_device == CPU_INDEX: # GPU to CPU
                 self._array[this_device] = cupy.asnumpy(array)
             else: # GPU to GPU
-                if int(array.device) == this_device: # data already in this device
-                    self._array[this_device] = array
-                else:  # GPU to GPU
-                    dst_data = cupy.empty_like(array)
-                    dst_data.data.copy_from_device_async(array.data, array.nbytes)
-                    self._array[this_device] = dst_data
+                with cupy.cuda.Device(this_device):
+                    if int(array.device) == this_device: # data already in this device
+                        self._array[this_device] = array
+                    else:  # GPU to GPU
+                        self._array[this_device] = cupy.empty_like(array)
+                        self._array[this_device].copy_from_device_async(array.data, array.nbytes)
+        else:
+            if this_device != CPU_INDEX:  # CPU to GPU
+                with cupy.cuda.Device(this_device):
+                    self._array[this_device] = cupy.empty_like(array)
+                    self._array[this_device].copy_from_device_async(array.data, array.nbytes)
+            else: # data already in CPU
+                self._array[this_device] = array
 
     # Coherence update operations:
 
@@ -174,15 +187,17 @@ class PArray:
         """
         Copy data from src to dst.
         """
-        if src == dst:
-            return
-        elif src == CPU_INDEX: # copy from CPU to GPU
-            self._array[dst] = cupy.asarray(self._array[src])
+        this_device = self._current_device_index
+        #if src == dst:
+        #    return
+        if src == CPU_INDEX: # copy from CPU to GPU
+            with cupy.cuda.Device(dst):
+                self._array[dst] = cupy.asarray(self._array[src])
         elif dst != CPU_INDEX: # copy from GPU to GPU
-            src_data = self._array[src]
-            dst_data = cupy.empty_like(src_data)
-            dst_data.data.copy_from_device_async(src_data.data, src_data.nbytes)
-            self._array[dst] = dst_data
+            with cupy.cuda.Device(dst):
+                src_data = self._array[src]
+                self._array[dst] = cupy.empty_like(src_data)
+                self._array[dst].data.copy_from_device_async(src_data.data, src_data.nbytes)
         else: # copy from GPU to CPU
             self._array[CPU_INDEX] = cupy.asnumpy(self._array[src])
 

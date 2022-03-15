@@ -290,8 +290,6 @@ class Task(TaskBase):
             self.assigned = False
             self.dataflow = dataflow  # input/output/inout of the task
             self._dependees = []
-            # Track data movement tasks created from this task.
-            self._datamove_tasks = []
             # Maintain dependenceis as a list object.
             # Therefore, bi-directional edges exist among
             # dependent tasks.
@@ -316,9 +314,6 @@ class Task(TaskBase):
                 get_scheduler_context().enqueue_spawned_task(self)
             else:
                 self._state = TaskWaiting()
-
-    def add_new_datamove_task(self, t):
-        self._datamove_tasks.append(t)
 
     @property
     def result(self):
@@ -394,6 +389,7 @@ class Task(TaskBase):
             if isinstance(dep, TaskID):
                 continue
             if not dep._add_dependee(self):
+                self._dependencies.remove(dep)
                 self._remaining_dependencies -= 1
 
     def _set_dependencies(self, dependencies):
@@ -407,6 +403,7 @@ class Task(TaskBase):
                 if isinstance(dep, TaskID):
                     continue
                 if not dep._add_dependee(self):
+                    self._dependencies.remove(dep)
                     self._remaining_dependencies -= 1
 
     def _add_dependency(self, dependency):
@@ -414,7 +411,10 @@ class Task(TaskBase):
             self._remaining_dependencies += 1
             self._dependencies.append(dependency)
             if not dependency._add_dependee(self):
+                self._dependencies.remove(dependency)
                 self._remaining_dependencies -= 1
+                return False
+            return True
 
     def _complete_dependency(self):
         with self._mutex:
@@ -639,10 +639,10 @@ class DataMovementTask(TaskBase):
         self._remaining_dependencies += 1
         self._dependencies.append(dependency)
         if not dependency._add_dependee(self):
+            self._dependencies.remove(dependency)
             self._remaining_dependencies -= 1
             return False
-        else:
-            return True
+        return True
 
     def _complete_dependency(self):
         with self._mutex:
@@ -707,10 +707,13 @@ class DataMovementTask(TaskBase):
                         self.req.environment:
                     write_flag = True
                     if (self._data_type == 0):
-                        print("This requestes read")
                         write_flag = False
                     # Move data to current device
-                    self._target_data._auto_move(do_write = write_flag)
+                    dev_type = get_current_devices()[0]
+                    dev_no = -1
+                    if (dev_type.architecture is not cpu):
+                        dev_no = dev_type.index
+                    self._target_data._auto_move(device_id = dev_no, do_write = write_flag)
                 # TODO(lhc):
                 #if task_state is None:
                 task_state = TaskCompleted(None)
@@ -742,6 +745,7 @@ class DataMovementTask(TaskBase):
         self._remaining_dependencies = len(dependencies)
         for dep in dependencies:
             if not dep._add_dependee(self):
+                self._dependencies.remove(dep)
                 self._remaining_dependencies -= 1
 
     def __await__(self):
@@ -1387,7 +1391,6 @@ class Scheduler(ControllableThread, SchedulerContext):
                                          str(hex(id(target_data))) + ".dmt")
         self.incr_active_tasks()
         compute_task._add_dependency(datamove_task)
-        compute_task.add_new_datamove_task(datamove_task)
         target_data_id = id(target_data)
         is_overlapped = False
         if target_data_id in self._datablock_dict:

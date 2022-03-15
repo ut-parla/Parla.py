@@ -113,7 +113,7 @@ class Coherence:
                 self._global_state = self.SHARED
 
                 # Trick: smaller one becomes owner, so will always load from CPU (-1) when possible
-                self._owner = min(self._owner, device_id)
+                self._owner = max(self._owner, device_id)
 
                 return MemoryOperation.load(dst=device_id, src=prev_owner)
             else:   # overall_state should not be INVALID here
