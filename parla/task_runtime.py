@@ -565,8 +565,8 @@ class DataMovementTask(TaskBase):
     #            For now, this class performs no-op.
     def __init__(self, dependencies: Collection["TaskBase"],
                  computation_task: Task, taskid,
-                 req: ResourceRequirements,
-                 target_data, name: Optional[str] = None):
+                 req: ResourceRequirements, target_data,
+                 data_type, name: Optional[str] = None):
         self._mutex = threading.Lock()
         with self._mutex:
             self._name = name
@@ -577,6 +577,7 @@ class DataMovementTask(TaskBase):
             # construction. This task is always assigned the target task.
             self.assigned = True
             self._target_data = target_data
+            self._data_type = data_type
             # The source (computation) task becomes a dependee of
             # this data movement task.
             # The dependees are set by `_set_dependencies()`.
@@ -704,9 +705,12 @@ class DataMovementTask(TaskBase):
                 # and enter the environment itself.
                 with _scheduler_locals._environment_scope(self.req.environment), \
                         self.req.environment:
+                    write_flag = True
+                    if (self._data_type == 0):
+                        print("This requestes read")
+                        write_flag = False
                     # Move data to current device
-                    self._target_data._auto_move()
-
+                    self._target_data._auto_move(do_write = write_flag)
                 # TODO(lhc):
                 #if task_state is None:
                 task_state = TaskCompleted(None)
@@ -1362,7 +1366,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             if len(new_tasks) > 0:
                 self._mapped_task_queue.extendleft(new_tasks)
 
-    def _construct_datamove_task(self, target_data, compute_task):
+    def _construct_datamove_task(self, target_data, compute_task, data_type):
         """
           This function constructs data movement task for target data.
           This function consists of two steps.
@@ -1378,7 +1382,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         task_locals.global_tasks += [taskid]
         datamove_task = DataMovementTask(None,
                                          compute_task, taskid,
-                                         compute_task.req, target_data,
+                                         compute_task.req, target_data, data_type,
                                          str(compute_task.taskid) + "." +
                                          str(hex(id(target_data))) + ".dmt")
         self.incr_active_tasks()
@@ -1421,8 +1425,14 @@ class Scheduler(ControllableThread, SchedulerContext):
                     else:
                         # Create data movement tasks for each data
                         # operands of this task.
-                        for data in task.dataflow:
-                            self._construct_datamove_task(data, task)
+                        # TODO(lhc): this is not good.
+                        #            will use logical values to make it easy to understand.
+                        for data in task.dataflow.input:
+                            self._construct_datamove_task(data, task, 0)
+                        for data in task.dataflow.output:
+                            self._construct_datamove_task(data, task, 1)
+                        for data in task.dataflow.inout:
+                            self._construct_datamove_task(data, task, 2)
 
                         # Only computation needs to set a assigned flag.
                         # Data movement task is set as assigned when it is created.
