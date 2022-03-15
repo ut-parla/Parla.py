@@ -51,6 +51,24 @@ class Dataflow:
         self._output = output
         self._inout = inout
 
+    @property
+    def input(self):
+        if self._input == None:
+            return []
+        return self._input
+
+    @property
+    def output(self):
+        if self._output == None:
+            return []
+        return self._output
+
+    @property
+    def inout(self):
+        if self._inout == None:
+            return []
+        return self._inout
+
     def auto_move(self):
         """
         Move all data to the current device (of the corresponding tasks).
