@@ -391,7 +391,6 @@ class Task(TaskBase):
             if isinstance(dep, TaskID):
                 continue
             if not dep._add_dependee(self):
-                self._dependencies.remove(dep)
                 self._remaining_dependencies -= 1
 
     def _set_dependencies(self, dependencies):
@@ -405,7 +404,6 @@ class Task(TaskBase):
                 if isinstance(dep, TaskID):
                     continue
                 if not dep._add_dependee(self):
-                    self._dependencies.remove(dep)
                     self._remaining_dependencies -= 1
 
     def _add_dependency(self, dependency):
@@ -413,7 +411,6 @@ class Task(TaskBase):
             self._remaining_dependencies += 1
             self._dependencies.append(dependency)
             if not dependency._add_dependee(self):
-                self._dependencies.remove(dependency)
                 self._remaining_dependencies -= 1
                 return False
             return True
@@ -641,7 +638,6 @@ class DataMovementTask(TaskBase):
         self._remaining_dependencies += 1
         self._dependencies.append(dependency)
         if not dependency._add_dependee(self):
-            self._dependencies.remove(dependency)
             self._remaining_dependencies -= 1
             return False
         return True
@@ -747,7 +743,6 @@ class DataMovementTask(TaskBase):
         self._remaining_dependencies = len(dependencies)
         for dep in dependencies:
             if not dep._add_dependee(self):
-                self._dependencies.remove(dep)
                 self._remaining_dependencies -= 1
 
     def __await__(self):
