@@ -5,6 +5,7 @@ from parla.task_runtime import get_current_devices
 from parla.device import Device
 
 from .coherence import MemoryOperation, Coherence, CPU_INDEX
+from typing import List
 
 import threading
 import numpy
@@ -43,7 +44,9 @@ class PArray:
         self._array[location] = array
         self._coherence = Coherence(location, num_devices)  # coherence protocol for managing data among multi device
 
-        self._coherence_lock = threading.Lock()  # a lock to greb when update coherence and move data
+        # a condition variable to acquire when moving data on the device
+        self._coherence_cv = {n:threading.Condition() for n in range(num_devices)}
+        self._coherence_cv[CPU_INDEX] = threading.Condition()
 
     # Properties:
 
@@ -124,9 +127,8 @@ class PArray:
             device_id = self._current_device_index
 
         # update protocol and get operation
-        with self._coherence_lock:
-            operation = self._coherence.read(device_id)
-            self._process_operation(operation)
+        operation = self._coherence.read(device_id) # locks involve
+        self._process_operations([operation]) # condition variable involve
 
     def _coherence_write(self, device_id: int = None) -> None:
         """Tell the coherence protocol a write happened on a device.
@@ -142,33 +144,38 @@ class PArray:
         if not device_id:
             device_id = self._current_device_index
 
-        # update protocol and get list of operations
-        # use lock to avoid race in between data movement and protocol updating
-        # TODO(Yineng): improve the lock or propose a lock free protocol
-        with self._coherence_lock:
-            operations = self._coherence.write(device_id)
-            for op in operations:
-                self._process_operation(op)
+        # update protocol and get operation
+        operations = self._coherence.write(device_id) # locks involve
+        self._process_operations(operations) # condition variable involve
 
     # Device management methods:
 
-    def _process_operation(self, operation: MemoryOperation) -> None:
+    def _process_operations(self, operations: List[MemoryOperation]) -> None:
         """
         Process the given memory operations.
         Data will be moved, and protocol states is kept unchanged.
         """
-        if operation.inst == MemoryOperation.NOOP:
-            return  # do nothing
-        elif operation.inst == MemoryOperation.LOAD:
-            self._copy_data_between_device(operation.dst, operation.src)
-        elif operation.inst == MemoryOperation.EVICT:
-            self._array[operation.src] = None  # decrement the reference counter, relying on GC to free the memory
-        elif operation.inst == MemoryOperation.ERROR:
-            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
-                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
-        else:
-            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
-                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
+        for op in operations:
+            if op.inst == MemoryOperation.NOOP:
+                pass  # do nothing
+            elif op.inst == MemoryOperation.CHECK_DATA:
+                if not self._coherence.data_is_ready(op.src):  # if data is not ready, wait
+                    with self._coherence_cv[op.src]:
+                        while not self._coherence.data_is_ready(op.src):
+                            self._coherence_cv[op.src].wait()
+            elif op.inst == MemoryOperation.LOAD:
+                with self._coherence_cv[op.dst]:  # hold the CV when moving data
+                    self._copy_data_between_device(op.dst, op.src)  # copy data
+                    self._coherence.set_data_as_ready(op.dst)  # mark it as done
+                    self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
+            elif op.inst == MemoryOperation.EVICT:
+                self._array[op.src] = None  # decrement the reference counter, relying on GC to free the memory
+                self._coherence.set_data_as_ready(op.src)  # mark it as done
+            elif op.inst == MemoryOperation.ERROR:
+                raise RuntimeError("PArray gets an error from coherence protocol")
+            else:
+                raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
+                                   f"detail: opcode {op.inst}, dst {op.dst}, src {op.src}")
 
     def _copy_data_between_device(self, dst, src) -> None:
         """
