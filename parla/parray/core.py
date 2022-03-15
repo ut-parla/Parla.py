@@ -104,6 +104,7 @@ class PArray:
 
         if isinstance(array, numpy.ndarray):
             if this_device != CPU_INDEX:  # CPU to GPU
+                # TODO(lhc): check if it is really necessary
                 with cupy.cuda.Device(this_device):
                     self._array[this_device] = cupy.empty_like(array)
                     self._array[this_device].copy_from_device_async(array.data, array.nbytes)
@@ -113,6 +114,7 @@ class PArray:
             if this_device == CPU_INDEX: # GPU to CPU
                 self._array[this_device] = cupy.asnumpy(array)
             else: # GPU to GPU
+                # TODO(lhc): check if it is really necessary
                 with cupy.cuda.Device(this_device):
                     if int(array.device) == this_device: # data already in this device
                         self._array[this_device] = array
@@ -191,9 +193,11 @@ class PArray:
         if src == dst:
             return
         elif src == CPU_INDEX: # copy from CPU to GPU
+            # TODO(lhc): check if it is really necessary
             with cupy.cuda.Device(dst):
                 self._array[dst] = cupy.asarray(self._array[src])
         elif dst != CPU_INDEX: # copy from GPU to GPU
+            # TODO(lhc): check if it is really necessary
             with cupy.cuda.Device(dst):
                 src_data = self._array[src]
                 self._array[dst] = cupy.empty_like(src_data)
