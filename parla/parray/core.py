@@ -35,10 +35,10 @@ class PArray:
         self._array[CPU_INDEX] = None  # add cpu id
 
         # get the array's location
-        if isinstance(array, cupy.ndarray):
-            location = int(array.device)
-        else:
+        if isinstance(array, numpy.ndarray):
             location = CPU_INDEX
+        else:
+            location = int(array.device)
 
         self._array[location] = array
         self._coherence = Coherence(location, num_devices)  # coherence protocol for managing data among multi device
@@ -102,7 +102,14 @@ class PArray:
         """
         this_device = self._current_device_index
 
-        if isinstance(array, cupy.ndarray):
+        if isinstance(array, numpy.ndarray):
+            if this_device != CPU_INDEX:  # CPU to GPU
+                with cupy.cuda.Device(this_device):
+                    self._array[this_device] = cupy.empty_like(array)
+                    self._array[this_device].copy_from_device_async(array.data, array.nbytes)
+            else: # data already in CPU
+                self._array[this_device] = array
+        else:
             if this_device == CPU_INDEX: # GPU to CPU
                 self._array[this_device] = cupy.asnumpy(array)
             else: # GPU to GPU
@@ -112,13 +119,6 @@ class PArray:
                     else:  # GPU to GPU
                         self._array[this_device] = cupy.empty_like(array)
                         self._array[this_device].copy_from_device_async(array.data, array.nbytes)
-        else:
-            if this_device != CPU_INDEX:  # CPU to GPU
-                with cupy.cuda.Device(this_device):
-                    self._array[this_device] = cupy.empty_like(array)
-                    self._array[this_device].copy_from_device_async(array.data, array.nbytes)
-            else: # data already in CPU
-                self._array[this_device] = array
 
     # Coherence update operations:
 
@@ -188,9 +188,9 @@ class PArray:
         Copy data from src to dst.
         """
         this_device = self._current_device_index
-        #if src == dst:
-        #    return
-        if src == CPU_INDEX: # copy from CPU to GPU
+        if src == dst:
+            return
+        elif src == CPU_INDEX: # copy from CPU to GPU
             with cupy.cuda.Device(dst):
                 self._array[dst] = cupy.asarray(self._array[src])
         elif dst != CPU_INDEX: # copy from GPU to GPU
