@@ -550,13 +550,21 @@ class PArray:
         ret = self.array.__getitem__(slices)
 
         # ndarray.__getitem__() may return a ndarray
-        if isinstance(ret, (numpy.ndarray, cupy.ndarray)):
+        if isinstance(ret, numpy.ndarray):
             return PArray(ret)
+        elif isinstance(ret, cupy.ndarray):
+            if ret.shape == ():
+                return ret.item()
+            else:
+                return PArray(ret)
         else:
             return ret
 
     def __setitem__(self, slices, value):
-        self.array.__setitem__(slices, value)
+        if isinstance(value, PArray):
+            self.array.__setitem__(slices, value.array)
+        else:
+            self.array.__setitem__(slices, value)
 
     # Conversion:
 
