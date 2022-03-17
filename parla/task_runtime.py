@@ -17,7 +17,7 @@ from parla.cpu_impl import cpu
 #logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 
-__all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
+__all__ = ["TaskBase", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
 
 # TODO: This module is pretty massively over-engineered the actual use case could use a much simpler scheduler.
 
@@ -102,8 +102,7 @@ class TaskRunning(TaskState):
     def __init__(self, func, args, dependencies):
         if dependencies is not None:
             for d in list(dependencies):
-                if not isinstance(d, Task) and \
-                        not isinstance(d, DataMovementTask):
+                if not isinstance(d, TaskBase):
                     # d could be one of four types: Task, DataMovementTask,
                     # TaskID or other types.
                     # Task and DataMovementTask are expected types and
@@ -268,14 +267,14 @@ class TaskBase:
     pass
 
 
-class Task(TaskBase):
+class ComputeTask(TaskBase):
     # This flag specifies if a task is assigned device.
     # If it is, it sets to True. Otherwise, it sets to False.
     # Any thread could read this flag, and therefore, mutex
     # is always required.
     assigned: bool
 
-    def __init__(self, func, args, dependencies: Collection["Task"], taskid,
+    def __init__(self, func, args, dependencies: Collection["TaskBase"], taskid,
                  req: ResourceRequirements, dataflow: "Dataflow",
                  name: Optional[str] = None,
                  num_unspawned_deps: int = 0):
@@ -422,7 +421,7 @@ class Task(TaskBase):
             logger.info(f"[Task %s] Data movement dependency completed. \
                 (remaining: %d)", self.name, self._remaining_dependencies)
 
-    def check_if_task_dependency(self, cand: "Task"):
+    def check_if_task_dependency(self, cand: "TaskBase"):
         with self._mutex:
             if cand in self._dependencies:
                 return True
@@ -501,7 +500,7 @@ class Task(TaskBase):
             self._notify_dependees()
             ctx.decr_active_tasks()
 
-    def decr_num_unspawned_deps(self, dep: "Task"):
+    def decr_num_unspawned_deps(self, dep: "TaskBase"):
         with self._mutex:
             self.num_unspawned_deps -= 1
             self._remaining_dependencies += 1
@@ -563,7 +562,7 @@ class DataMovementTask(TaskBase):
     # TODO(lhc): For now, input and output data are string.
     #            For now, this class performs no-op.
     def __init__(self, dependencies: Collection["TaskBase"],
-                 computation_task: Task, taskid,
+                 computation_task: ComputeTask, taskid,
                  req: ResourceRequirements, target_data,
                  data_type, name: Optional[str] = None):
         self._mutex = threading.Lock()
@@ -785,7 +784,7 @@ class TaskID:
     task object in most places.
 
     """
-    _task: Optional[Task]
+    _task: Optional[TaskBase]
     _id: Iterable[int]
 
     def __init__(self, name, id: Iterable[int]):
@@ -848,16 +847,16 @@ class InvalidSchedulerAccessException(RuntimeError):
 class SchedulerContext(metaclass=ABCMeta):
     def spawn_task(self, function, args, deps, taskid,
                    req, dataflow, name: Optional[str] = None):
-        return Task(function, args, deps, taskid, req, dataflow, name)
+        return ComputeTask(function, args, deps, taskid, req, dataflow, name)
 
     def create_wait_task(self, function, args, deps, taskid,
                          req, dataflow, num_unspawned_deps,
                          name: Optional[str] = None):
-        return Task(function, args, deps, taskid, req,
-                    dataflow, name, num_unspawned_deps)
+        return ComputeTask(function, args, deps, taskid, req,
+                           dataflow, name, num_unspawned_deps)
 
     @abstractmethod
-    def enqueue_task(self, task):
+    def enqueue_task(self, taskBase):
         raise NotImplementedError()
 
     def __enter__(self):
@@ -969,10 +968,10 @@ class WorkerThread(ControllableThread, SchedulerContext):
     def decr_active_tasks(self):
         self.scheduler.decr_active_tasks()
 
-    def enqueue_spawned_task(self, task: Task):
+    def enqueue_spawned_task(self, task: TaskBase):
         self.scheduler.enqueue_spawned_task(task)
 
-    def enqueue_task(self, task):
+    def enqueue_task(self, task: TaskBase):
         """Push a task on the queue tail.
         """
         # For the moment, bypass the local queue and put the task in the global scheduler queue
@@ -988,7 +987,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
         #     self._push_task(task)
         # This would need to fail over to the scheduler level enqueue if the resources is not available for assignment.
 
-    def assign_task(self, task):
+    def assign_task(self, task: TaskBase):
         with self._monitor:
             if self.task:
                 raise WorkerThreadException("Tried to assign task to WorkerThread that already had one.")
@@ -1257,7 +1256,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         if done:
             self.stop()
 
-    def enqueue_spawned_task(self, task: Task):
+    def enqueue_spawned_task(self, task: TaskBase):
         """Enqueue a spawned task on the spawned task queue.
            Scheduler iterates the queue and assigns resources
            regardless of remaining dependencies.
@@ -1265,7 +1264,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         with self._monitor:
             self._new_spawned_task_queue.appendleft(task)
 
-    def _dequeue_spawned_task(self) -> Optional[Task]:
+    def _dequeue_spawned_task(self) -> Optional[TaskBase]:
         """Dequeue a task from the spawned task queue.
         """
         with self._monitor:
@@ -1277,13 +1276,13 @@ class Scheduler(ControllableThread, SchedulerContext):
             except IndexError:
                 return None
 
-    def enqueue_task(self, task: Task):
+    def enqueue_task(self, task: TaskBase):
         """Enqueue a task on the resource allocation queue.
            Note that this enqueue has no data race.
         """
         self._ready_queue.appendleft(task)
 
-    def _dequeue_task(self, timeout=None) -> Optional[Task]:
+    def _dequeue_task(self, timeout=None) -> Optional[TaskBase]:
         """Dequeue a task from the resource allocation queue.
         """
         while True:
@@ -1298,7 +1297,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 # Keep proceeding the next step.
                 return None
 
-    def _assignment_policy(self, task: Task):
+    def _assignment_policy(self, task: TaskBase):
         """
         Attempt to assign resources to `task`.
 
@@ -1367,7 +1366,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             if len(new_tasks) > 0:
                 self._mapped_task_queue.extendleft(new_tasks)
 
-    def _construct_datamove_task(self, target_data, compute_task, data_type):
+    def _construct_datamove_task(self, target_data, compute_task: ComputeTask, data_type):
         """
           This function constructs data movement task for target data.
           This function consists of two steps.
@@ -1415,7 +1414,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         logger.debug("[Scheduler] Map Phase")
         self.fill_curr_spawned_task_queue()
         while True:
-            task: Optional[Task] = self._dequeue_spawned_task()
+            task: Optional[TaskBase] = self._dequeue_spawned_task()
             if task:
                 if not task.assigned:
                     is_assigned = self._assignment_policy(task)
