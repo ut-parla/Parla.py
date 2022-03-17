@@ -17,7 +17,7 @@ from parla.cpu_impl import cpu
 #logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 
-__all__ = ["TaskBase", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
+__all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
 
 # TODO: This module is pretty massively over-engineered the actual use case could use a much simpler scheduler.
 
@@ -102,7 +102,7 @@ class TaskRunning(TaskState):
     def __init__(self, func, args, dependencies):
         if dependencies is not None:
             for d in list(dependencies):
-                if not isinstance(d, TaskBase):
+                if not isinstance(d, Task):
                     # d could be one of four types: Task, DataMovementTask,
                     # TaskID or other types.
                     # Task and DataMovementTask are expected types and
@@ -263,79 +263,20 @@ class OptionsRequirements(ResourceRequirements):
         return "OptionsRequirements({}, {}, {})".format(self.resources, self.ndevices, self.options)
 
 
-class TaskBase:
-    pass
-
-
-class ComputeTask(TaskBase):
-    # This flag specifies if a task is assigned device.
-    # If it is, it sets to True. Otherwise, it sets to False.
-    # Any thread could read this flag, and therefore, mutex
-    # is always required.
-    assigned: bool
-
-    def __init__(self, func, args, dependencies: Collection["TaskBase"], taskid,
-                 req: ResourceRequirements, dataflow: "Dataflow",
-                 name: Optional[str] = None,
-                 num_unspawned_deps: int = 0):
+class Task:
+    def __init__(self, dependencies: Collection["Task"], taskid,
+                 req: ResourceRequirements, name: Optional[str] = None):
         self._mutex = threading.Lock()
         with self._mutex:
             self._name = name
+            self._dependees = []
+            # Maintain dependencies as a list object.
+            # Therefore, bi-directional edges exist among dependent tasks.
+            # Some of these dependencies are moved to a data movement task.
+            self._set_dependencies_nomutex(dependencies)
             self._taskid = taskid
             self._req = req
-            # This task could be spawend when it is ready.
-            # To set its state Running when it is running later,
-            # store functions and arguments as member variables.
-            self._func = func
-            self._args = args
             self.assigned = False
-            self.dataflow = dataflow  # input/output/inout of the task
-            self._dependees = []
-            # Maintain dependenceis as a list object.
-            # Therefore, bi-directional edges exist among
-            # dependent tasks.
-            # These dependencies are moved to a data movement
-            # task.
-            self._set_dependencies_nomutex(dependencies)
-            # Expose the self reference to other threads as late as possible, but not after potentially getting
-            # scheduled.
-            taskid.task = self
-
-            logger.debug("Task %r: Creating", self)
-
-            self.num_unspawned_deps = num_unspawned_deps
-            # If this task is not waiting for any dependent tasks,
-            # enqueue onto the spawned queue.
-            if not self.num_unspawned_deps > 0:
-                self.notify_wait_dependees()
-                self._state = TaskRunning(func, args, None)
-                get_scheduler_context().incr_active_tasks()
-                # Enqueue this task right after spawning on the spawend queue.
-                # The task could have dependencies.
-                get_scheduler_context().enqueue_spawned_task(self)
-            else:
-                self._state = TaskWaiting()
-
-    @property
-    def result(self):
-        if isinstance(self._state, TaskCompleted):
-            return self._state.ret
-        elif isinstance(self._state, TaskException):
-            raise self._state.exc
-
-    def _reset_dependencies(self):
-        """ Reset dependencies of this task. This should also remove
-            this task from dependencie's dependee list.
-            This function is called to spawn a new task and
-            inherits its dependencies to that. The new task is
-            generally a data movement task. """
-        with self._mutex:
-            _remaining_dependencies = []
-            for dep in self._dependencies:
-                if dep._remove_dependee(self):
-                    _remaining_dependencies.append(dep)
-            self._dependencies = []
-            return _remaining_dependencies
 
     @property
     def taskid(self) -> TaskID:
@@ -354,19 +295,26 @@ class ComputeTask(TaskBase):
         self._req = new_req
 
     @property
-    def dependencies(self) -> Tuple["TaskBase"]:
+    def dependencies(self) -> Tuple["Task"]:
         with self._mutex:
             return self._dependencies
 
     @property
-    def dependees(self) -> Tuple["TaskBase"]:
+    def dependees(self) -> Tuple["Task"]:
         """
         A tuple of the currently known tasks that depend on self.
 
-        This tuple may be added to at any time during the life of a task (as dependee tasks are created),
-        but tasks are never removed.
+        This tuple may be added to at any time during the life of a task
+        (as dependee tasks are created), but tasks are never removed.
         """
         return tuple(self._dependees)
+
+    @property
+    def result(self):
+        if isinstance(self._state, TaskCompleted):
+            return self._state.ret
+        elif isinstance(self._state, TaskException):
+            raise self._state.exc
 
     def set_assigned(self):
         with self._mutex:
@@ -379,7 +327,6 @@ class ComputeTask(TaskBase):
             else:
                 return False
 
-    # TODO(lhc): Is this fine??
     def _set_dependencies_nomutex(self, dependencies):
         self._dependencies = dependencies
         self._remaining_dependencies = len(dependencies)
@@ -391,6 +338,80 @@ class ComputeTask(TaskBase):
                 continue
             if not dep._add_dependee(self):
                 self._remaining_dependencies -= 1
+
+    def _add_dependee(self, dependee: "Task"):
+        """Add the dependee if self is not completed, otherwise return False."""
+        with self._mutex:
+            if self._state.is_terminal:
+                return False
+            else:
+                logger.debug("Task, %s added a dependee, %s",
+                             self.name, dependee)
+                self._dependees.append(dependee)
+                return True
+
+    def __await__(self):
+        return (yield TaskAwaitTasks([self], self))
+
+    def __repr__(self):
+        return "<Task {} nrem_deps={} state={} assigned={assigned}>". \
+               format(self.name or "", self._remaining_dependencies,
+                      type(self._state).__name__, **self.__dict__)
+
+
+class ComputeTask(Task):
+    # This flag specifies if a task is assigned device.
+    # If it is, it sets to True. Otherwise, it sets to False.
+    # Any thread could read this flag, and therefore, mutex
+    # is always required.
+    assigned: bool
+
+    def __init__(self, func, args, dependencies: Collection["Task"], taskid,
+                 req: ResourceRequirements, dataflow: "Dataflow",
+                 name: Optional[str] = None,
+                 num_unspawned_deps: int = 0):
+        super().__init__(dependencies,taskid, req, name)
+        with self._mutex:
+            # This task could be spawend when it is ready.
+            # To set its state Running when it is running later,
+            # store functions and arguments as member variables.
+            self._func = func
+            self._args = args
+            self.dataflow = dataflow  # input/output/inout of the task
+            # Expose the self reference to other threads as late as possible,
+            # but not after potentially getting scheduled.
+            taskid.task = self
+
+            logger.debug("Task %r: Creating", self)
+
+            self.num_unspawned_deps = num_unspawned_deps
+            # If this task is not waiting for any dependent tasks,
+            # enqueue onto the spawned queue.
+            if not self.num_unspawned_deps > 0:
+                self.notify_wait_dependees()
+                self._state = TaskRunning(func, args, None)
+                get_scheduler_context().incr_active_tasks()
+                # Enqueue this task right after spawning on the spawend queue.
+                # The task could have dependencies.
+                get_scheduler_context().enqueue_spawned_task(self)
+            else:
+                self._state = TaskWaiting()
+
+    def _reset_dependencies(self):
+        """ Reset dependencies of this task. This should also remove
+            this task from dependencie's dependee list.
+            This function is called to spawn a new task and
+            inherits its dependencies to that. The new task is
+            generally a data movement task. """
+        with self._mutex:
+            _remaining_dependencies = []
+            for dep in self._dependencies:
+                if dep._remove_dependee(self):
+                    _remaining_dependencies.append(dep)
+            self._dependencies = []
+            return _remaining_dependencies
+
+    # TODO(lhc): Is this fine??
 
     def _set_dependencies(self, dependencies):
         with self._mutex:
@@ -421,7 +442,7 @@ class ComputeTask(TaskBase):
             logger.info(f"[Task %s] Data movement dependency completed. \
                 (remaining: %d)", self.name, self._remaining_dependencies)
 
-    def check_if_task_dependency(self, cand: "TaskBase"):
+    def check_if_task_dependency(self, cand: "Task"):
         with self._mutex:
             if cand in self._dependencies:
                 return True
@@ -459,17 +480,7 @@ class ComputeTask(TaskBase):
         else:
             return True
 
-    def _add_dependee(self, dependee: "TaskBase"):
-        """Add the dependee if self is not completed, otherwise return False."""
-        with self._mutex:
-            if self._state.is_terminal:
-                return False
-            else:
-                logger.debug("Computation task, %s added a dependee, %s", self.name, dependee)
-                self._dependees.append(dependee)
-                return True
-
-    def _remove_dependee(self, dependee: "TaskBase"):
+    def _remove_dependee(self, dependee: "Task"):
         """Remove the dependee and return true if this task is alive.
            Otherwise, return false. """
         with self._mutex:
@@ -500,7 +511,7 @@ class ComputeTask(TaskBase):
             self._notify_dependees()
             ctx.decr_active_tasks()
 
-    def decr_num_unspawned_deps(self, dep: "TaskBase"):
+    def decr_num_unspawned_deps(self, dep: "Task"):
         with self._mutex:
             self.num_unspawned_deps -= 1
             self._remaining_dependencies += 1
@@ -545,14 +556,8 @@ class ComputeTask(TaskBase):
             logger.exception("Task %r: Exception in task handling", self)
             raise e
 
-    def __await__(self):
-        return (yield TaskAwaitTasks([self], self))
 
-    def __repr__(self):
-        return "<Task {} nrem_deps={} state={} req={_req} assigned={assigned}>".format(self._name or "", self._remaining_dependencies, type(self._state).__name__, **self.__dict__)
-
-
-class DataMovementTask(TaskBase):
+class DataMovementTask(Task):
     # This flag specifies if a task is assigned device.
     # If it is, it sets to True. Otherwise, it sets to False.
     # Any thread could read this flag, and therefore, mutex
@@ -561,77 +566,21 @@ class DataMovementTask(TaskBase):
 
     # TODO(lhc): For now, input and output data are string.
     #            For now, this class performs no-op.
-    def __init__(self, dependencies: Collection["TaskBase"],
+    def __init__(self, dependencies: Collection["Task"],
                  computation_task: ComputeTask, taskid,
                  req: ResourceRequirements, target_data,
                  data_type, name: Optional[str] = None):
-        self._mutex = threading.Lock()
+        super().__init__(dependencies, taskid, req, name)
         with self._mutex:
-            self._name = name
-            self._taskid = taskid
-            self._req = req
-            # This task is an auxiliary task
-            # which is created at mapping task subgraph
-            # construction. This task is always assigned the target task.
+            # A data movement task is created after mapping phase.
+            # Therefore, this class is already assigned to devices.
             self.assigned = True
+            # TODO(lhc): rename
             self._target_data = target_data
             self._data_type = data_type
-            # The source (computation) task becomes a dependee of
-            # this data movement task.
-            # The dependees are set by `_set_dependencies()`.
-            self._dependees = []
-            # Data movement task gets subsets of dependency of the
-            # source (computation) task depending on data dependency.
-            self._dependencies = []
-            if (dependencies is not None):
-                self._set_dependencies_nomutex(dependencies)
-            else:
-                self._remaining_dependencies = 0
-
             # TODO(lhc): temporary task running state.
             #            This would be a data movement kernel.
             self._state = TaskRunning(None, None, dependencies)
-
-    @property
-    def taskid(self) -> TaskID:
-        return self._taskid
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def req(self):
-        return self._req
-
-    @req.setter
-    def req(self, new_req):
-        self._req = new_req
-
-    @property
-    def dependencies(self) -> Tuple["TaskBase"]:
-        return tuple(self._dependencies)
-
-    @property
-    def dependees(self) -> Tuple["TaskBase"]:
-        """
-        A tuple of the currently known tasks that depend on self.
-
-        This tuple may be added to at any time during the life of a task (as dependee tasks are created),
-        but tasks are never removed.
-        """
-        return tuple(self._dependees)
-
-    def set_assigned(self):
-        with self._mutex:
-            self.assigned = True
-
-    def is_assigned(self):
-        with self._mutex:
-            if self.assigned:
-                return True
-            else:
-                return False
 
     def _add_dependency(self, dependency):
         self._remaining_dependencies += 1
@@ -728,27 +677,11 @@ class DataMovementTask(TaskBase):
             logger.exception("Task %r: Exception in task handling", self)
             raise e
 
-    def _add_dependee(self, dependee: "TaskBase"):
-        """Add the dependee if self is not completed, otherwise return False."""
-        with self._mutex:
-            if self._state.is_terminal:
-                return False
-            else:
-                #print("Data-movement task, ", self.name, ", added a dependee, ", dependee, sep='')
-                self._dependees.append(dependee)
-                return True
-
     def _set_dependencies(self, dependencies):
         self._remaining_dependencies = len(dependencies)
         for dep in dependencies:
             if not dep._add_dependee(self):
                 self._remaining_dependencies -= 1
-
-    def __await__(self):
-        return (yield TaskAwaitTasks([self], self))
-
-    def __repr__(self):
-        return "<Task {} nrem_deps={} state={} assigned={assigned}>".format(self.name or "", self._remaining_dependencies, type(self._state).__name__, **self.__dict__)
 
 
 class _TaskLocals(threading.local):
@@ -784,7 +717,7 @@ class TaskID:
     task object in most places.
 
     """
-    _task: Optional[TaskBase]
+    _task: Optional[Task]
     _id: Iterable[int]
 
     def __init__(self, name, id: Iterable[int]):
@@ -856,7 +789,7 @@ class SchedulerContext(metaclass=ABCMeta):
                            dataflow, name, num_unspawned_deps)
 
     @abstractmethod
-    def enqueue_task(self, taskBase):
+    def enqueue_task(self, Task):
         raise NotImplementedError()
 
     def __enter__(self):
@@ -968,10 +901,10 @@ class WorkerThread(ControllableThread, SchedulerContext):
     def decr_active_tasks(self):
         self.scheduler.decr_active_tasks()
 
-    def enqueue_spawned_task(self, task: TaskBase):
+    def enqueue_spawned_task(self, task: Task):
         self.scheduler.enqueue_spawned_task(task)
 
-    def enqueue_task(self, task: TaskBase):
+    def enqueue_task(self, task: Task):
         """Push a task on the queue tail.
         """
         # For the moment, bypass the local queue and put the task in the global scheduler queue
@@ -987,7 +920,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
         #     self._push_task(task)
         # This would need to fail over to the scheduler level enqueue if the resources is not available for assignment.
 
-    def assign_task(self, task: TaskBase):
+    def assign_task(self, task: Task):
         with self._monitor:
             if self.task:
                 raise WorkerThreadException("Tried to assign task to WorkerThread that already had one.")
@@ -1256,7 +1189,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         if done:
             self.stop()
 
-    def enqueue_spawned_task(self, task: TaskBase):
+    def enqueue_spawned_task(self, task: Task):
         """Enqueue a spawned task on the spawned task queue.
            Scheduler iterates the queue and assigns resources
            regardless of remaining dependencies.
@@ -1264,7 +1197,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         with self._monitor:
             self._new_spawned_task_queue.appendleft(task)
 
-    def _dequeue_spawned_task(self) -> Optional[TaskBase]:
+    def _dequeue_spawned_task(self) -> Optional[Task]:
         """Dequeue a task from the spawned task queue.
         """
         with self._monitor:
@@ -1276,13 +1209,13 @@ class Scheduler(ControllableThread, SchedulerContext):
             except IndexError:
                 return None
 
-    def enqueue_task(self, task: TaskBase):
+    def enqueue_task(self, task: Task):
         """Enqueue a task on the resource allocation queue.
            Note that this enqueue has no data race.
         """
         self._ready_queue.appendleft(task)
 
-    def _dequeue_task(self, timeout=None) -> Optional[TaskBase]:
+    def _dequeue_task(self, timeout=None) -> Optional[Task]:
         """Dequeue a task from the resource allocation queue.
         """
         while True:
@@ -1297,7 +1230,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 # Keep proceeding the next step.
                 return None
 
-    def _assignment_policy(self, task: TaskBase):
+    def _assignment_policy(self, task: Task):
         """
         Attempt to assign resources to `task`.
 
@@ -1414,7 +1347,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         logger.debug("[Scheduler] Map Phase")
         self.fill_curr_spawned_task_queue()
         while True:
-            task: Optional[TaskBase] = self._dequeue_spawned_task()
+            task: Optional[Task] = self._dequeue_spawned_task()
             if task:
                 if not task.assigned:
                     is_assigned = self._assignment_policy(task)
@@ -1457,7 +1390,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         """
         logger.debug("[Scheduler] Schedule Phase")
         while True:
-            task: Optional[TaskBase] = self._dequeue_task()
+            task: Optional[Task] = self._dequeue_task()
             if not task or not task.assigned:
                 logger.debug("Task %r: Failed to assign", task)
                 break

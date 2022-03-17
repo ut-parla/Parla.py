@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager, contextmanager, ExitStack
 from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, FrozenSet, Dict
 
 from parla.device import Device, Architecture, get_all_devices
-from parla.task_runtime import TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, TaskBase, get_scheduler_context, task_locals, wait_dependees_collection
+from parla.task_runtime import TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context, task_locals, wait_dependees_collection
 from parla.utils import parse_index
 from parla.dataflow import Dataflow
 
@@ -30,7 +30,7 @@ except ImportError as e:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "TaskID", "TaskSpace", "spawn", "tasks", "finish", "CompletedTaskSpace", "TaskBase", "reserve_persistent_memory"
+    "TaskID", "TaskSpace", "spawn", "tasks", "finish", "CompletedTaskSpace", "Task", "reserve_persistent_memory"
 ]
 
 class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
@@ -159,7 +159,7 @@ class CompletedTaskSpace(TaskSet):
 
 
 # TODO (bozhi): We may need a centralized typing module to reduce types being imported everywhere.
-PlacementSource = Union[Architecture, Device, TaskBase, TaskID, Any]
+PlacementSource = Union[Architecture, Device, Task, TaskID, Any]
 
 # TODO (bozhi): We may need a `placement` module to hold these `get_placement_for_xxx` interfaces, which makes more sense than the `tasks` module here. Check imports when doing so.
 def get_placement_for_value(p: PlacementSource) -> List[Device]:
@@ -170,7 +170,7 @@ def get_placement_for_value(p: PlacementSource) -> List[Device]:
         return [p]
     elif isinstance(p, TaskID):
         return get_placement_for_value(p.task)
-    elif isinstance(p, task_runtime.TaskBase):
+    elif isinstance(p, task_runtime.Task):
         return get_placement_for_value(p.req)
     elif array.is_array(p):
         return [array.get_memory(p).device]
@@ -277,7 +277,7 @@ def _task_callback(task, body) -> TaskState:
                 dependencies = new_task_info.dependencies
                 value_task = new_task_info.value_task
                 if value_task:
-                    assert isinstance(value_task, task_runtime.TaskBase)
+                    assert isinstance(value_task, task_runtime.Task)
                     task.value_task = value_task
                 return TaskRunning(_task_callback, (body,), dependencies)
             except StopIteration as e:
