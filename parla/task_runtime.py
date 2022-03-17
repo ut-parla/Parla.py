@@ -1319,6 +1319,36 @@ class Scheduler(ControllableThread, SchedulerContext):
                 logger.info(f"[Scheduler] Enqueuing %r to device %r", task, d)
                 self._device_queues[d].append(task)
 
+    # _launch_[DEVICE TYPES]_tasks launches a task by assigning it to available
+    # worker threads. It manages different execution paths based on the target
+    # devices' types.
+    # For example, in the future, the runtime will allow two task colocations
+    # of computation, moving data in, and moving data out.
+    # TODO(lhc): for now, the CPU/GPU launchers are same.
+
+    def _launch_cpu_tasks(self, task: Task, dev: Device):
+        if self._available_resources.check_resources_availability(dev, task.req.resources):
+            worker = self._free_worker_threads.pop() # grab a worker
+            logger.info(f"[Scheduler] Launching CPU task, %r on %r",
+                        task, worker)
+            # Assign the task to the worker (this notifies the worker's monitor)
+            worker.assign_task(task)
+            logger.debug(f"[Scheduler] Launched %r", task)
+        else:
+            queue.appendleft(task)
+
+    def _launch_gpu_tasks(self, task: Task, dev: Device):
+        if self._available_resources.check_resources_availability(dev, task.req.resources):
+            print("Dev idx:", dev.index, " Task:", str(task.taskid))
+            worker = self._free_worker_threads.pop() # grab a worker
+            logger.info(f"[Scheduler] Launching GPU task, %r on %r",
+                        task, worker)
+            # Assign the task to the worker (this notifies the worker's monitor)
+            worker.assign_task(task)
+            logger.debug(f"[Scheduler] Launched %r", task)
+        else:
+            queue.appendleft(task)
+
     def _launch_tasks(self):
         """ Iterate through free devices and launch tasks on them
         """
@@ -1331,13 +1361,10 @@ class Scheduler(ControllableThread, SchedulerContext):
                 if len(queue) > 0: # If there are tasks on the queue.
                     try:
                         task = queue.pop() # Grab a task.
-                        if self._available_resources.check_resources_availability(dev, task.req.resources):
-                            worker = self._free_worker_threads.pop() # grab a worker
-                            logger.info(f"[Scheduler] Launching %r on %r", task, worker)
-                            worker.assign_task(task) # assign the task to the worker (this notifies the worker's monitor)
-                            logger.debug(f"[Scheduler] Launched %r", task)
+                        if dev.architecture is cpu:
+                            self._launch_cpu_tasks(task, dev)
                         else:
-                            queue.appendleft(task)
+                            self._launch_gpu_tasks(task, dev)
                     finally:
                         pass
 

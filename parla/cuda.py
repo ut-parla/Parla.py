@@ -294,6 +294,24 @@ class GPUComponentInstance(EnvironmentComponentInstance):
             self._stack.pop_device()
         return ret
 
+    def preprocess(self):
+        print("Preprocess")
+
+    def postprocess(self):
+        print("Postprocess")
+
+    def create_events(self):
+        print("Create event")
+
+    def record_events(self):
+        print("Record event")
+
+    def synchronize_events(self):
+        print("Synchronize event")
+
+    def wait_event(self):
+        print("Wait event")
+
     def initialize_thread(self) -> None:
         for gpu in self.gpus:
             # Trigger cuBLAS/etc. initialization for this GPU in this thread.

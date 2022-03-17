@@ -132,6 +132,12 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
     def initialize_thread(self) -> None:
         pass
 
+    def preprocess(self):
+        print("Preprocess")
+
+    def postprocess(self):
+        print("Postprocess")
+
 
 class UnboundCPUComponent(EnvironmentComponentDescriptor):
     """A single CPU component that represents a "core" but isn't automatically bound to the given core.
