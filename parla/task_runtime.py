@@ -15,6 +15,7 @@ from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSe
 from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
 from parla.cpu_impl import cpu
+from parla.cuda import gpu
 
 # Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level = logging.INFO)
@@ -177,6 +178,16 @@ ResourceDict = Dict[str, Union[float, int]]
 
 
 class ResourceRequirements(object, metaclass=ABCMeta):
+    """
+    When a task spawns, it has a set of requirements based on parameters
+    supplied to @spawn.
+    This class represents those resources.
+    This is an Abstract Base Class - see below for classes which inherit from it.
+    Currently, spawned tasks only use DeviceSetRequirements.
+    After mapping, tasks receive EnvironmentRequirements.
+    As of writing this comment, idk what the difference is. Enviroments seem unnecessary and confusing.
+    OptionsRequirements aren't even used anywhere at all.
+    """
     __slots__ = ["resources", "ndevices", "tags"]
 
     tags: FrozenSet[Any]
@@ -226,6 +237,8 @@ class EnvironmentRequirements(ResourceRequirements):
         return "EnvironmentRequirements({}, {})".format(self.resources, self.environment)
 
 
+# This basically stores all the devices a task is *permitted* to run on,
+# taking into account spawn's placement parameter
 class DeviceSetRequirements(ResourceRequirements):
     __slots__ = ["devices"]
     devices: FrozenSet[Device]
@@ -253,6 +266,7 @@ class DeviceSetRequirements(ResourceRequirements):
         return "DeviceSetRequirements({}, {}, {}, exact={})".format(self.resources, self.ndevices, self.devices, self.exact)
 
 
+# CURRENTLY NOT USED
 class OptionsRequirements(ResourceRequirements):
     __slots__ = ["options"]
     options: List[List[Device]]
@@ -281,14 +295,19 @@ class Task:
                  req: ResourceRequirements, name: Optional[str] = None):
         self._mutex = threading.Lock()
         with self._mutex:
+            # This is the name of the task, which is distinct from the TaskID and from the name of its func?
             self._name = name
-            self._dependees = []
+
             # Maintain dependencies as a list object.
             # Therefore, bi-directional edges exist among dependent tasks.
             # Some of these dependencies are moved to a data movement task.
+            self._dependees = []
             self._set_dependencies(dependencies)
+
             self._taskid = taskid
+
             self._req = req
+
             # This flag specifies if a task is assigned device.
             # If it is, it sets to True. Otherwise, it sets to False.
             self.assigned = False
@@ -528,6 +547,7 @@ class ComputeTask(Task):
                 # the scheduler.
                 for d in self.req.devices:
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
+                    ctx.scheduler._device_task_counts[d] -= 1
                 self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
@@ -889,21 +909,101 @@ class WorkerThread(ControllableThread, SchedulerContext):
 
 
 class ResourcePool:
-    _multiplier: float
+    # Importing this at the top of the file breaks due to circular dependencies
+    from parla.parray.core import CPU_INDEX, PArray
+
     _monitor: threading.Condition
     _devices: Dict[Device, Dict[str, float]]
+    _device_indices: List[int]
+    _managed_parrays: Dict[int, Dict[Device, bool]]
 
     # Resource pools track device resources. Environments are a separate issue and are not tracked here. Instead,
     # tasks will consume resources based on their devices even though those devices are bundled into an environment.
+    # TODO: Figure out what the h*ck environments are
 
-    def __init__(self, multiplier):
-        self._multiplier = multiplier
-        self._monitor = threading.Condition(threading.Lock())
-        self._devices = self._initial_resources(multiplier)
+    def __init__(self):
+        self._monitor = threading.Condition(threading.Lock()) # Sean TODO: Do I need this?
+
+        # Devices are stored in a dict keyed by the device.
+        # Each entry stores a dict with cores, memory, etc. info based on the architecture
+        self._devices = self._initial_resources()
+        # TODO: You could probably just use the device's resources property instead of a separate dict
+
+
+        # Parla tracks managed PArrays' locations
+        # Index into dict with id(array), then with device. True means the array is present there
+        # We use the unique id of the array as the key because PArray is an unhashable class
+        self._managed_parrays = {}
+
+    # Sean TODO: Test this
+    # parrays don't use devices, they use indices
+    # CPU is CPU_INDEX, GPUs are positive integers
+    # This helper function translates from a Device class to its PArray ID quickly
+    def _to_parray_index(self, device):
+        if device.architecture == cpu:
+            return self.CPU_INDEX
+        if device.architecture == gpu:
+            return device.index
+        raise NotImplementedError("Only cpu and gpu architectures are supported")
+
+    # Start tracking the memory usage of a parray
+    def track_parray(self, parray):
+        # Figure out all the locations where a parray exists
+        parray_location_map = {}
+        for device in self._devices:
+            device_id = self._to_parray_index(device)
+            if parray.exists_on_device(device_id):
+                parray_location_map[device] = True
+                
+                # Update the resource usage at this location
+                self._devices[device]["memory"] -= parray.size
+            else:
+                parray_location_map[device] = False
+
+        # Insert the location map into our dict, keyed by the parray itself
+        self._managed_parrays[id(parray)] = parray_location_map
+
+    # Stop tracking the memory usage of a parray
+    def untrack_parray(self, parray):
+        # Return resources to the devices
+        for device, parray_exists in self._managed_parrays[id(parray)]:
+            if parray_exists:
+                self._devices[device]["memory"] += parray.size
+
+        # Delete the dictionary entry
+        del self._managed_parrays[id(parray)]
+
+    # Notify the resource pool that a device has a new instantiation of an array
+    def add_parray_to_device(self, parray, device):
+        if self._managed_parrays[id(parray)][device] == True:
+            #raise ValueError("Tried to register a parray on a device where it already existed")
+            return
+        self._managed_parrays[id(parray)][device] = True
+        self._devices[device]["memory"] -= parray.size
+
+    # Notify the resource pool that an instantiation of an array has been deleted
+    def remove_parray_from_device(self, parray, device):
+        if self._managed_parrays[id(parray)][device] == False:
+            #raise ValueError("Tried to remove a parray from a device where it didn't exist")
+            return
+        self._managed_parrays[id(parray)][device] = False
+        self._devices[device]["memory"] -= parray.size
+
+    # On a parray move, call this to start tracking the parray (if necessary) and update its location
+    def register_parray_move(self, parray, device):
+        if id(parray) not in self._managed_parrays:
+            self.track_parray(parray)
+            # If this new array originates on the dest device, skip the next step
+            if self._managed_parrays[id(parray)][device]:
+                return
+        self.add_parray_to_device(parray, device)
+
+    def parray_is_on_device(self, parray, device):
+        return (id(parray) in self._managed_parrays) and (self._managed_parrays[id(parray)][device])
 
     @staticmethod
-    def _initial_resources(multiplier):
-        return {dev: {name: amt * multiplier for name, amt in dev.resources.items()} for dev in get_all_devices()}
+    def _initial_resources():
+        return {dev: {name: amt for name, amt in dev.resources.items()} for dev in get_all_devices()}
 
     def allocate_resources(self, d: Device, resources: ResourceDict, *, blocking: bool = False) -> bool:
         """Allocate the resources described by `dd`.
@@ -971,10 +1071,8 @@ class ResourcePool:
                     dres[res] += amount
                     if amount > 0:
                         self._monitor.notify_all()
-                    assert dres[res] <= dev.resources[res] * self._multiplier, \
-                        "{}.{} was over deallocated".format(dev, res)
-                    assert dres[res] >= 0, \
-                        "{}.{} was over allocated".format(dev, res)
+                    assert dres[res] <= dev.resources[res], "{}.{} was over deallocated".format(dev, res)
+                    assert dres[res] >= 0, "{}.{} was over allocated".format(dev, res)
                     return True
                 else:
                     if block:
@@ -1007,6 +1105,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     _worker_threads: List[WorkerThread]
     _free_worker_threads: Deque[WorkerThread]
     _available_resources: ResourcePool
+    _device_task_counts: Dict[Device, int]
     period: float
 
     def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 1.4012985e-20):
@@ -1033,7 +1132,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._monitor = threading.Condition(threading.Lock())
 
         # Track, allocate, and deallocate resources (devices)
-        self._available_resources = ResourcePool(multiplier=1.0)
+        self._available_resources = ResourcePool()
 
         # Spawned task queues
         # Tasks that have been spawned but not mapped are stored here.
@@ -1055,6 +1154,9 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         # The device queues where scheduled tasks go to be launched from
         self._device_queues = {dev: deque() for dev in self._available_resources.get_resources()}
+
+        # The number of in-flight tasks on each device
+        self._device_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
 
         # Dictinary mapping data block to task lists.
         self._datablock_dict = defaultdict(list)
@@ -1160,6 +1262,86 @@ class Scheduler(ControllableThread, SchedulerContext):
         :return: True if the assignment succeeded, False otherwise.
         """
         logger.debug(f"[Scheduler] Mapping %r.", task)
+
+
+        # Sean: The goal of the mapper look at data locality and load balancing
+        # and pick a suitable set of devices on which to run a task.
+        # Currently, it just supports single-device tasks (like everything else...)
+        # Tasks have a set of requirements passed to them by @spawn. We need to
+        # match those requirements and find the most suitable device.
+        possible_devices = task.req.devices
+        max_suitability = None
+        best_device = None
+        for device in possible_devices:
+            # Ensure that the device has enough memory for the task
+            if 'memory' in task.req.resources:
+                if task.req.resources['memory'] > self._available_resources._devices[device]['memory']:
+                    continue
+            
+            # THIS IS THE MEAT OF THE MAPPING POLICY
+            # We calculate a few constants based on data locality and load balancing
+            # We then add those together with tunable weights to determine a suitability
+            # The device with the highest suitability is the lucky winner
+
+            # First, we calculate data on the device and data to be moved to the device
+            local_data = 0
+            nonlocal_data = 0
+            for parray in task.dataflow.input + task.dataflow.inout:
+                if self._available_resources.parray_is_on_device(parray, device):
+                    local_data += parray.size
+                else:
+                    nonlocal_data += parray.size
+
+            # These values are really big, so I'm normalizing them to the size of the
+            # device memory so my monkey brain can fathom the numbers
+            local_data /= device.resources['memory']
+            nonlocal_data /= device.resources['memory']
+            
+            # Next we calculate the load-balancing factor
+            # For now this is just a count of tasks on the device queue (TODO: better heuristics later...)
+            dev_load = self._device_task_counts[device]
+
+            # Normalize this too so we have numbers between 0 and 1
+            dev_load /= self._active_task_count
+
+            # TODO: Move these magic numbers somewhere better
+            local_data_weight = 30.0
+            nonlocal_data_weight = 10.0
+            load_weight = 1.0
+
+            # Calculate the suitability
+            suitability = local_data_weight * local_data \
+                        - nonlocal_data_weight * nonlocal_data \
+                        - load_weight * dev_load
+
+            """
+            def myformat(num):
+                return "{:.3f}".format(num)
+
+            print(f"local={myformat(local_data)}   nonlocal={myformat(nonlocal_data)}   \
+                    load={myformat(dev_load)}   suit={myformat(suitability)}")
+            """
+
+            # Update whether or not this is the most suitable device
+            if max_suitability is None or suitability > max_suitability:
+                max_suitability = suitability
+                best_device = device
+        
+        if best_device is None:
+            logger.debug(f"[Scheduler] Failed to map %r.", task)
+            return False
+
+        # Stick this info in an environment (I based this code on the commented out stuff below)
+        #print(f"best={best_device}")
+        task_env_gen = self._environments.find_all(placement={best_device}, tags={}, exact=True)
+        task_env = next(task_env_gen)
+        task.req = EnvironmentRequirements(task.req.resources, task_env, task.req.tags)
+
+        logger.debug(f"[Scheduler] Mapped %r.", task)
+        return True
+
+        # Sean: I don't understand the old way. Just commenting it out and acting like it doesn't exist.
+        """
         # Build a list of environments with "qualities" assigned based on how well they match a possible
         # option for the task
         env_match_quality = defaultdict(lambda: 0)
@@ -1191,9 +1373,11 @@ class Scheduler(ControllableThread, SchedulerContext):
             if is_res_constraint_satisifed:
                 task.req = EnvironmentRequirements(task.req.resources, env, task.req.tags)
                 logger.debug(f"[Scheduler] Mapped %r.", task)
+                print(f"Mapped {task} to {task.req.devices}")
                 return True
         logger.debug(f"[Scheduler] Failed to map %r.", task)
         return False
+        """
 
     def fill_curr_spawned_task_queue(self):
         """ It moves tasks on the new spawned task queue to
@@ -1285,6 +1469,15 @@ class Scheduler(ControllableThread, SchedulerContext):
                             self._construct_datamove_task(data, task, OperandType.OUT)
                         for data in task.dataflow.inout:
                             self._construct_datamove_task(data, task, OperandType.INOUT)
+
+                        # Update parray tracking and task count on the device
+                        for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
+                            if len(task.req.environment.placement) > 1:
+                                raise NotImplementedError("Multidevice not supported")
+                            for device in task.req.environment.placement:
+                                self._available_resources.register_parray_move(parray, device)
+                                self._device_task_counts[device] += 1
+                        # TODO: Update size after task for outputs
 
                         # Only computation needs to set a assigned flag.
                         # Data movement task is set as assigned when it is created.

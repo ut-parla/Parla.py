@@ -418,7 +418,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         taskid.dependencies = dependencies
 
         # gather input/output/inout, which is hint for data from or to the this task
-        dataflow = Dataflow(input, output, inout)
+        dataflow = Dataflow(list(input), list(output), list(inout))
 
         if num_unspawned_deps == 0:
           # Spawn the task via the Parla runtime API
