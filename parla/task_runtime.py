@@ -1438,7 +1438,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     # of computation, moving data in, and moving data out.
     # TODO(lhc): for now, the CPU/GPU launchers are same.
 
-    def _launch_cpu_tasks(self, task: Task, dev: Device):
+    def _launch_cpu_tasks(self, queue, task: Task, dev: Device):
         if self._available_resources.check_resources_availability(dev, task.req.resources):
             worker = self._free_worker_threads.pop() # grab a worker
             logger.info(f"[Scheduler] Launching CPU task, %r on %r",
@@ -1449,7 +1449,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         else:
             queue.appendleft(task)
 
-    def _launch_gpu_tasks(self, task: Task, dev: Device):
+    def _launch_gpu_tasks(self, queue, task: Task, dev: Device):
         if self._available_resources.check_resources_availability(dev, task.req.resources):
             worker = self._free_worker_threads.pop() # grab a worker
             logger.info(f"[Scheduler] Launching GPU task, %r on %r",
@@ -1473,9 +1473,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                     try:
                         task = queue.pop() # Grab a task.
                         if dev.architecture is cpu:
-                            self._launch_cpu_tasks(task, dev)
+                            self._launch_cpu_tasks(queue, task, dev)
                         else:
-                            self._launch_gpu_tasks(task, dev)
+                            self._launch_gpu_tasks(queue, task, dev)
                     finally:
                         pass
 
