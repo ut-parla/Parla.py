@@ -17,7 +17,7 @@ from parla.cpu_impl import cpu
 #logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 
-__all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
+__all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices", "has_environment"]
 
 # TODO: This module is pretty massively over-engineered the actual use case could use a much simpler scheduler.
 
@@ -922,6 +922,13 @@ def get_scheduler_context() -> SchedulerContext:
 
 def get_devices() -> Collection[Device]:
     return _scheduler_locals.environment.placement
+
+def has_environment() -> bool:
+    """
+    Return True if this is called inside a task environment.
+    """
+    return _scheduler_locals._environment is not None
+
 
 def get_current_devices() -> List[Device]:
     """
