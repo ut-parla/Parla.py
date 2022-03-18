@@ -551,6 +551,7 @@ class ComputeTask(Task):
                 if len(self.events) > 0:
                     self._notify_dependees(self.events)
                     pre_notify_dependees = True
+#env.synchronize_dependent_events()
 
                 env.set_final_context()
                 with _scheduler_locals._environment_scope(env), env:

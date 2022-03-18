@@ -316,15 +316,11 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         if self._thlocal_status.is_firstctx:
             dev = self.gpu.cupy_device
             self._object_stack.push_device(dev)
-        else:
-            dev = self._object_stack.device
-        dev.__enter__()
+            dev.__enter__()
         if self._thlocal_status.is_firstctx:
             stream = self._make_stream()
             self._object_stack.push_stream(stream)
-        else:
-            stream = self._object_stack.stream
-        stream.__enter__()
+            stream.__enter__()
         if self._thlocal_status.is_firstctx:
             # Create an event.
             # It initialized an event to 'Unoccurred'.
@@ -337,15 +333,16 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         stream = self._object_stack.stream
         event = self._object_stack.event
         try:
+            ret = True 
             if (self._thlocal_status.is_finalctx == True):
                 # Synchronize a stream only if the current
                 # context is permanantely exited
                 log_memory()
                 stream.synchronize()
                 log_memory()
-            stream.__exit__(exc_type, exc_val, exc_tb)
-            _gpu_locals._gpus = None
-            ret = dev.__exit__(exc_type, exc_val, exc_tb)
+                stream.__exit__(exc_type, exc_val, exc_tb)
+                _gpu_locals._gpus = None
+                ret = dev.__exit__(exc_type, exc_val, exc_tb)
         finally:
             if (self._thlocal_status.is_finalctx == True):
                 self._object_stack.pop_event()
@@ -378,6 +375,12 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         event = self._object_stack.event
         stream = self._object_stack.stream
         event.record(stream)
+        event.synchronize()
+
+    def synchronize_event(self):
+        event = self._object_stack.event
+        stream = self._object_stack.stream
+        stream.use()
         event.synchronize()
 
     def wait_event(self, event):

@@ -184,6 +184,10 @@ class TaskEnvironment(ContextManager):
         for c in self.components.values():
             c.record_event()
 
+    def synchronize_dependent_events(self):
+        for c in self.components.values():
+            c.synchronize_event()
+
 
 class TaskEnvironmentRegistry(Collection[TaskEnvironment]):
     """

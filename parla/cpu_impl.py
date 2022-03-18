@@ -161,6 +161,9 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
     def wait_event(self, event):
         pass
 
+    def synchronize_event(self):
+        pass
+
     def check_device_type(self, checking_type_str):
         if (checking_type_str == "CPU"):
             return True
