@@ -316,10 +316,8 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         if self._thlocal_status.is_firstctx:
             dev = self.gpu.cupy_device
             self._object_stack.push_device(dev)
-            print("Device at first:", type(dev))
         else:
             dev = self._object_stack.device
-            print("Device at non-first:", type(dev))
         dev.__enter__()
         if self._thlocal_status.is_firstctx:
             stream = self._make_stream()
@@ -340,11 +338,8 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         event = self._object_stack.event
         try:
             if (self._thlocal_status.is_finalctx == True):
-                print(stream, " enters exits")
                 # Synchronize a stream only if the current
                 # context is permanantely exited
-                event.synchronize()
-                print("Stream:", stream, " Event:", event, " Done", flush=True)
                 log_memory()
                 stream.synchronize()
                 log_memory()
@@ -374,29 +369,20 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         event = self._object_stack.event
         return ("GPU", event)
 
-    def preprocess(self):
-        print("Preprocess")
-
-    def postprocess(self):
-        print("Postprocess")
-
     def create_event(self):
         event = cupy.cuda.Event() 
         stream = self._object_stack.stream
-        print("Create event: ", event, " by ", stream, flush=True)
         return event
 
     def record_event(self):
         event = self._object_stack.event
         stream = self._object_stack.stream
-        print("Record event: ", event, flush=True)
         event.record(stream)
+        event.synchronize()
 
     def wait_event(self, event):
         stream = self._object_stack.stream
-        print("Wait event: ", event, " stream:", stream, flush=True )
         stream.wait_event(event)
-        print("Wait event: ", event, " stream:", stream, "[done]", flush=True )
 
     def check_device_type(self, checking_type_str):
         if (checking_type_str == "GPU"):

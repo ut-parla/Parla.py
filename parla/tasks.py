@@ -134,7 +134,6 @@ class TaskSpace(TaskSet):
         ret = []
         parse_index((), index, lambda x, i: x + (i,),
                 lambda x: ret.append(self._data.setdefault(x, TaskID(self._name, x))))
-        # print(index, ret)
         if len(ret) == 1:
             return ret[0]
         return ret

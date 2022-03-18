@@ -101,6 +101,15 @@ class TaskEnvironment(ContextManager):
 
     def __enter__(self):
         for c in self.components.values():
+            # This calls starts preprocessing.
+            # This preprocessing is decided based on the target device type.
+            # For GPU devices, it first notifies dependees on CPU device
+            # before it enters a stream context.
+            # (Note that if the stream context starts, the body becomes
+            #  GPU kernel body and runs on GPU.)
+            # For CPU devices, the current mechanism does not need preprocessing,
+            # and it is no-op.
+            c.preprocess()
             c.__enter__()
         return self
 
@@ -150,10 +159,6 @@ class TaskEnvironment(ContextManager):
         for c in self.components.values():
             c.set_final_context()
 
-    def unset_final_context(self):
-        for c in self.components.values():
-            c.unset_final_context()
-
     def post_process(self):
         # This calls starts postprocessing
         # (after task computation/data transfers are done.)
@@ -165,24 +170,11 @@ class TaskEnvironment(ContextManager):
 
     def get_events_from_components(self) -> List:
         events = []
-        for c in self.components.values():
+        for c in self.components.value():
             event = c.get_event_object()
             if event is not None:
                 events.append(event)
         return events
-
-    def wait_dependent_events(self, events: List):
-        for event_info in events:
-            # TODO(lhc): should be refactored
-            dev_type, event = event_info[0]
-            for c in self.components.values():
-                if c.check_device_type(dev_type):
-                    c.wait_event(event)
-                    break
-
-    def record_dependent_events(self):
-        for c in self.components.values():
-            c.record_event()
 
 
 class TaskEnvironmentRegistry(Collection[TaskEnvironment]):

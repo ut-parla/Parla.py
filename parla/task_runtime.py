@@ -535,22 +535,27 @@ class ComputeTask(Task):
                 env = self.req.environment
                 env.set_first_context()
                 with _scheduler_locals._environment_scope(env), env:
-                    env.wait_dependent_events(self.dependent_events)
                     self.events = env.get_events_from_components()
-                self.dependent_events = []
                 env.unset_first_context()
-                if len(self.events) > 0:
-                    self._notify_dependees(self.events)
-                    pre_notify_dependees = True
+
+                env.wait_dependent_events(self.dependent_events)
+                self.dependent_events = []
 
                 # Mark that the next with statment will be the final context,
                 # which requires environment object including
                 # logical devices releases
-                env.set_final_context()
                 # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
                 with _scheduler_locals._environment_scope(env), env:
                     task_state = self._state.func(self, *self._state.args)
-                    env.record_dependent_events()
+                env.record_dependent_events()
+                if len(self.events) > 0:
+                    self._notify_dependees(self.events)
+                    pre_notify_dependees = True
+
+                env.set_final_context()
+                with _scheduler_locals._environment_scope(env), env:
+                    pass
+
                 if task_state is None:
                     task_state = TaskCompleted(None)
             except Exception as e:
@@ -617,18 +622,16 @@ class DataMovementTask(Task):
                 env = self.req.environment
                 env.set_first_context()
                 with _scheduler_locals._environment_scope(env), env:
-                    env.wait_dependent_events(self.dependent_events)
                     self.events = env.get_events_from_components()
-                self.dependent_events = []
                 env.unset_first_context()
-                if len(self.events) > 0:
-                   self._notify_dependees(self.events)
-                   pre_notify_dependees = True
+
+                env.wait_dependent_events(self.dependent_events)
+                self.dependent_events = []
 
                 # Mark that the next with statment will be the final context,
                 # which requires environment object including
                 # logical devices releases
-                env.set_final_context()
+#env.set_final_context()
 
                 # We both set the environment as a thread local using _environment_scope,
                 # and enter the environment itself.
@@ -642,7 +645,15 @@ class DataMovementTask(Task):
                     if (dev_type.architecture is not cpu):
                         dev_no = dev_type.index
                     self._target_data._auto_move(device_id = dev_no, do_write = write_flag)
-                    env.record_dependent_events()
+                env.record_dependent_events()
+                if len(self.events) > 0:
+                   self._notify_dependees(self.events)
+                   pre_notify_dependees = True
+
+                env.set_final_context()
+                with _scheduler_locals._environment_scope(env), env:
+                    pass
+
                 # TODO(lhc):
                 #if task_state is None:
                 task_state = TaskCompleted(None)
@@ -1398,7 +1409,6 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def _launch_gpu_tasks(self, task: Task, dev: Device):
         if self._available_resources.check_resources_availability(dev, task.req.resources):
-            print("Dev idx:", dev.index, " Task:", str(task.taskid))
             worker = self._free_worker_threads.pop() # grab a worker
             logger.info(f"[Scheduler] Launching GPU task, %r on %r",
                         task, worker)
