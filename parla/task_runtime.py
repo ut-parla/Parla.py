@@ -519,8 +519,16 @@ class ComputeTask(Task):
             # Allocate the resources used by this task (blocking)
             for d in self.req.devices:
                 ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
-            # Run the task and assign the new task state
+            # This flag specifies whether notifying dependees happened
+            # before Parla task completes (Note that this is not exactly
+            # the completion of the actual kernel. For example, CUDA kernel
+            # could be done before Parla task is done, which is the view of
+            # the Parla runtime system).
+            # If it is True, notifying dependees is performed before
+            # task termination step. Otherwise, it notifies dependees after
+            # all Parla task termination step is done.
             pre_notify_dependees = False
+            # Run the task and assign the new task state
             try:
                 assert isinstance(self._state, TaskRunning)
                 # TODO(lhc): This assumes Parla only has two devices.
@@ -529,34 +537,44 @@ class ComputeTask(Task):
                 #            Whenever we import cuda.py, cupy compilation
                 #            is invoked. We should remove or avoid that.
 
-                # First, create device/stream instances.
-                # In this case, if the device is gpu, create an event and notify
-                # dependee tasks.
+                # First, create device/stream/event instances.
+                # Second, gets the created event instance.
+                # Third, it scatters the event to dependees who wait for
+                # the current task.
                 env = self.req.environment
                 env.set_first_context()
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
+                # It lets the CUDA instance know that the runtime can enter or
+                # exit Parla CUDA context without any deallocation of objects or
+                # entering/exiting pure CUDA contexts.
+                # FYI, you can think of the Parla CUDA contexts as the wrapper
+                # context/layer of the pure CUDA contexts.
                 env.unset_first_context()
 
                 env.wait_dependent_events(self.dependent_events)
+                # Already waited all dependent events.
+                # Initialize the dependent event list.
                 self.dependent_events = []
-
-                # Mark that the next with statment will be the final context,
-                # which requires environment object including
-                # logical devices releases
-                # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
                 with _scheduler_locals._environment_scope(env), env:
                     task_state = self._state.func(self, *self._state.args)
                 env.record_dependent_events()
                 if len(self.events) > 0:
+                    # If any event created by the current task exist,
+                    # notify dependees and make them wait for that event,
+                    # not Parla task completion.
                     self._notify_dependees(self.events)
                     pre_notify_dependees = True
-#env.synchronize_dependent_events()
 
+                # Mark that the next with statment will be the final context,
+                # and allow to exit CUDA pure device/stream contexts and
+                # deallocate related objects.
                 env.set_final_context()
                 with _scheduler_locals._environment_scope(env), env:
+                    # When the runtime exits this context,
+                    # all pure CUDA contexts and corresponding resources
+                    # will be released.
                     pass
-
                 if task_state is None:
                     task_state = TaskCompleted(None)
             except Exception as e:
@@ -564,12 +582,17 @@ class ComputeTask(Task):
                 logger.exception("Exception in task")
             finally:
                 logger.info("Finally for task %r", self)
-                # Deallocate all the resources, both from the allocation above and from the "assignment" done by
-                # the scheduler.
+                # Deallocate all the resources, both from the allocation above
+                # and from the "assignment" done by the scheduler.
                 for d in self.req.devices:
-                    ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
+                    ctx.scheduler._available_resources. \
+                              deallocate_resources(d, self.req.resources)
                 env.unset_final_context()
                 if not pre_notify_dependees:
+                    # If there is no event created by this task,
+                    # (Simply, you can think of CPU tasks)
+                    # notify dependees, at this phase, the Parla task
+                    # termination phase
                     self._notify_dependees()
                 self._set_state(task_state)
         except Exception as e:
@@ -611,31 +634,38 @@ class DataMovementTask(Task):
             # Allocate the resources used by this task (blocking)
             for d in self.req.devices:
                 ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
-            # Run the task and assign the new task state
+            # This flag specifies whether notifying dependees happened
+            # before Parla task completes (Note that this is not exactly
+            # the completion of the actual kernel. For example, CUDA kernel
+            # could be done before Parla task is done, which is the view of
+            # the Parla runtime system).
+            # If it is True, notifying dependees is performed before
+            # task termination step. Otherwise, it notifies dependees after
+            # all Parla task termination step is done.
             pre_notify_dependees = False
+            # Run the task and assign the new task state
             try:
-                # TODO(lhc): don't know how to handle this correctly.
-                #assert isinstance(self._state, TaskRunning)
+                assert isinstance(self._state, TaskRunning)
 
-                # First, create device/stream instances.
-                # In this case, if the device is gpu, create an event and notify
-                # dependee tasks.
+                # First, create device/stream/event instances.
+                # Second, gets the created event instance.
+                # Third, it scatters the event to dependees who wait for
+                # the current task.
                 env = self.req.environment
                 env.set_first_context()
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
+                # It lets the CUDA instance know that the runtime can enter or
+                # exit Parla CUDA context without any deallocation of objects or
+                # entering/exiting pure CUDA contexts.
+                # FYI, you can think of the Parla CUDA contexts as the wrapper
+                # context/layer of the pure CUDA contexts.
                 env.unset_first_context()
 
                 env.wait_dependent_events(self.dependent_events)
+                # Already waited all dependent events.
+                # Initialize the dependent event list.
                 self.dependent_events = []
-
-                # Mark that the next with statment will be the final context,
-                # which requires environment object including
-                # logical devices releases
-#env.set_final_context()
-
-                # We both set the environment as a thread local using _environment_scope,
-                # and enter the environment itself.
                 with _scheduler_locals._environment_scope(env), env:
                     write_flag = True
                     if (self._operand_type == OperandType.IN):
@@ -648,13 +678,20 @@ class DataMovementTask(Task):
                     self._target_data._auto_move(device_id = dev_no, do_write = write_flag)
                 env.record_dependent_events()
                 if len(self.events) > 0:
-                   self._notify_dependees(self.events)
-                   pre_notify_dependees = True
-
+                    # If any event created by the current task exist,
+                    # notify dependees and make them wait for that event,
+                    # not Parla task completion.
+                    self._notify_dependees(self.events)
+                    pre_notify_dependees = True
+                # Mark that the next with statment will be the final context,
+                # and allow to exit CUDA pure device/stream contexts and
+                # deallocate related objects.
                 env.set_final_context()
                 with _scheduler_locals._environment_scope(env), env:
+                    # When the runtime exits this context,
+                    # all pure CUDA contexts and corresponding resources
+                    # will be released.
                     pass
-
                 # TODO(lhc):
                 #if task_state is None:
                 task_state = TaskCompleted(None)
@@ -669,6 +706,10 @@ class DataMovementTask(Task):
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
                 env.unset_final_context()
                 if not pre_notify_dependees:
+                    # If there is no event created by this task,
+                    # (Simply, you can think of CPU tasks)
+                    # notify dependees, at this phase, the Parla task
+                    # termination phase
                     self._notify_dependees()
                 self._set_state(task_state)
         except Exception as e:

@@ -147,7 +147,7 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
         self.is_finalctx = False
 
     def get_event_object(self):
-        return None 
+        return None
 
     def create_event(self):
         pass
@@ -161,19 +161,10 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
     def wait_event(self, event):
         pass
 
-    def synchronize_event(self):
-        pass
-
     def check_device_type(self, checking_type_str):
         if (checking_type_str == "CPU"):
             return True
         return False
-
-    def preprocess(self):
-        print("Preprocess")
-
-    def postprocess(self):
-        print("Postprocess")
 
 
 class UnboundCPUComponent(EnvironmentComponentDescriptor):

@@ -128,15 +128,15 @@ class TaskEnvironment(ContextManager):
             else:
                 out[type(c)] = c
         return list(out.values())
-  
+
     def set_first_context(self):
         # This function specifies that the next context (by with statement)
         # is the first context call.
         # Devices could require object initializations within their contexts
         # only at the first time.
-        # For example, Parla GPU task creates events for dependencies.
+        # For example, Parla GPU tasks create events for dependencies.
         # They should be created within the corresponding device context
-        # only at the beginning.
+        # only once, at the beginning.
         for c in self.components.values():
             c.set_first_context()
 
@@ -147,6 +147,10 @@ class TaskEnvironment(ContextManager):
     def set_final_context(self):
         # This function specifies that the next context (by with statement)
         # is the final context call which requires object releases.
+        # For example, Parla GPU tasks exit and deallocate devices, streams
+        # and events only once, at the last.
+        # (This is also related to time performance, a well as memory
+        #  overhead. Entering/exiting CUDA contexts are expensive)
         for c in self.components.values():
             c.set_final_context()
 
@@ -154,16 +158,12 @@ class TaskEnvironment(ContextManager):
         for c in self.components.values():
             c.unset_final_context()
 
-    def post_process(self):
-        # This calls starts postprocessing
-        # (after task computation/data transfers are done.)
-        # This postprocessing is decided based on the target device type.
-        # For GPU devices, it waits dependent GPU tasks' events.
-        # For CPU devices, it notifies dependees.
-        for c in self.components.values():
-            c.post_process()
-
     def get_events_from_components(self) -> List:
+        # This function aggregates all events created by each component,
+        # and returns back to the task_runtime. Through this, dependees
+        # can wait for them on the proper devices.
+        # Note that this function returns a list of a pair of (Arch type string,
+        # event object).
         events = []
         for c in self.components.values():
             event = c.get_event_object()
@@ -183,10 +183,6 @@ class TaskEnvironment(ContextManager):
     def record_dependent_events(self):
         for c in self.components.values():
             c.record_event()
-
-    def synchronize_dependent_events(self):
-        for c in self.components.values():
-            c.synchronize_event()
 
 
 class TaskEnvironmentRegistry(Collection[TaskEnvironment]):

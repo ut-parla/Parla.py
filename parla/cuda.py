@@ -268,6 +268,17 @@ class _GPUStatusLocal(threading.local):
 
     def __init__(self):
         super(_GPUStatusLocal, self).__init__()
+        # These flags specify whether a CUDA context
+        # is entered at the first time or the last time.
+        # If the context is entered first,
+        # runtime creates device, stream and event objects
+        # and maintain them.
+        # If the context is entered as the last,
+        # runtime deallocates objects.
+        # Entrances between the first and the final entrances,
+        # reuse the objects.
+        # All threads share the one CUDA instance and therefore
+        # we exploit thread local stack for thread local variables.
         self._is_firstctx = True
         self._is_finalctx = False
 
@@ -313,17 +324,23 @@ class GPUComponentInstance(EnvironmentComponentInstance):
 
     def __enter__(self):
         _gpu_locals._gpus = self.gpus
+        # When the context is entered first time,
+        # the runtime creates device, stream and event objects.
+        # After that, the context reuses the objects until
+        # the last context entrace.
         if self._thlocal_status.is_firstctx:
             dev = self.gpu.cupy_device
             self._object_stack.push_device(dev)
             dev.__enter__()
-        if self._thlocal_status.is_firstctx:
             stream = self._make_stream()
             self._object_stack.push_stream(stream)
             stream.__enter__()
-        if self._thlocal_status.is_firstctx:
             # Create an event.
-            # It initialized an event to 'Unoccurred'.
+            # It initialized an event to 'Occurred'.
+            # Event recording changes this event to
+            # 'Unoccurred' and it is again changed
+            # to 'Occurred' when the HEAD of the stream queue
+            # points to that record operation.
             event = self.create_event()
             self._object_stack.push_event(event)
         return self
@@ -333,7 +350,7 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         stream = self._object_stack.stream
         event = self._object_stack.event
         try:
-            ret = True 
+            ret = True
             if (self._thlocal_status.is_finalctx == True):
                 # Synchronize a stream only if the current
                 # context is permanantely exited
@@ -363,11 +380,16 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         self._thlocal_status.unset_final_context()
 
     def get_event_object(self) -> Tuple[str, cupy.cuda.Event]:
+        """ Return an event managed by the current stream.
+            It is returned as a tuple of architecture type
+            and event and therefore, TaskEnvironment requests
+            dependee tasks to this task to wait those events on
+            the proper devices """
         event = self._object_stack.event
         return ("GPU", event)
 
     def create_event(self):
-        event = cupy.cuda.Event() 
+        event = cupy.cuda.Event()
         stream = self._object_stack.stream
         return event
 
@@ -377,18 +399,16 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         event.record(stream)
         event.synchronize()
 
-    def synchronize_event(self):
-        event = self._object_stack.event
-        stream = self._object_stack.stream
-        stream.use()
-        event.synchronize()
-
     def wait_event(self, event):
         stream = self._object_stack.stream
         stream.wait_event(event)
 
-    def check_device_type(self, checking_type_str):
-        if (checking_type_str == "GPU"):
+    def check_device_type(self, arch_type_str):
+        """ Check if returned events of `get_event_object()`
+            on dependent tasks are the current device type (CUDA).
+            To do this, it compares an architecture type strings of that
+            events """
+        if (arch_type_str == "GPU"):
             return True
         return False
 
