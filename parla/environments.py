@@ -115,6 +115,7 @@ class TaskEnvironment(ContextManager):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         for c in self.components.values():
+            print("!!!!!!!!!!!!!! ", c)
             c.__exit__(exc_type, exc_val, exc_tb)
 
     def __repr__(self):
@@ -137,6 +138,31 @@ class TaskEnvironment(ContextManager):
             else:
                 out[type(c)] = c
         return list(out.values())
+  
+    def set_first_context(self):
+        # This function specifies that the next context (by with statement)
+        # is the first context call.
+        # Devices could require object initializations within their contexts
+        # only at the first time.
+        # For example, Parla GPU task creates events for dependencies.
+        # They should be created within the corresponding device context
+        # only at the beginning.
+        for c in self.components.values():
+            c.set_first_context()
+
+    def unset_first_context(self):
+        for c in self.components.values():
+            c.unset_first_context()
+
+    def set_final_context(self):
+        # This function specifies that the next context (by with statement)
+        # is the final context call which requires object releases.
+        for c in self.components.values():
+            c.set_final_context()
+
+    def unset_final_context(self):
+        for c in self.components.values():
+            c.unset_final_context()
 
     def post_process(self):
         # This calls starts postprocessing
@@ -146,6 +172,31 @@ class TaskEnvironment(ContextManager):
         # For CPU devices, it notifies dependees.
         for c in self.components.values():
             c.post_process()
+
+    def get_events_from_components(self) -> List:
+        events = []
+        for c in self.components.values():
+            event = c.get_event_object()
+            if event is not None:
+                print("Appended: >>>>", event)
+                events.append(event)
+        return events
+
+    def wait_dependent_events(self, events: List):
+        for event in events:
+            print(">>>>", event)
+        for event_info in events:
+            # TODO(lhc): should be refactored
+            dev_type, event = event_info[0]
+            print("Dev type:", dev_type, " event: ", event)
+            for c in self.components.values():
+                if c.check_device_type(dev_type):
+                    c.wait_event(event)
+                    break
+
+    def record_dependent_events(self):
+        for c in self.components.values():
+            c.record_event()
 
 
 class TaskEnvironmentRegistry(Collection[TaskEnvironment]):

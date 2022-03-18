@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 import logging
 from functools import wraps, lru_cache
-from typing import Dict, List, Optional, Collection
+from typing import Dict, List, Optional, Tuple, Collection
 
 from parla import array
 from parla.array import ArrayType
@@ -215,13 +215,21 @@ if cupy:
 # Integration with parla.environments
 
 class _GPUStacksLocal(threading.local):
+    _event_stack: List[cupy.cuda.Event]
     _stream_stack: List[cupy.cuda.Stream]
     _device_stack: List[cupy.cuda.Device]
 
     def __init__(self):
         super(_GPUStacksLocal, self).__init__()
+        self._event_stack = []
         self._stream_stack = []
         self._device_stack = []
+
+    def push_event(self, event):
+        self._event_stack.append(event)
+
+    def pop_event(self) -> cupy.cuda.Event:
+        return self._event_stack.pop()
 
     def push_stream(self, stream):
         self._stream_stack.append(stream)
@@ -247,10 +255,46 @@ class _GPUStacksLocal(threading.local):
             return self._device_stack[-1]
         else:
             return None
+    @property
+    def event(self):
+        if self._event_stack:
+            return self._event_stack[-1]
+        else:
+            return None
+
+class _GPUStatusLocal(threading.local):
+    _is_firstctx: bool
+    _is_finalctx: bool
+
+    def __init__(self):
+        super(_GPUStatusLocal, self).__init__()
+        self._is_firstctx = True
+        self._is_finalctx = False
+
+    def set_first_context(self):
+        self._is_firstctx = True
+
+    def unset_first_context(self):
+        self._is_firstctx = False
+
+    def set_final_context(self):
+        self._is_finalctx = True
+
+    def unset_final_context(self):
+        self._is_finalctx = False
+
+    @property
+    def is_firstctx(self):
+        return self._is_firstctx
+
+    @property
+    def is_finalctx(self):
+        return self._is_finalctx
 
 
 class GPUComponentInstance(EnvironmentComponentInstance):
-    _stack: _GPUStacksLocal
+    _object_stack: _GPUStacksLocal
+    _thlocal_status: _GPUStatusLocal
     gpus: List[_GPUDevice]
 
     def __init__(self, descriptor: "GPUComponent", env: TaskEnvironment):
@@ -259,7 +303,9 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         assert len(self.gpus) == 1
         self.gpu = self.gpus[0]
         # Use a stack per thread per GPU component just in case.
-        self._stack = _GPUStacksLocal()
+        self._object_stack = _GPUStacksLocal()
+        self._thlocal_status = _GPUStatusLocal()
+        self.event = None
 
     def _make_stream(self):
         with self.gpu.cupy_device:
@@ -267,32 +313,66 @@ class GPUComponentInstance(EnvironmentComponentInstance):
 
     def __enter__(self):
         _gpu_locals._gpus = self.gpus
-        dev = self.gpu.cupy_device
+        if self._thlocal_status.is_firstctx:
+            dev = self.gpu.cupy_device
+            self._object_stack.push_device(dev)
+            print("Device at first:", type(dev))
+        else:
+            dev = self._object_stack.device
+            print("Device at non-first:", type(dev))
         dev.__enter__()
-        self._stack.push_device(dev)
-        stream = self._make_stream()
+        if self._thlocal_status.is_firstctx:
+            stream = self._make_stream()
+            self._object_stack.push_stream(stream)
+        else:
+            stream = self._object_stack.stream
         stream.__enter__()
-        self._stack.push_stream(stream)
+        if self._thlocal_status.is_firstctx:
+            # Create an event.
+            # It initialized an event to 'Unoccurred'.
+            event = self.create_event()
+            self._object_stack.push_event(event)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        dev = self._stack.device
-        stream = self._stack.stream
+        dev = self._object_stack.device
+        stream = self._object_stack.stream
+        event = self._object_stack.event
         try:
-
-            log_memory()
-
-            stream.synchronize()
-
-            log_memory()
-
+            if (self._thlocal_status.is_finalctx == True):
+                print(stream, " enters exits")
+                # Synchronize a stream only if the current
+                # context is permanantely exited
+                event.synchronize()
+                print("Stream:", stream, " Event:", event, " Done", flush=True)
+                log_memory()
+                stream.synchronize()
+                log_memory()
             stream.__exit__(exc_type, exc_val, exc_tb)
             _gpu_locals._gpus = None
             ret = dev.__exit__(exc_type, exc_val, exc_tb)
         finally:
-            self._stack.pop_stream()
-            self._stack.pop_device()
+            if (self._thlocal_status.is_finalctx == True):
+                self._object_stack.pop_event()
+                self._object_stack.pop_stream()
+                self._object_stack.pop_device()
         return ret
+
+    def set_first_context(self):
+        self._thlocal_status.set_first_context()
+
+    def unset_first_context(self):
+        self._thlocal_status.unset_first_context()
+
+    def set_final_context(self):
+        self._thlocal_status.set_final_context()
+
+    def unset_final_context(self):
+        self._thlocal_status.unset_final_context()
+
+    def get_event_object(self) -> Tuple[str, cupy.cuda.Event]:
+        event = self._object_stack.event
+        return ("GPU", event)
 
     def preprocess(self):
         print("Preprocess")
@@ -300,17 +380,28 @@ class GPUComponentInstance(EnvironmentComponentInstance):
     def postprocess(self):
         print("Postprocess")
 
-    def create_events(self):
-        print("Create event")
+    def create_event(self):
+        event = cupy.cuda.Event() 
+        stream = self._object_stack.stream
+        print("Create event: ", event, " by ", stream, flush=True)
+        return event
 
-    def record_events(self):
-        print("Record event")
+    def record_event(self):
+        event = self._object_stack.event
+        stream = self._object_stack.stream
+        print("Record event: ", event, flush=True)
+        event.record(stream)
 
-    def synchronize_events(self):
-        print("Synchronize event")
+    def wait_event(self, event):
+        stream = self._object_stack.stream
+        print("Wait event: ", event, " stream:", stream, flush=True )
+        stream.wait_event(event)
+        print("Wait event: ", event, " stream:", stream, "[done]", flush=True )
 
-    def wait_event(self):
-        print("Wait event")
+    def check_device_type(self, checking_type_str):
+        if (checking_type_str == "GPU"):
+            return True
+        return False
 
     def initialize_thread(self) -> None:
         for gpu in self.gpus:
