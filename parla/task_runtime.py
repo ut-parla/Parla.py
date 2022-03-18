@@ -1,3 +1,4 @@
+# General imports
 from functools import lru_cache
 import logging
 import random
@@ -10,19 +11,17 @@ import time
 from itertools import combinations
 from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar, Deque
 
+# Parla imports
 from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
-
 from parla.cpu_impl import cpu
 
+# Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
-
-# TODO: This module is pretty massively over-engineered the actual use case could use a much simpler scheduler.
-
-_ASSIGNMENT_FAILURE_WARNING_LIMIT = 32
 
 
 # Note: tasks can be implemented as lock free, however, atomics aren't really a thing in Python, so instead
