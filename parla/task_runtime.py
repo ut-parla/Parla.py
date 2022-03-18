@@ -1,3 +1,8 @@
+# MAJOR TODO:
+# 1) Check on memory allocation/deallocation everywhere. Don't double count resource usage.
+# 2) Tasks need to update the ResourcePool's size of their inout/out parrays
+# 3) Dependent tasks need increased affinity to the device of their dependencies if using same data
+
 # General imports
 from functools import lru_cache
 import logging
@@ -587,6 +592,7 @@ class DataMovementTask(Task):
         try:
             # Allocate the resources used by this task (blocking)
             for d in self.req.devices:
+                # TODO: Don't double count resources
                 ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
             # Run the task and assign the new task state
             try:
@@ -1318,8 +1324,11 @@ class Scheduler(ControllableThread, SchedulerContext):
             def myformat(num):
                 return "{:.3f}".format(num)
 
-            print(f"local={myformat(local_data)}   nonlocal={myformat(nonlocal_data)}   \
-                    load={myformat(dev_load)}   suit={myformat(suitability)}")
+            print(f"dev={device}   \
+                    local={myformat(local_data)}   \
+                    nonlocal={myformat(nonlocal_data)}   \
+                    load={myformat(dev_load)}   \
+                    suit={myformat(suitability)}")
             """
 
             # Update whether or not this is the most suitable device
