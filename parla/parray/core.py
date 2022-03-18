@@ -82,6 +82,9 @@ class PArray:
 
             # Public API:
 
+    def exists_on_device(self, device_id):
+        return (self._array[device_id] is not None)
+
     def update(self, array) -> None:
         """ Update the copy on current device.
 
