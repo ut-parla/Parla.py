@@ -284,11 +284,11 @@ class Task:
         with self._mutex:
             self._name = name
             self._dependees = []
+            self._taskid = taskid
             # Maintain dependencies as a list object.
             # Therefore, bi-directional edges exist among dependent tasks.
             # Some of these dependencies are moved to a data movement task.
             self._set_dependencies(dependencies)
-            self._taskid = taskid
             self._req = req
             # This flag specifies if a task is assigned device.
             # If it is, it sets to True. Otherwise, it sets to False.
@@ -367,6 +367,12 @@ class Task:
             logger.info("Task %r: Scheduling", self)
             get_scheduler_context().enqueue_task(self)
 
+    def _check_remaining_dependencies_mutex(self):
+        with self._mutex:
+            if not self._remaining_dependencies and self.assigned:
+                logger.info("Task %r: Scheduling", self)
+                get_scheduler_context().enqueue_task(self)
+
     def bool_check_remaining_dependencies(self):
         if not self._remaining_dependencies:
             return False
@@ -391,10 +397,11 @@ class Task:
                 self._dependees.append(dependee)
                 return True
 
-    def _notify_dependees(self, events = None):
+    def _notify_dependees_mutex(self, events = None):
         with self._mutex:
             for dependee in self._dependees:
                 dependee._complete_dependency(events)
+            self._dependees = []
 
     def _add_dependency_mutex(self, dependency):
         with self._mutex:
@@ -430,7 +437,7 @@ class Task:
             ctx.scheduler.report_exception(new_state.exc)
         elif isinstance(new_state, TaskRunning):
             self._set_dependencies_mutex(new_state.dependencies)
-            self._check_remaining_dependencies()
+            self._check_remaining_dependencies_mutex()
             new_state.clear_dependencies()
         if new_state.is_terminal:
             ctx.decr_active_tasks()
@@ -449,7 +456,7 @@ class ComputeTask(Task):
                  req: ResourceRequirements, dataflow: "Dataflow",
                  name: Optional[str] = None,
                  num_unspawned_deps: int = 0):
-        super().__init__(dependencies,taskid, req, name)
+        super(ComputeTask, self).__init__(dependencies, taskid, req, name)
         with self._mutex:
             # This task could be spawend when it is ready.
             # To set its state Running when it is running later,
@@ -563,8 +570,9 @@ class ComputeTask(Task):
                     # If any event created by the current task exist,
                     # notify dependees and make them wait for that event,
                     # not Parla task completion.
-                    self._notify_dependees(self.events)
+                    self._notify_dependees_mutex(self.events)
                     pre_notify_dependees = True
+                env.sync_dependent_events()
 
                 # Mark that the next with statment will be the final context,
                 # and allow to exit CUDA pure device/stream contexts and
@@ -588,12 +596,13 @@ class ComputeTask(Task):
                     ctx.scheduler._available_resources. \
                               deallocate_resources(d, self.req.resources)
                 env.unset_final_context()
-                if not pre_notify_dependees:
-                    # If there is no event created by this task,
-                    # (Simply, you can think of CPU tasks)
-                    # notify dependees, at this phase, the Parla task
-                    # termination phase
-                    self._notify_dependees()
+                # TODO
+                # Regardless of previous notification, we should notify
+                # If there is no event created by this task,
+                # (Simply, you can think of CPU tasks)
+                # notify dependees, at this phase, the Parla task
+                # termination phase
+                self._notify_dependees_mutex()
                 self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
@@ -610,7 +619,7 @@ class DataMovementTask(Task):
     def __init__(self, computation_task: ComputeTask, taskid,
                  req: ResourceRequirements, target_data,
                  operand_type: OperandType, name: Optional[str] = None):
-        super().__init__([], taskid, req, name)
+        super(DataMovementTask, self).__init__([], taskid, req, name)
         with self._mutex:
             # A data movement task is created after mapping phase.
             # Therefore, this class is already assigned to devices.
@@ -646,7 +655,6 @@ class DataMovementTask(Task):
             # Run the task and assign the new task state
             try:
                 assert isinstance(self._state, TaskRunning)
-
                 # First, create device/stream/event instances.
                 # Second, gets the created event instance.
                 # Third, it scatters the event to dependees who wait for
@@ -676,13 +684,16 @@ class DataMovementTask(Task):
                     if (dev_type.architecture is not cpu):
                         dev_no = dev_type.index
                     self._target_data._auto_move(device_id = dev_no, do_write = write_flag)
+                # TODO(lhc): record_event
                 env.record_dependent_events()
                 if len(self.events) > 0:
                     # If any event created by the current task exist,
                     # notify dependees and make them wait for that event,
                     # not Parla task completion.
-                    self._notify_dependees(self.events)
+                    self._notify_dependees_mutex(self.events)
                     pre_notify_dependees = True
+                # TODO(lhc): sync event 
+                env.sync_dependent_events()
                 # Mark that the next with statment will be the final context,
                 # and allow to exit CUDA pure device/stream contexts and
                 # deallocate related objects.
@@ -705,12 +716,11 @@ class DataMovementTask(Task):
                 for d in self.req.devices:
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
                 env.unset_final_context()
-                if not pre_notify_dependees:
-                    # If there is no event created by this task,
-                    # (Simply, you can think of CPU tasks)
-                    # notify dependees, at this phase, the Parla task
-                    # termination phase
-                    self._notify_dependees()
+                # If there is no event created by this task,
+                # (Simply, you can think of CPU tasks)
+                # notify dependees, at this phase, the Parla task
+                # termination phase
+                self._notify_dependees_mutex()
                 self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)

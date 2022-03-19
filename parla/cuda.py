@@ -355,7 +355,7 @@ class GPUComponentInstance(EnvironmentComponentInstance):
                 # Synchronize a stream only if the current
                 # context is permanantely exited
                 log_memory()
-                stream.synchronize()
+#stream.synchronize()
                 log_memory()
                 stream.__exit__(exc_type, exc_val, exc_tb)
                 _gpu_locals._gpus = None
@@ -397,6 +397,9 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         event = self._object_stack.event
         stream = self._object_stack.stream
         event.record(stream)
+
+    def sync_event(self):
+        event = self._object_stack.event
         event.synchronize()
 
     def wait_event(self, event):

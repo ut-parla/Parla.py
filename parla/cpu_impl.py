@@ -155,6 +155,9 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
     def record_event(self):
         pass
 
+    def sync_event(self):
+        pass
+
     def wait_event(self):
         pass
 
