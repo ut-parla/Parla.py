@@ -214,7 +214,7 @@ class PArray:
 
         # update protocol and get operation
         operations = self._coherence.read(device_id, slices) # locks involve
-        self._process_operations(operations) # condition variable involve
+        self._process_operations(operations, slices) # condition variable involve
 
     def _coherence_write(self, device_id: int = None, slices: SlicesType = None) -> None:
         """Tell the coherence protocol a write happened on a device.
@@ -234,11 +234,11 @@ class PArray:
 
         # update protocol and get operation
         operations = self._coherence.write(device_id, slices) # locks involve
-        self._process_operations(operations) # condition variable involve
+        self._process_operations(operations, slices) # condition variable involve
 
     # Device management methods:
 
-    def _process_operations(self, operations: List[MemoryOperation]) -> None:
+    def _process_operations(self, operations: List[MemoryOperation], slices: SlicesType = None) -> None:
         """
         Process the given memory operations.
         Data will be moved, and protocol states is kept unchanged.
@@ -253,33 +253,19 @@ class PArray:
                             self._coherence_cv[op.src].wait()
             elif op.inst == MemoryOperation.LOAD:
                 with self._coherence_cv[op.dst]:  # hold the CV when moving data
-                    self._copy_data_between_device(op.dst, op.src)  # copy data
-                    self._coherence.set_data_as_ready(op.dst)  # mark it as done
+                    self._array.copy_data_between_device(op.dst, op.src)  # copy data
+                    self._coherence.set_data_as_ready(op.dst, slices)  # mark it as done
                     self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
+            elif op.inst == MemoryOperation.UPDATE_MAP:
+                self._array.set_slices_mapping(op.src, slices)
             elif op.inst == MemoryOperation.EVICT:
                 self._array[op.src] = None  # decrement the reference counter, relying on GC to free the memory
-                self._coherence.set_data_as_ready(op.src)  # mark it as done
+                self._coherence.set_data_as_ready(op.src, slices)  # mark it as done
             elif op.inst == MemoryOperation.ERROR:
                 raise RuntimeError("PArray gets an error from coherence protocol")
             else:
                 raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
                                    f"detail: opcode {op.inst}, dst {op.dst}, src {op.src}")
-
-    def _copy_data_between_device(self, dst, src) -> None:
-        """
-        Copy data from src to dst.
-        """
-        if src == dst:
-            return
-        elif src == CPU_INDEX: # copy from CPU to GPU
-            self._array[dst] = cupy.asarray(self._array[src])
-        elif dst != CPU_INDEX: # copy from GPU to GPU
-            src_data = self._array[src]
-            dst_data = cupy.empty_like(src_data)
-            dst_data.data.copy_from_device_async(src_data.data, src_data.nbytes)
-            self._array[dst] = dst_data
-        else: # copy from GPU to CPU
-            self._array[CPU_INDEX] = cupy.asnumpy(self._array[src])
 
     @staticmethod
     def _get_current_device() -> Device | None:

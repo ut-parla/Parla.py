@@ -2,8 +2,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Union, List, Dict, Tuple, Any
 
 import numpy
+import cupy
 
-from coherence import CPU_INDEX
+from .coherence import CPU_INDEX
 
 if TYPE_CHECKING:  # False at runtime
     import cupy
@@ -20,7 +21,6 @@ class MultiDeviceBuffer:
     _buffer: Dict[int, ndarray | List[ndarray] | None]
     shape: tuple
     _indices_map: Dict[int, List[IndicesMapType] | None]
-    _subarray_index_map: Dict[int, Dict[SlicesType, int] | None]
 
     def __init__(self, num_gpu: int):
         # per device buffer
@@ -34,12 +34,6 @@ class MultiDeviceBuffer:
         # val: list of {global_index: local_index} and tuple(begin, end, stop), and the tuple is a represent of slice(begin, end, stop)
         self._indices_map = {n: None for n in range(num_gpu)}
         self._indices_map[CPU_INDEX] = None
-
-        # per device mapping bettwen slices and subarray index
-        # key: device_id
-        # val: dict{global_slice: subarray_index}
-        self._subarray_index_map = {n: None for n in range(num_gpu)}
-        self._subarray_index_map[CPU_INDEX] = None
 
         # the shape of the complete array
         self.shape = ()
@@ -76,12 +70,10 @@ class MultiDeviceBuffer:
         """
         if is_complete:
             self._indices_map[device_id] = None
-            self._subarray_index_map[device_id] = None
             self._buffer[device_id] = array
         else:
             if not isinstance(self._buffer[device_id], List) or overwrite:
                 self._indices_map[device_id] = None
-                self._subarray_index_map[device_id] = None
                 self._buffer[device_id] = [array]
             else:
                 self._buffer[device_id].append(array)
@@ -93,15 +85,11 @@ class MultiDeviceBuffer:
         if self._indices_map[device_id] is not None:  # subarray
             del self._indices_map[device_id][subarray_index]
             del self._buffer[device_id][subarray_index]
-            self._subarray_index_map[device_id] = {key:val for key, val
-                                                   in self._subarray_index_map[device_id].items() if val != subarray_index}
-
+            
             if len(self._indices_map[device_id]) == 0:
                 self._indices_map[device_id] = None
             if len(self._buffer[device_id]) == 0:
                 self._buffer[device_id] = None
-            if len(self._subarray_index_map[device_id]) == 0:
-                self._subarray_index_map[device_id] = None
         else:
             self._buffer[device_id] = None
 
@@ -311,7 +299,7 @@ class MultiDeviceBuffer:
               exception will be trigger later when trying to index into the copy
         """
         if not isinstance(global_slices, tuple):  # if not a tuple, make it a tuple
-            global_slices = tuple(global_slices)
+            global_slices = tuple([global_slices])
 
         if len(self.shape) < len(global_slices):
             raise IndexError(f"index out of range, index:{global_slices}")
@@ -337,8 +325,6 @@ class MultiDeviceBuffer:
             self._indices_map[device_id] = [slices_map_list]
         else:
             self._indices_map[device_id].append(slices_map_list)
-
-        self._subarray_index_map[device_id][global_slices] = len(self._indices_map[device_id]) - 1
 
     def get_by_global_slices(self, device_id: int, global_slices: SlicesType):
         """
@@ -383,7 +369,7 @@ class MultiDeviceBuffer:
             subarray_index, local_slices = self.map_local_slices(device_id, global_slices)
             self._buffer[device_id][subarray_index].__setitem__(local_slices, value)
 
-    def copy_data_between_device(self, dst, src, current_device) -> None:
+    def copy_data_between_device(self, dst, src) -> None:
         """
         Copy data from src to dst.
         """
@@ -403,17 +389,9 @@ class MultiDeviceBuffer:
                 raise ValueError("Copy from subarray to subarray is unsupported")
 
         if src == CPU_INDEX:  # copy from CPU to GPU
-            if dst == current_device:
-                _move_data(cupy.array)
-            else:
-                with cupy.cuda.Device(dst):
-                    _move_data(cupy.array)
+            _move_data(cupy.array)
         elif dst != CPU_INDEX:  # copy from GPU to GPU
-            if dst == current_device:
-                _move_data(cupy.copy)
-            else:
-                with cupy.cuda.Device(dst):
-                    _move_data(cupy.copy)
+            _move_data(cupy.copy)
         else:  # copy from GPU to CPU
             _move_data(cupy.asnumpy)
 

@@ -137,11 +137,11 @@ class Coherence:
             slices: slices of the subarray to be manipulated
                     by default equals to None, which means the whole array is manipulated
         """
-        self._data_ready[device_id] = True
-
         if slices: # move a subarray
             slices_hash = self._buffer.get_slices_hash(slices)
             self._data_ready[device_id][slices_hash] = True
+        else:
+            self._data_ready[device_id] = True
 
     def _owner_is_latest(self) -> bool:
         """True if owner's has latest version"""
@@ -243,7 +243,7 @@ class Coherence:
                     operations.append(MemoryOperation.check_data(device_id))  # check if the data is ready
                 else:  # update it to latest
                     self._data_ready[self.owner] = False
-                    operations.append(self._write_back_to(self.owner))
+                    operations.extend(self._write_back_to(self.owner))
             else:
                 if device_local_state == self.INVALID:
                     if self._is_complete[device_id]:
@@ -251,11 +251,13 @@ class Coherence:
                             operations.append(MemoryOperation.load(dst=device_id, src=self.owner))
                         else:
                             self._data_ready[self.owner] = False
-                            operations.append(self._write_back_to(self.owner))
+                            operations.extend(self._write_back_to(self.owner))
                             operations.append(MemoryOperation.load(dst=device_id, src=self.owner))
                     else:  # since we assume all array are disjoint, so could load directly
                         operations.append(MemoryOperation.load(dst=device_id, src=self.owner))
-                        operations.append(MemoryOperation.UPDATE_MAP)
+                        operations.append(MemoryOperation.update_map(device_id))
+                else:
+                    operations.append(MemoryOperation.check_data(device_id))
 
             # update status
             if self._is_complete[device_id]:
@@ -315,17 +317,19 @@ class Coherence:
                     operations.append(MemoryOperation.check_data(device_id))  # check if the data is ready
                 else:  # update it to latest
                     self._data_ready[self.owner] = False
-                    operations.append(self._write_back_to(self.owner, self.MODIFIED))
+                    operations.extend(self._write_back_to(self.owner, self.MODIFIED))
             else:
                 if device_local_state == self.INVALID:
                     if self._is_complete[device_id]:  # TODO: OPTIMIZE here
                         if self._owner_is_latest():
                             operations.append(MemoryOperation.load(dst=device_id, src=self.owner))
                         else:
-                            operations.append(self._write_back_to(device_id, self.MODIFIED))
+                            operations.extend(self._write_back_to(device_id, self.MODIFIED))
                     else:  # since we assume all array are disjoint, so could load directly
                         operations.append(MemoryOperation.load(dst=device_id, src=self.owner))
-                        operations.append(MemoryOperation.UPDATE_MAP)
+                        operations.append(MemoryOperation.update_map(device_id))
+                else:
+                    operations.append(MemoryOperation.check_data(device_id))
 
             # update status
             if self._is_complete[device_id]:
