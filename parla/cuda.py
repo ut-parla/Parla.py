@@ -330,7 +330,7 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         return ("GPU", event)
 
     def create_event(self):
-        event = cupy.cuda.Event()
+        event = cupy.cuda.Event(block=True)
         stream = self._object_stack.stream
         return event
 
