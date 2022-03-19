@@ -379,6 +379,13 @@ class Task:
         else:
             return True
 
+    def bool_check_remaining_dependencies_mutex(self):
+        with self._mutex:
+            if not self._remaining_dependencies:
+                return False
+            else:
+                return True
+
     def is_dependent(self, cand: "Task"):
         with self._mutex:
             if cand in self._dependencies:
@@ -542,7 +549,8 @@ class ComputeTask(Task):
                 env = self.req.environment
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
-                    env.wait_dependent_events(self.dependent_events)
+                    if self.bool_check_remaining_dependencies_mutex():
+                        env.wait_dependent_events(self.dependent_events)
                     # Already waited all dependent events.
                     # Initialize the dependent event list.
                     self.dependent_events = []
@@ -623,7 +631,8 @@ class DataMovementTask(Task):
                 env = self.req.environment
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
-                    env.wait_dependent_events(self.dependent_events)
+                    if self.bool_check_remaining_dependencies_mutex():
+                        env.wait_dependent_events(self.dependent_events)
                     # Already waited all dependent events.
                     # Initialize the dependent event list.
                     self.dependent_events = []
