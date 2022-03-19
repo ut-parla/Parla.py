@@ -566,7 +566,6 @@ class ComputeTask(Task):
                 for d in self.req.devices:
                     ctx.scheduler._available_resources. \
                               deallocate_resources(d, self.req.resources)
-                env.unset_final_context()
                 # Regardless of the previous notification,
                 # (So, before leaving the current run(), the above)
                 # it should notify dependees since
@@ -657,7 +656,6 @@ class DataMovementTask(Task):
                 # the scheduler.
                 for d in self.req.devices:
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
-                env.unset_final_context()
                 # Regardless of the previous notification,
                 # (So, before leaving the current run(), the above)
                 # it should notify dependees since
