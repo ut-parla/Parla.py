@@ -526,15 +526,6 @@ class ComputeTask(Task):
             # Allocate the resources used by this task (blocking)
             for d in self.req.devices:
                 ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
-            # This flag specifies whether notifying dependees happened
-            # before Parla task completes (Note that this is not exactly
-            # the completion of the actual kernel. For example, CUDA kernel
-            # could be done before Parla task is done, which is the view of
-            # the Parla runtime system).
-            # If it is True, notifying dependees is performed before
-            # task termination step. Otherwise, it notifies dependees after
-            # all Parla task termination step is done.
-            pre_notify_dependees = False
             # Run the task and assign the new task state
             try:
                 assert isinstance(self._state, TaskRunning)
@@ -565,14 +556,14 @@ class ComputeTask(Task):
                 self.dependent_events = []
                 with _scheduler_locals._environment_scope(env), env:
                     task_state = self._state.func(self, *self._state.args)
-                env.record_dependent_events()
+                # Events could be multiple for multiple devices task.
+                env.record_events()
                 if len(self.events) > 0:
                     # If any event created by the current task exist,
                     # notify dependees and make them wait for that event,
                     # not Parla task completion.
                     self._notify_dependees_mutex(self.events)
-                    pre_notify_dependees = True
-                env.sync_dependent_events()
+                env.sync_events()
 
                 # Mark that the next with statment will be the final context,
                 # and allow to exit CUDA pure device/stream contexts and
@@ -596,12 +587,12 @@ class ComputeTask(Task):
                     ctx.scheduler._available_resources. \
                               deallocate_resources(d, self.req.resources)
                 env.unset_final_context()
-                # TODO
-                # Regardless of previous notification, we should notify
-                # If there is no event created by this task,
-                # (Simply, you can think of CPU tasks)
-                # notify dependees, at this phase, the Parla task
-                # termination phase
+                # Regardless of the previous notification,
+                # (So, before leaving the current run(), the above)
+                # it should notify dependees since
+                # new dependees could be added after the above
+                # notifications, while other devices are running
+                # their kernels asynchronously.
                 self._notify_dependees_mutex()
                 self._set_state(task_state)
         except Exception as e:
@@ -643,15 +634,6 @@ class DataMovementTask(Task):
             # Allocate the resources used by this task (blocking)
             for d in self.req.devices:
                 ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
-            # This flag specifies whether notifying dependees happened
-            # before Parla task completes (Note that this is not exactly
-            # the completion of the actual kernel. For example, CUDA kernel
-            # could be done before Parla task is done, which is the view of
-            # the Parla runtime system).
-            # If it is True, notifying dependees is performed before
-            # task termination step. Otherwise, it notifies dependees after
-            # all Parla task termination step is done.
-            pre_notify_dependees = False
             # Run the task and assign the new task state
             try:
                 assert isinstance(self._state, TaskRunning)
@@ -684,16 +666,14 @@ class DataMovementTask(Task):
                     if (dev_type.architecture is not cpu):
                         dev_no = dev_type.index
                     self._target_data._auto_move(device_id = dev_no, do_write = write_flag)
-                # TODO(lhc): record_event
-                env.record_dependent_events()
+                # Events could be multiple for multiple devices task.
+                env.record_events()
                 if len(self.events) > 0:
                     # If any event created by the current task exist,
                     # notify dependees and make them wait for that event,
                     # not Parla task completion.
                     self._notify_dependees_mutex(self.events)
-                    pre_notify_dependees = True
-                # TODO(lhc): sync event 
-                env.sync_dependent_events()
+                env.sync_events()
                 # Mark that the next with statment will be the final context,
                 # and allow to exit CUDA pure device/stream contexts and
                 # deallocate related objects.
@@ -716,10 +696,12 @@ class DataMovementTask(Task):
                 for d in self.req.devices:
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
                 env.unset_final_context()
-                # If there is no event created by this task,
-                # (Simply, you can think of CPU tasks)
-                # notify dependees, at this phase, the Parla task
-                # termination phase
+                # Regardless of the previous notification,
+                # (So, before leaving the current run(), the above)
+                # it should notify dependees since
+                # new dependees could be added after the above
+                # notifications, while other devices are running
+                # their kernels asynchronously.
                 self._notify_dependees_mutex()
                 self._set_state(task_state)
         except Exception as e:
