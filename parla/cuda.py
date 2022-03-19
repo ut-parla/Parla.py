@@ -262,50 +262,9 @@ class _GPUStacksLocal(threading.local):
         else:
             return None
 
-class _GPUStatusLocal(threading.local):
-    _is_firstctx: bool
-    _is_finalctx: bool
-
-    def __init__(self):
-        super(_GPUStatusLocal, self).__init__()
-        # These flags specify whether a CUDA context
-        # is entered at the first time or the last time.
-        # If the context is entered first,
-        # runtime creates device, stream and event objects
-        # and maintain them.
-        # If the context is entered as the last,
-        # runtime deallocates objects.
-        # Entrances between the first and the final entrances,
-        # reuse the objects.
-        # All threads share the one CUDA instance and therefore
-        # we exploit thread local stack for thread local variables.
-        self._is_firstctx = True
-        self._is_finalctx = False
-
-    def set_first_context(self):
-        self._is_firstctx = True
-
-    def unset_first_context(self):
-        self._is_firstctx = False
-
-    def set_final_context(self):
-        self._is_finalctx = True
-
-    def unset_final_context(self):
-        self._is_finalctx = False
-
-    @property
-    def is_firstctx(self):
-        return self._is_firstctx
-
-    @property
-    def is_finalctx(self):
-        return self._is_finalctx
-
 
 class GPUComponentInstance(EnvironmentComponentInstance):
     _object_stack: _GPUStacksLocal
-    _thlocal_status: _GPUStatusLocal
     gpus: List[_GPUDevice]
 
     def __init__(self, descriptor: "GPUComponent", env: TaskEnvironment):
@@ -315,7 +274,6 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         self.gpu = self.gpus[0]
         # Use a stack per thread per GPU component just in case.
         self._object_stack = _GPUStacksLocal()
-        self._thlocal_status = _GPUStatusLocal()
         self.event = None
 
     def _make_stream(self):
@@ -328,21 +286,20 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         # the runtime creates device, stream and event objects.
         # After that, the context reuses the objects until
         # the last context entrace.
-        if self._thlocal_status.is_firstctx:
-            dev = self.gpu.cupy_device
-            self._object_stack.push_device(dev)
-            dev.__enter__()
-            stream = self._make_stream()
-            self._object_stack.push_stream(stream)
-            stream.__enter__()
-            # Create an event.
-            # It initialized an event to 'Occurred'.
-            # Event recording changes this event to
-            # 'Unoccurred' and it is again changed
-            # to 'Occurred' when the HEAD of the stream queue
-            # points to that record operation.
-            event = self.create_event()
-            self._object_stack.push_event(event)
+        dev = self.gpu.cupy_device
+        self._object_stack.push_device(dev)
+        dev.__enter__()
+        stream = self._make_stream()
+        self._object_stack.push_stream(stream)
+        stream.__enter__()
+        # Create an event.
+        # It initialized an event to 'Occurred'.
+        # Event recording changes this event to
+        # 'Unoccurred' and it is again changed
+        # to 'Occurred' when the HEAD of the stream queue
+        # points to that record operation.
+        event = self.create_event()
+        self._object_stack.push_event(event)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -351,33 +308,17 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         event = self._object_stack.event
         try:
             ret = True
-            if (self._thlocal_status.is_finalctx == True):
-                # Synchronize a stream only if the current
-                # context is permanantely exited
-                log_memory()
-#stream.synchronize()
-                log_memory()
-                stream.__exit__(exc_type, exc_val, exc_tb)
-                _gpu_locals._gpus = None
-                ret = dev.__exit__(exc_type, exc_val, exc_tb)
+            # Exit a stream only if the current
+            # context is permanantely exited.
+            log_memory()
+            stream.__exit__(exc_type, exc_val, exc_tb)
+            _gpu_locals._gpus = None
+            ret = dev.__exit__(exc_type, exc_val, exc_tb)
         finally:
-            if (self._thlocal_status.is_finalctx == True):
-                self._object_stack.pop_event()
-                self._object_stack.pop_stream()
-                self._object_stack.pop_device()
+            self._object_stack.pop_event()
+            self._object_stack.pop_stream()
+            self._object_stack.pop_device()
         return ret
-
-    def set_first_context(self):
-        self._thlocal_status.set_first_context()
-
-    def unset_first_context(self):
-        self._thlocal_status.unset_first_context()
-
-    def set_final_context(self):
-        self._thlocal_status.set_final_context()
-
-    def unset_final_context(self):
-        self._thlocal_status.unset_final_context()
 
     def get_event_object(self) -> Tuple[str, cupy.cuda.Event]:
         """ Return an event managed by the current stream.

@@ -122,8 +122,6 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
         cpus = [d for d in env.placement if isinstance(d, _CPUDevice)]
         assert len(cpus) == 1
         self.cpus = cpus
-        self.is_firstctx = True
-        self.is_finalctx = False
 
     def __enter__(self):
         return
@@ -133,18 +131,6 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
 
     def initialize_thread(self) -> None:
         pass
-
-    def set_first_context(self):
-        self.is_firstctx = True
-
-    def unset_first_context(self):
-        self.is_firstctx = False
-
-    def set_final_context(self):
-        self.is_finalctx = True
-
-    def unset_final_context(self):
-        self.is_finalctx = False
 
     def get_event_object(self):
         return None

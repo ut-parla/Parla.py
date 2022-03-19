@@ -540,40 +540,20 @@ class ComputeTask(Task):
                 # Third, it scatters the event to dependees who wait for
                 # the current task.
                 env = self.req.environment
-                env.set_first_context()
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
-                # It lets the CUDA instance know that the runtime can enter or
-                # exit Parla CUDA context without any deallocation of objects or
-                # entering/exiting pure CUDA contexts.
-                # FYI, you can think of the Parla CUDA contexts as the wrapper
-                # context/layer of the pure CUDA contexts.
-                env.unset_first_context()
-
-                env.wait_dependent_events(self.dependent_events)
-                # Already waited all dependent events.
-                # Initialize the dependent event list.
-                self.dependent_events = []
-                with _scheduler_locals._environment_scope(env), env:
+                    env.wait_dependent_events(self.dependent_events)
+                    # Already waited all dependent events.
+                    # Initialize the dependent event list.
+                    self.dependent_events = []
                     task_state = self._state.func(self, *self._state.args)
-                # Events could be multiple for multiple devices task.
-                env.record_events()
-                if len(self.events) > 0:
-                    # If any event created by the current task exist,
-                    # notify dependees and make them wait for that event,
-                    # not Parla task completion.
-                    self._notify_dependees_mutex(self.events)
-                env.sync_events()
-
-                # Mark that the next with statment will be the final context,
-                # and allow to exit CUDA pure device/stream contexts and
-                # deallocate related objects.
-                env.set_final_context()
-                with _scheduler_locals._environment_scope(env), env:
-                    # When the runtime exits this context,
-                    # all pure CUDA contexts and corresponding resources
-                    # will be released.
-                    pass
+                    env.record_events()
+                    if len(self.events) > 0:
+                        # If any event created by the current task exist,
+                        # notify dependees and make them wait for that event,
+                        # not Parla task completion.
+                        self._notify_dependees_mutex(self.events)
+                    env.sync_events()
                 if task_state is None:
                     task_state = TaskCompleted(None)
             except Exception as e:
@@ -642,21 +622,12 @@ class DataMovementTask(Task):
                 # Third, it scatters the event to dependees who wait for
                 # the current task.
                 env = self.req.environment
-                env.set_first_context()
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
-                # It lets the CUDA instance know that the runtime can enter or
-                # exit Parla CUDA context without any deallocation of objects or
-                # entering/exiting pure CUDA contexts.
-                # FYI, you can think of the Parla CUDA contexts as the wrapper
-                # context/layer of the pure CUDA contexts.
-                env.unset_first_context()
-
-                env.wait_dependent_events(self.dependent_events)
-                # Already waited all dependent events.
-                # Initialize the dependent event list.
-                self.dependent_events = []
-                with _scheduler_locals._environment_scope(env), env:
+                    env.wait_dependent_events(self.dependent_events)
+                    # Already waited all dependent events.
+                    # Initialize the dependent event list.
+                    self.dependent_events = []
                     write_flag = True
                     if (self._operand_type == OperandType.IN):
                         write_flag = False
@@ -666,23 +637,14 @@ class DataMovementTask(Task):
                     if (dev_type.architecture is not cpu):
                         dev_no = dev_type.index
                     self._target_data._auto_move(device_id = dev_no, do_write = write_flag)
-                # Events could be multiple for multiple devices task.
-                env.record_events()
-                if len(self.events) > 0:
-                    # If any event created by the current task exist,
-                    # notify dependees and make them wait for that event,
-                    # not Parla task completion.
-                    self._notify_dependees_mutex(self.events)
-                env.sync_events()
-                # Mark that the next with statment will be the final context,
-                # and allow to exit CUDA pure device/stream contexts and
-                # deallocate related objects.
-                env.set_final_context()
-                with _scheduler_locals._environment_scope(env), env:
-                    # When the runtime exits this context,
-                    # all pure CUDA contexts and corresponding resources
-                    # will be released.
-                    pass
+                    # Events could be multiple for multiple devices task.
+                    env.record_events()
+                    if len(self.events) > 0:
+                        # If any event created by the current task exist,
+                        # notify dependees and make them wait for that event,
+                        # not Parla task completion.
+                        self._notify_dependees_mutex(self.events)
+                    env.sync_events()
                 # TODO(lhc):
                 #if task_state is None:
                 task_state = TaskCompleted(None)

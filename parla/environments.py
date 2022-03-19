@@ -129,35 +129,6 @@ class TaskEnvironment(ContextManager):
                 out[type(c)] = c
         return list(out.values())
 
-    def set_first_context(self):
-        # This function specifies that the next context (by with statement)
-        # is the first context call.
-        # Devices could require object initializations within their contexts
-        # only at the first time.
-        # For example, Parla GPU tasks create events for dependencies.
-        # They should be created within the corresponding device context
-        # only once, at the beginning.
-        for c in self.components.values():
-            c.set_first_context()
-
-    def unset_first_context(self):
-        for c in self.components.values():
-            c.unset_first_context()
-
-    def set_final_context(self):
-        # This function specifies that the next context (by with statement)
-        # is the final context call which requires object releases.
-        # For example, Parla GPU tasks exit and deallocate devices, streams
-        # and events only once, at the last.
-        # (This is also related to time performance, a well as memory
-        #  overhead. Entering/exiting CUDA contexts are expensive)
-        for c in self.components.values():
-            c.set_final_context()
-
-    def unset_final_context(self):
-        for c in self.components.values():
-            c.unset_final_context()
-
     def get_events_from_components(self) -> List:
         # This function aggregates all events created by each component,
         # and returns back to the task_runtime. Through this, dependees
@@ -180,11 +151,11 @@ class TaskEnvironment(ContextManager):
                     c.wait_event(event)
                     break
 
-    def record_dependent_events(self):
+    def record_events(self):
         for c in self.components.values():
             c.record_event()
 
-    def sync_dependent_events(self):
+    def sync_events(self):
         for c in self.components.values():
             c.sync_event()
 
