@@ -550,6 +550,20 @@ class ComputeTask(Task):
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
                     if self.bool_check_remaining_dependencies_mutex():
+                        # Only wait events if any remaining dependent tasks exist.
+                        # TODO(lhc): This does not support nested CPU tasks from GPU tasks.
+                        #            When we notify dependees, we don't know places on
+                        #            which the dependees will run since those would decide
+                        #            at the next step, mapping step.
+                        #            Therefore, the current runtime does not consider
+                        #            dependees' placements, but just creates events
+                        #            on the devices where the current task is running.
+                        #            For example, when CPU tasks get GPU events,
+                        #            they will just skip and will not wait for them.
+                        #            This is not technical limitation, just need refactoring
+                        #            and adding more features.
+                        #            But our target applications do not have this pattern
+                        #            and will do it later.
                         env.wait_dependent_events(self.dependent_events)
                     # Already waited all dependent events.
                     # Initialize the dependent event list.
@@ -632,6 +646,20 @@ class DataMovementTask(Task):
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
                     if self.bool_check_remaining_dependencies_mutex():
+                        # Only wait events if any remaining dependent tasks exist.
+                        # TODO(lhc): This does not support nested CPU tasks from GPU tasks.
+                        #            When we notify dependees, we don't know places on
+                        #            which the dependees will run since those would decide
+                        #            at the next step, mapping step.
+                        #            Therefore, the current runtime does not consider
+                        #            dependees' placements, but just creates events
+                        #            on the devices where the current task is running.
+                        #            For example, when CPU tasks get GPU events,
+                        #            they will just skip and will not wait for them.
+                        #            This is not technical limitation, just need refactoring
+                        #            and adding more features.
+                        #            But our target applications do not have this pattern
+                        #            and will do it later.
                         env.wait_dependent_events(self.dependent_events)
                     # Already waited all dependent events.
                     # Initialize the dependent event list.
