@@ -107,6 +107,15 @@ class PArray:
                     dst_data.data.copy_from_device_async(array.data, array.nbytes)
                     self._array[this_device] = dst_data
 
+    def evict_all(self) -> None:
+        """
+        Evict all copies from buffer, and clean all related fields
+
+        Note: this object should not be accessed anymore after called this method
+        """
+        self._array = None
+        self._coherence = None
+
     # Coherence update operations:
 
     def _coherence_read(self, device_id: int = None) -> None:
