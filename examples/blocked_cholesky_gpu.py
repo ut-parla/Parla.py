@@ -155,7 +155,7 @@ def cholesky_blocked_inplace(a):
     for j in range(len(a)):
         for k in range(j):
             # Inter-block GEMM
-            @spawn(gemm1[j, k], [solve[j, k], gemm2[j, k, 0:k]], placement=loc)
+            @spawn(gemm1[j, k], [solve[j, k], gemm1[j, 0:k]], placement=loc)
             def t1():
                 #print("GEMM1", (j, j), (j, k), flush=True)
                 out = clone_here(a[j][j])
