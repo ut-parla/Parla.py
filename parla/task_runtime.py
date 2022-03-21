@@ -549,7 +549,7 @@ class ComputeTask(Task):
                 env = self.req.environment
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
-                    if self.bool_check_remaining_dependencies_mutex():
+                    if len(self.dependent_events) > 0:
                         # Only wait events if any remaining dependent tasks exist.
                         # TODO(lhc): This does not support nested CPU tasks from GPU tasks.
                         #            When we notify dependees, we don't know places on
@@ -645,7 +645,7 @@ class DataMovementTask(Task):
                 env = self.req.environment
                 with _scheduler_locals._environment_scope(env), env:
                     self.events = env.get_events_from_components()
-                    if self.bool_check_remaining_dependencies_mutex():
+                    if len(self.dependent_events) > 0:
                         # Only wait events if any remaining dependent tasks exist.
                         # TODO(lhc): This does not support nested CPU tasks from GPU tasks.
                         #            When we notify dependees, we don't know places on
