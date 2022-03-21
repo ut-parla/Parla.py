@@ -146,7 +146,8 @@ class TaskRunning(TaskState):
 
     def __repr__(self):
         if self.func:
-            return "TaskRunning({}, {}, {})".format(self.func.__name__, self.args, self.dependencies)
+            #return "TaskRunning({}, {}, {})".format(self.func.__name__, self.args, self.dependencies)
+            return "TaskRunning({})".format(self.func.__name__)
         else:
             return "Functionless task"
 
@@ -384,7 +385,7 @@ class Task:
 
     def _check_remaining_dependencies(self):
         if not self._remaining_dependencies and self.assigned:
-            logger.info("Task %r: Scheduling", self)
+            logger.info("[Task] %s: Scheduling", self._name)
             get_scheduler_context().enqueue_task(self)
 
     def bool_check_remaining_dependencies(self):
@@ -406,8 +407,8 @@ class Task:
             if self._state.is_terminal:
                 return False
             else:
-                logger.debug("Task, %s added a dependee, %s",
-                             self.name, dependee)
+                logger.debug("[Task] %s added a dependee, %s",
+                             self.name, dependee.name)
                 self._dependees.append(dependee)
                 return True
 
@@ -437,7 +438,7 @@ class Task:
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
-        logger.info("Task %r: %r -> %r", self, self._state, new_state)
+        logger.info("[Task] %r: %r -> %r", self._name, self._state, new_state)
         self._state = new_state
         ctx = get_scheduler_context()
 
@@ -477,8 +478,6 @@ class ComputeTask(Task):
             # but not after potentially getting scheduled.
             taskid.task = self
 
-            logger.debug("Task %r: Creating", self)
-
             self.num_unspawned_deps = num_unspawned_deps
             # If this task is not waiting for any dependent tasks,
             # enqueue onto the spawned queue.
@@ -491,6 +490,7 @@ class ComputeTask(Task):
                 get_scheduler_context().enqueue_spawned_task(self)
             else:
                 self._state = TaskWaiting()
+            logger.debug("Task %r: Creating", self)
 
     def notify_wait_dependees(self):
         """ Notify all dependees who wait for this task.
@@ -1058,7 +1058,8 @@ class ResourcePool:
             else:
                 to_release.clear()
 
-            logger.info("Attempted to allocate %s * %r (blocking %s) => %s\n%r", multiplier, (d, resources), block, success, self)
+            logger.info("[ResourcePool] Attempted to allocate %s * %r (blocking %s) => %s", \
+                         multiplier, (d, resources), block, "success" if success else "fail")
             if to_release:
                 logger.info("Releasing resources due to failure: %r", to_release)
 
@@ -1457,7 +1458,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     def _map_tasks(self):
         # The first loop iterates a spawned task queue
         # and constructs a mapped task subgrpah.
-        logger.debug("[Scheduler] Map Phase")
+        #logger.debug("[Scheduler] Map Phase")
         self.fill_curr_spawned_task_queue()
         while True:
             task: Optional[Task] = self._dequeue_spawned_task()
@@ -1510,7 +1511,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         """ Currently this doesn't do any intelligent scheduling (ordering).
             Dequeue all ready tasks and send them to device queues in order.
         """
-        logger.debug("[Scheduler] Schedule Phase")
+        #logger.debug("[Scheduler] Schedule Phase")
         while True:
             task: Optional[Task] = self._dequeue_task()
             if not task or not task.assigned:
@@ -1523,7 +1524,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     def _launch_tasks(self):
         """ Iterate through free devices and launch tasks on them
         """
-        logger.debug("[Scheduler] Launch Phase")
+        #logger.debug("[Scheduler] Launch Phase")
         with self._monitor:
             for dev, queue in self._device_queues.items():
                 # Make sure there's an available WorkerThread
@@ -1550,9 +1551,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                 self._map_tasks()
                 self._schedule_tasks()
                 self._launch_tasks()
-                logger.debug("[Scheduler] Sleeping!")
+                #logger.debug("[Scheduler] Sleeping!")
                 time.sleep(self.period)
-                logger.debug("[Scheduler] Awake!")
+                #logger.debug("[Scheduler] Awake!")
 
         except Exception:
             logger.exception("Unexpected exception in Scheduler")
