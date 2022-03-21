@@ -1273,9 +1273,6 @@ class Scheduler(ControllableThread, SchedulerContext):
                     if not datamove_task._add_dependency(dep_task):
                         completed_tasks.append(dep_task_id)
             dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
-            print("++!! Creating DataMoveTask", taskid, "VALUE: ", target_data._array," :: dependencies - ", dep_list, "built from: ", compute_task._taskid, flush=True)
-        else:
-            print("++!! Creating DataMoveTask :: no dependencies, built from: ", compute_task._taskid, flush=True)
 
         if operand_type != OperandType.IN:
             self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
