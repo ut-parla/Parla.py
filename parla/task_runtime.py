@@ -989,6 +989,11 @@ class ResourcePool:
             is_available = True
             for name, amount in resources.items():
                 dres = self._devices[d]
+
+                # Workaround stupid vcus (I'm getting rid of these at some point)
+                if d.architecture == gpu and name == 'vcus':
+                    continue
+
                 if amount > dres[name]:
                     is_available = False
                 logger.debug("Resource check for %d %s on device %r: %s", amount, name, d, "Passed" if is_available else "Failed")
@@ -1020,6 +1025,9 @@ class ResourcePool:
             return success
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
+        # Workaround stupid vcus (I'm getting rid of these at some point)
+        if dev.architecture == gpu and res == 'vcus':
+            return True
         try:
             while True: # contains return
                 dres = self._devices[dev]
