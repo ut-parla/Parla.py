@@ -209,8 +209,8 @@ def cholesky_blocked_inplace(a):
                     rhs1 = a[i][k].array
                     rhs2 = a[j][k].array
 
-                    stream = cp.cuda.get_current_stream()
-                    stream.synchronize()
+                    #stream = cp.cuda.get_current_stream()
+                    #stream.synchronize()
 
                     log_memory()
                     out = update(rhs1, rhs2, out)
