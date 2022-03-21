@@ -517,6 +517,21 @@ class ComputeTask(Task):
                 assert isinstance(self._state, TaskRunning)
                 # We both set the environment as a thread local using _environment_scope, and enter the environment itself.
                 with _scheduler_locals._environment_scope(self.req.environment), self.req.environment:
+
+                    write_flag = True
+                    dev_type = get_current_devices()[0]
+                    dev_no = -1
+                    if (dev_type.architecture is not cpu):
+                        dev_no = dev_type.index
+
+                    #Note: This should NEVER perform a copy. Only invalidate the data.
+                    #Note: If it does ever perform a copy, its probably fine but slow?
+                    for data in self.dataflow.output:
+                        data._auto_move(device_id = dev_no, do_write = write_flag)
+
+                    for data in self.dataflow.inout:
+                        data._auto_move(device_id = dev_no, do_write = write_flag)
+
                     task_state = self._state.func(self, *self._state.args)
                 if task_state is None:
                     task_state = TaskCompleted(None)
@@ -578,9 +593,10 @@ class DataMovementTask(Task):
                 # and enter the environment itself.
                 with _scheduler_locals._environment_scope(self.req.environment), \
                         self.req.environment:
-                    write_flag = True
-                    if (self._operand_type == OperandType.IN):
-                        write_flag = False
+                    write_flag = False
+                    #NOTE: Writes always disabled in data movement task to allow concurrent reads between dependent tasks (that don't modify the data)
+                    #if (self._operand_type == OperandType.IN):
+                    #    write_flag = False
                     # Move data to current device
                     dev_type = get_current_devices()[0]
                     dev_no = -1
@@ -1246,16 +1262,24 @@ class Scheduler(ControllableThread, SchedulerContext):
         if target_data_id in self._datablock_dict:
             # Get task lists using the target data block.
             dep_task_list = self._datablock_dict[target_data_id]
+            dep_list = []
             completed_tasks = []
             for dep_task_tuple in dep_task_list:
                 dep_task_id = dep_task_tuple[0]
                 dep_task = dep_task_tuple[1]
                 # Only checks dependent tasks if they use the same data blocks.
                 if compute_task.is_dependent(dep_task):
+                    dep_list.append(dep_task)
                     if not datamove_task._add_dependency(dep_task):
                         completed_tasks.append(dep_task_id)
             dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
-        self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
+            print("++!! Creating DataMoveTask", taskid, "VALUE: ", target_data._array," :: dependencies - ", dep_list, "built from: ", compute_task._taskid, flush=True)
+        else:
+            print("++!! Creating DataMoveTask :: no dependencies, built from: ", compute_task._taskid, flush=True)
+
+        if operand_type != OperandType.IN:
+            self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
+
         # If a task has no dependency after it is assigned to devices,
         # immediately enqueue a corresponding data movement task to
         # the ready queue.
@@ -1282,8 +1306,11 @@ class Scheduler(ControllableThread, SchedulerContext):
                         #            will use logical values to make it easy to understand.
                         for data in task.dataflow.input:
                             self._construct_datamove_task(data, task, OperandType.IN)
+
+                        #TODO: Does output having a data move task make sense? What makes this distinct from inout?
                         for data in task.dataflow.output:
                             self._construct_datamove_task(data, task, OperandType.OUT)
+
                         for data in task.dataflow.inout:
                             self._construct_datamove_task(data, task, OperandType.INOUT)
 
