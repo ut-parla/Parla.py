@@ -56,8 +56,8 @@ def main():
 
         distribute=True
         fixed_placement=True
-        verbose=True
-        sync = True
+        verbose=False
+        sync = False
 
         time_list = list()
 
