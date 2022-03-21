@@ -393,7 +393,7 @@ class Task:
             else:
                 return False
 
-    def _add_dependee(self, dependee: "Task"):
+    def _add_dependee_mutex(self, dependee: "Task"):
         """Add the dependee if self is not completed, otherwise return False."""
         with self._mutex:
             if self._state.is_terminal:
@@ -404,11 +404,26 @@ class Task:
                 self._dependees.append(dependee)
                 return True
 
+    def _add_dependee(self, dependee: "Task"):
+        """Add the dependee if self is not completed, otherwise return False."""
+        if self._state.is_terminal:
+            return False
+        else:
+            logger.debug("Task, %s added a dependee, %s",
+                         self.name, dependee)
+            self._dependees.append(dependee)
+            return True
+
     def _notify_dependees_mutex(self, events = None):
         with self._mutex:
             for dependee in self._dependees:
                 dependee._complete_dependency(events)
             self._dependees = []
+
+    def _notify_dependees(self, events = None):
+        for dependee in self._dependees:
+            dependee._complete_dependency(events)
+        self._dependees = []
 
     def _add_dependency_mutex(self, dependency):
         with self._mutex:
@@ -417,7 +432,7 @@ class Task:
     def _add_dependency(self, dependency):
         self._remaining_dependencies += 1
         self._dependencies.append(dependency)
-        if not dependency._add_dependee(self):
+        if not dependency._add_dependee_mutex(self):
             self._remaining_dependencies -= 1
             return False
         return True
@@ -443,8 +458,8 @@ class Task:
         if isinstance(new_state, TaskException):
             ctx.scheduler.report_exception(new_state.exc)
         elif isinstance(new_state, TaskRunning):
-            self._set_dependencies_mutex(new_state.dependencies)
-            self._check_remaining_dependencies_mutex()
+            self._set_dependencies(new_state.dependencies)
+            self._check_remaining_dependencies()
             new_state.clear_dependencies()
         if new_state.is_terminal:
             ctx.decr_active_tasks()
@@ -588,14 +603,17 @@ class ComputeTask(Task):
                 for d in self.req.devices:
                     ctx.scheduler._available_resources. \
                               deallocate_resources(d, self.req.resources)
-                # Regardless of the previous notification,
-                # (So, before leaving the current run(), the above)
-                # it should notify dependees since
-                # new dependees could be added after the above
-                # notifications, while other devices are running
-                # their kernels asynchronously.
-                self._notify_dependees_mutex()
-                self._set_state(task_state)
+                # Protect the case that it notifies dependees and
+                # any dependee task is spawned before setting state.
+                with self._mutex:
+                    # Regardless of the previous notification,
+                    # (So, before leaving the current run(), the above)
+                    # it should notify dependees since
+                    # new dependees could be added after the above
+                    # notifications, while other devices are running
+                    # their kernels asynchronously.
+                    self._notify_dependees()
+                    self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
             raise e
@@ -693,14 +711,17 @@ class DataMovementTask(Task):
                 # the scheduler.
                 for d in self.req.devices:
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
-                # Regardless of the previous notification,
-                # (So, before leaving the current run(), the above)
-                # it should notify dependees since
-                # new dependees could be added after the above
-                # notifications, while other devices are running
-                # their kernels asynchronously.
-                self._notify_dependees_mutex()
-                self._set_state(task_state)
+                # Protect the case that it notifies dependees and
+                # any dependee task is spawned before setting state.
+                with self._mutex:
+                    # Regardless of the previous notification,
+                    # (So, before leaving the current run(), the above)
+                    # it should notify dependees since
+                    # new dependees could be added after the above
+                    # notifications, while other devices are running
+                    # their kernels asynchronously.
+                    self._notify_dependees()
+                    self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
             raise e
@@ -1490,9 +1511,8 @@ class Scheduler(ControllableThread, SchedulerContext):
             w.stop()
 
     def report_exception(self, e: BaseException):
-        with self._monitor:
-            logger.exception("Report exception:", e)
-            self._exceptions.append(e)
+        logger.exception("Report exception:", e)
+        self._exceptions.append(e)
 
     def dump_status(self, lg=logger):
         lg.info("%r:\n%r\navailable: %r", self,
