@@ -1,8 +1,3 @@
-# MAJOR TODO:
-# 1) Check on memory allocation/deallocation everywhere. Don't double count resource usage.
-# 2) Tasks need to update the ResourcePool's size of their inout/out parrays
-# 3) Dependent tasks need increased affinity to the device of their dependencies if using same data
-
 # General imports
 from functools import lru_cache
 import logging
@@ -1317,6 +1312,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         possible_devices = task.req.devices
         max_suitability = None
         best_device = None
+        best_device_owns_dependency = False
+        best_device_local_data = 0
         for device in possible_devices:
             # Ensure that the device has enough resources for the task
             if not self._available_resources.check_resources_availability(device, task.req.resources):
@@ -1340,6 +1337,19 @@ class Scheduler(ControllableThread, SchedulerContext):
             # device memory so my monkey brain can fathom the numbers
             local_data /= device.resources['memory']
             nonlocal_data /= device.resources['memory']
+
+            # Figure out whether the task has a dependency running on this device
+            this_device_owns_dependency = False
+            for dependency in task.dependencies:
+                if device in dependency.req.devices:
+                    this_device_owns_dependency = True
+                    break
+
+            # If the best device owns a dependency, but this one doesn't,
+            # AND the best device has more local data, we can skip this device
+            # TODO: Ignore this if the dependency has finished running!
+            if best_device_owns_dependency and not this_device_owns_dependency and best_device_local_data >= local_data:
+                continue
             
             # Next we calculate the load-balancing factor
             # For now this is just a count of tasks on the device queue (TODO: better heuristics later...)
@@ -1362,24 +1372,26 @@ class Scheduler(ControllableThread, SchedulerContext):
             def myformat(num):
                 return "{:.3f}".format(num)
 
-            print(f"dev={device}   \
-                    local={myformat(local_data)}   \
-                    nonlocal={myformat(nonlocal_data)}   \
-                    load={myformat(dev_load)}   \
-                    suit={myformat(suitability)}")
+            print(f"dev={device}", end='   ')
+            print(f"dep={this_device_owns_dependency}", end='   ')
+            print(f"local={myformat(local_data)}", end='   ')
+            print(f"nonlocal={myformat(nonlocal_data)}", end='   ')
+            print(f"load={myformat(dev_load)}", end='   ')
+            print(f"suit={myformat(suitability)}")
             """
 
             # Update whether or not this is the most suitable device
             if max_suitability is None or suitability > max_suitability:
                 max_suitability = suitability
                 best_device = device
+                best_device_owns_dependency = this_device_owns_dependency
+                best_device_local_data = local_data
         
         if best_device is None:
             logger.debug(f"[Scheduler] Failed to map %r.", task)
             return False
 
         # Stick this info in an environment (I based this code on the commented out stuff below)
-        #print(f"best={best_device}")
         task_env_gen = self._environments.find_all(placement={best_device}, tags={}, exact=True)
         task_env = next(task_env_gen)
         task.req = EnvironmentRequirements(task.req.resources, task_env, task.req.tags)
@@ -1421,7 +1433,6 @@ class Scheduler(ControllableThread, SchedulerContext):
             if is_res_constraint_satisifed:
                 task.req = EnvironmentRequirements(task.req.resources, env, task.req.tags)
                 logger.debug(f"[Scheduler] Mapped %r.", task)
-                print(f"Mapped {task} to {task.req.devices}")
                 return True
         logger.debug(f"[Scheduler] Failed to map %r.", task)
         return False
