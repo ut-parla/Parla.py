@@ -46,6 +46,7 @@ class PArray:
         self._coherence_lock = threading.Lock()  # a lock to greb when update coherence and move data
 
         self.size = array.size
+        self.nbytes = array.nbytes
 
     # Properties:
 
@@ -95,6 +96,7 @@ class PArray:
         Note: data should be put in OUT/INOUT fields of spawn
         """
         self.size = array.size
+        self.nbytes = array.nbytes
 
         this_device = self._current_device_index
 
