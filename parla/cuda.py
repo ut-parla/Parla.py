@@ -3,7 +3,7 @@ from contextlib import contextmanager
 
 import logging
 from functools import wraps, lru_cache
-from typing import Dict, List, Optional, Collection
+from typing import Dict, List, Optional, Tuple, Collection
 
 from parla import array
 from parla.array import ArrayType
@@ -215,13 +215,21 @@ if cupy:
 # Integration with parla.environments
 
 class _GPUStacksLocal(threading.local):
+    _event_stack: List[cupy.cuda.Event]
     _stream_stack: List[cupy.cuda.Stream]
     _device_stack: List[cupy.cuda.Device]
 
     def __init__(self):
         super(_GPUStacksLocal, self).__init__()
+        self._event_stack = []
         self._stream_stack = []
         self._device_stack = []
+
+    def push_event(self, event):
+        self._event_stack.append(event)
+
+    def pop_event(self) -> cupy.cuda.Event:
+        return self._event_stack.pop()
 
     def push_stream(self, stream):
         self._stream_stack.append(stream)
@@ -247,10 +255,16 @@ class _GPUStacksLocal(threading.local):
             return self._device_stack[-1]
         else:
             return None
+    @property
+    def event(self):
+        if self._event_stack:
+            return self._event_stack[-1]
+        else:
+            return None
 
 
 class GPUComponentInstance(EnvironmentComponentInstance):
-    _stack: _GPUStacksLocal
+    _object_stack: _GPUStacksLocal
     gpus: List[_GPUDevice]
 
     def __init__(self, descriptor: "GPUComponent", env: TaskEnvironment):
@@ -259,7 +273,8 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         assert len(self.gpus) == 1
         self.gpu = self.gpus[0]
         # Use a stack per thread per GPU component just in case.
-        self._stack = _GPUStacksLocal()
+        self._object_stack = _GPUStacksLocal()
+        self.event = None
 
     def _make_stream(self):
         with self.gpu.cupy_device:
@@ -267,32 +282,79 @@ class GPUComponentInstance(EnvironmentComponentInstance):
 
     def __enter__(self):
         _gpu_locals._gpus = self.gpus
+        # When the context is entered first time,
+        # the runtime creates device, stream and event objects.
+        # After that, the context reuses the objects until
+        # the last context entrace.
         dev = self.gpu.cupy_device
+        self._object_stack.push_device(dev)
         dev.__enter__()
-        self._stack.push_device(dev)
         stream = self._make_stream()
+        self._object_stack.push_stream(stream)
         stream.__enter__()
-        self._stack.push_stream(stream)
+        # Create an event.
+        # It initialized an event to 'Occurred'.
+        # Event recording changes this event to
+        # 'Unoccurred' and it is again changed
+        # to 'Occurred' when the HEAD of the stream queue
+        # points to that record operation.
+        event = self.create_event()
+        self._object_stack.push_event(event)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        dev = self._stack.device
-        stream = self._stack.stream
+        dev = self._object_stack.device
+        stream = self._object_stack.stream
+        event = self._object_stack.event
         try:
-
+            ret = True
+            # Exit a stream only if the current
+            # context is permanantely exited.
             log_memory()
-
-            stream.synchronize()
-
-            log_memory()
-
             stream.__exit__(exc_type, exc_val, exc_tb)
             _gpu_locals._gpus = None
             ret = dev.__exit__(exc_type, exc_val, exc_tb)
         finally:
-            self._stack.pop_stream()
-            self._stack.pop_device()
+            self._object_stack.pop_event()
+            self._object_stack.pop_stream()
+            self._object_stack.pop_device()
         return ret
+
+    def get_event_object(self) -> Tuple[str, cupy.cuda.Event]:
+        """ Return an event managed by the current stream.
+            It is returned as a tuple of architecture type
+            and event and therefore, TaskEnvironment requests
+            dependee tasks to this task to wait those events on
+            the proper devices """
+        event = self._object_stack.event
+        return ("GPU", event)
+
+    def create_event(self):
+        event = cupy.cuda.Event(block=True)
+        stream = self._object_stack.stream
+        return event
+
+    def record_event(self):
+        event = self._object_stack.event
+        stream = self._object_stack.stream
+        event.record(stream)
+
+    def sync_event(self):
+        event = self._object_stack.event
+        event.synchronize()
+
+    def wait_event(self, event):
+        stream = self._object_stack.stream
+        stream.wait_event(event)
+
+    def check_device_type(self, arch_type_str):
+        """ Check if returned events of `get_event_object()`
+            on dependent tasks are the current device type (CUDA).
+            To do this, it compares an architecture type strings of that
+            events """
+        if (arch_type_str == "GPU"):
+            return True
+        return False
 
     def initialize_thread(self) -> None:
         for gpu in self.gpus:

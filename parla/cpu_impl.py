@@ -132,6 +132,29 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
     def initialize_thread(self) -> None:
         pass
 
+    def get_event_object(self):
+        return None
+
+    def create_event(self):
+        pass
+
+    def record_event(self):
+        pass
+
+    def sync_event(self):
+        pass
+
+    def wait_event(self):
+        pass
+
+    def wait_event(self, event):
+        pass
+
+    def check_device_type(self, checking_type_str):
+        if (checking_type_str == "CPU"):
+            return True
+        return False
+
 
 class UnboundCPUComponent(EnvironmentComponentDescriptor):
     """A single CPU component that represents a "core" but isn't automatically bound to the given core.

@@ -129,6 +129,37 @@ class TaskEnvironment(ContextManager):
                 out[type(c)] = c
         return list(out.values())
 
+    def get_events_from_components(self) -> List:
+        # This function aggregates all events created by each component,
+        # and returns back to the task_runtime. Through this, dependees
+        # can wait for them on the proper devices.
+        # Note that this function returns a list of a pair of (Arch type string,
+        # event object).
+        events = []
+        for c in self.components.values():
+            event = c.get_event_object()
+            if event is not None:
+                events.append(event)
+        return events
+
+    def wait_dependent_events(self, events: List):
+        for event_info in events:
+            # TODO(lhc): should be refactored
+            dev_type, event = event_info[0]
+            for c in self.components.values():
+                if c.check_device_type(dev_type):
+                    c.wait_event(event)
+                    break
+
+    def record_events(self):
+        for c in self.components.values():
+            c.record_event()
+
+    def sync_events(self):
+        for c in self.components.values():
+            c.sync_event()
+
+
 class TaskEnvironmentRegistry(Collection[TaskEnvironment]):
     """
     A collections of task environments with a utility to look up environments based on their placement and tags.
