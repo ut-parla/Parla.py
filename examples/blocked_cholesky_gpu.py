@@ -155,7 +155,8 @@ def cholesky_blocked_inplace(a):
     for j in range(len(a)):
         for k in range(j):
             # Inter-block GEMM
-            @spawn(gemm1[j, k], [solve[j, k], gemm1[j, 0:k]], placement=loc)
+            mem = 8*4* block_size**2
+            @spawn(gemm1[j, k], [solve[j, k], gemm1[j, 0:k]], placement=loc, memory=mem)
             def t1():
                 #print("GEMM1", (j, j), (j, k), flush=True)
                 out = clone_here(a[j][j])
@@ -173,7 +174,8 @@ def cholesky_blocked_inplace(a):
                 #stream.synchronize()
 
         # Cholesky on block
-        @spawn(subcholesky[j], [gemm1[j, 0:j]], placement=loc)
+        mem = 8*2* block_size**2
+        @spawn(subcholesky[j], [gemm1[j, 0:j]], placement=loc, memory=mem)
         def t2():
             dblock = clone_here(a[j][j])
             #stream = cp.cuda.get_current_stream()
@@ -189,7 +191,8 @@ def cholesky_blocked_inplace(a):
         for i in range(j+1, len(a)):
             for k in range(j):
                 # Inter-block GEMM
-                @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k], gemm2[i, j, 0:k]], placement=loc)
+                mem = 8*5*block_size**2
+                @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k], gemm2[i, j, 0:k]], placement=loc, memory=mem)
                 def t3():
 
                     #print("GEMM2", (i, j), (i, k), (j, k) , flush=True)
@@ -208,7 +211,9 @@ def cholesky_blocked_inplace(a):
 
 
             # Triangular solve
-            @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], placement=loc)
+
+            mem = 8*3*block_size**2
+            @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], placement=loc, memory=mem)
             def t4():
 
                 factor = clone_here(a[j][j])

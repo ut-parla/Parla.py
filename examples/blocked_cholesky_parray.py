@@ -160,7 +160,7 @@ def cholesky_blocked_inplace(a):
     for j in range(len(a)):
         for k in range(j):
             # Inter-block GEMM
-            mem = 4* block_size**2
+            mem = 8*4* block_size**2
             @spawn(gemm1[j, k], [solve[j, k], gemm1[j, 0:k]], input=[a[j][k]], inout=[a[j][j]], placement=loc, memory=mem)
             def t1():
                 #print(f"+SYRK: ({j}, {k}) - Requires rw({j},{j})  r({j}, {k})", flush=True)
@@ -178,7 +178,7 @@ def cholesky_blocked_inplace(a):
                 #print(f"-SYRK: ({j}, {k}) - Requires rw({j},{j})  r({j}, {k})", flush=True)
 
         # Cholesky on block
-        mem = 2* block_size**2
+        mem = 8*2* block_size**2
         @spawn(subcholesky[j], [gemm1[j, 0:j]], inout=[a[j][j]], placement=loc, memory=mem)
         def t2():
             #print(f"+POTRF: ({j}) - Requires rw({j},{j})", flush=True)
@@ -201,7 +201,7 @@ def cholesky_blocked_inplace(a):
         for i in range(j+1, len(a)):
             for k in range(j):
                 # Inter-block GEMM
-                mem = 5*block_size**2
+                mem = 8*5*block_size**2
                 @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k], gemm2[i, j, 0:k]], inout=[a[i][j]], input=[a[i][k], a[j][k]], placement=loc, memory=mem)
                 def t3():
                     #print(f"+GEMM: ({i}, {j}, {k}) - Requires rw({i},{j}), r({i}, {k}), r({j}, {k})", flush=True)
@@ -224,7 +224,7 @@ def cholesky_blocked_inplace(a):
                     #print(f"-GEMM: ({i}, {j}, {k}) - Requires rw({i},{j}), r({i}, {k}), r({j}, {k})", flush=True)
 
             # Triangular solve
-            mem = 3*block_size**2
+            mem = 8*3*block_size**2
             @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], inout=[a[i][j]], input=[a[j][j]], placement=loc, memory=mem)
             def t4():
                 #print(f"+TRSM: ({i}, {j}) - Requires rw({i},{j}), r({j}, {j})", flush=True)
