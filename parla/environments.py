@@ -144,12 +144,21 @@ class TaskEnvironment(ContextManager):
 
     def wait_dependent_events(self, events: List):
         for event_info in events:
+            done = False
             # TODO(lhc): should be refactored
             dev_type, event = event_info[0]
             for c in self.components.values():
                 if c.check_device_type(dev_type):
+                    done = True
                     c.wait_event(event)
                     break
+            if dev_type == "GPU" and done is False:
+                # This is the case that GPU -> CPU tasks spawn.
+                try:
+                    import cupy
+                    event.synchronize()
+                except:
+                    raise NotImplementedError("Cupy should exist")
 
     def record_events(self):
         for c in self.components.values():
