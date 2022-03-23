@@ -379,7 +379,7 @@ class Task:
 
     def _check_remaining_dependencies(self):
         if not self._remaining_dependencies and self.assigned:
-            logger.info("[Task] %s: Scheduling", self._name)
+            logger.info("[Task] %s: Scheduling", str(self.taskid))
             get_scheduler_context().enqueue_task(self)
 
     def bool_check_remaining_dependencies(self):
@@ -432,7 +432,7 @@ class Task:
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
-        logger.info("[Task] %r: %r -> %r", self._name, self._state, new_state)
+        logger.info("[Task] %r: %r -> %r", str(self._taskid), self._state, new_state)
         self._state = new_state
         ctx = get_scheduler_context()
 
