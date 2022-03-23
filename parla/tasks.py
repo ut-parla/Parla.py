@@ -418,6 +418,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         taskid.dependencies = dependencies
 
         # gather input/output/inout, which is hint for data from or to the this task
+        # TODO (ses): I gathered these into lists so I could perform concatentation later. This may be inefficient.
         dataflow = Dataflow(list(input), list(output), list(inout))
 
         if num_unspawned_deps == 0:

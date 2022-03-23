@@ -295,7 +295,7 @@ class Task:
                  req: ResourceRequirements, name: Optional[str] = None):
         self._mutex = threading.Lock()
         with self._mutex:
-            # This is the name of the task, which is distinct from the TaskID and from the name of its func?
+            # This is the name of the task, which is distinct from the TaskID. It inherits its name from the func.
             self._name = name
 
             # Maintain dependencies as a list object.
@@ -550,6 +550,7 @@ class ComputeTask(Task):
                 # Update parray tracking information
                 # The easiest way to do this is just untrack and re-track the array for anything that could've changed
                 for parray in (self.dataflow.inout + self.dataflow.output):
+                    # TODO (ses): Make this atomic so the GIL can't switch between
                     ctx.scheduler._available_resources.untrack_parray(parray)
                     ctx.scheduler._available_resources.track_parray(parray)
 
@@ -916,6 +917,9 @@ class WorkerThread(ControllableThread, SchedulerContext):
         return "<{} {} {}>".format(type(self).__name__, self.index, self._status)
 
 
+# Two major TODO (ses) items:
+# 1) Fix the mutexes here. There are places where if the GIL switched, stuff could break
+# 2) Provide a way for the mapper to evict if the resourcepool shows a task can't be mapped anywhere and we need to clear space
 class ResourcePool:
     # Importing this at the top of the file breaks due to circular dependencies
     from parla.parray.core import CPU_INDEX, PArray
@@ -927,10 +931,9 @@ class ResourcePool:
 
     # Resource pools track device resources. Environments are a separate issue and are not tracked here. Instead,
     # tasks will consume resources based on their devices even though those devices are bundled into an environment.
-    # TODO: Figure out what the h*ck environments are
 
     def __init__(self):
-        self._monitor = threading.Condition(threading.Lock()) # Sean TODO: Do I need this?
+        self._monitor = threading.Condition(threading.Lock())
 
         # Devices are stored in a dict keyed by the device.
         # Each entry stores a dict with cores, memory, etc. info based on the architecture
@@ -1156,7 +1159,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         #            Each device needs a dedicated thread.
         n_threads = sum(d.resources.get("vcus", 1) for e in environments for d in e.placement)
 
-        # TODO: Figure out what these are for
         self._environments = TaskEnvironmentRegistry(*environments)
 
         # Empty list for storing reported exceptions at runtime
@@ -1346,18 +1348,18 @@ class Scheduler(ControllableThread, SchedulerContext):
 
             # If the best device owns a dependency, but this one doesn't,
             # AND the best device has more local data, we can skip this device
-            # TODO: Ignore this if the dependency has finished running!
+            # TODO (ses): Ignore this if the dependency has finished running!
             if best_device_owns_dependency and not this_device_owns_dependency and best_device_local_data >= local_data:
                 continue
             
             # Next we calculate the load-balancing factor
-            # For now this is just a count of tasks on the device queue (TODO: better heuristics later...)
+            # For now this is just a count of tasks on the device queue (TODO (ses): better heuristics later...)
             dev_load = self._device_compute_task_counts[device]
 
             # Normalize this too so we have numbers between 0 and 1
             dev_load /= self._active_task_count
 
-            # TODO: Move these magic numbers somewhere better
+            # TODO (ses): Move these magic numbers somewhere better
             local_data_weight = 30.0
             nonlocal_data_weight = 10.0
             load_weight = 1.0
