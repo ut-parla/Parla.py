@@ -165,6 +165,9 @@ class PArray:
                             self._coherence_cv[op.src].wait()
             elif op.inst == MemoryOperation.LOAD:
                 with self._coherence_cv[op.dst]:  # hold the CV when moving data
+                    with self._coherence_cv[op.src]:  # wait on src until it is ready
+                        while not self._coherence.data_is_ready(op.src):
+                            self._coherence_cv[op.src].wait()
                     self._copy_data_between_device(op.dst, op.src)  # copy data
                     self._coherence.set_data_as_ready(op.dst)  # mark it as done
                     self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
