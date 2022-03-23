@@ -45,6 +45,9 @@ class PArray:
 
         self._coherence_lock = threading.Lock()  # a lock to greb when update coherence and move data
 
+        self.size = array.size
+        self.nbytes = array.nbytes
+
     # Properties:
 
     @property
@@ -80,6 +83,9 @@ class PArray:
 
             # Public API:
 
+    def exists_on_device(self, device_id):
+        return (self._array[device_id] is not None)
+
     def update(self, array) -> None:
         """ Update the copy on current device.
 
@@ -89,6 +95,9 @@ class PArray:
         Note: should be called within the current task context
         Note: data should be put in OUT/INOUT fields of spawn
         """
+        self.size = array.size
+        self.nbytes = array.nbytes
+
         this_device = self._current_device_index
 
         if isinstance(array, numpy.ndarray):

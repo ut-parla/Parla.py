@@ -1,3 +1,4 @@
+# General imports
 from functools import lru_cache
 import logging
 import random
@@ -10,19 +11,17 @@ import time
 from itertools import combinations
 from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSet, Iterable, TypeVar, Deque
 
+# Parla imports
 from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
-
 from parla.cpu_impl import cpu
 
+# Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level = logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
-
-# TODO: This module is pretty massively over-engineered the actual use case could use a much simpler scheduler.
-
-_ASSIGNMENT_FAILURE_WARNING_LIMIT = 32
 
 
 # Note: tasks can be implemented as lock free, however, atomics aren't really a thing in Python, so instead
@@ -141,7 +140,8 @@ class TaskRunning(TaskState):
 
     def __repr__(self):
         if self.func:
-            return "TaskRunning({}, {}, {})".format(self.func.__name__, self.args, self.dependencies)
+            #return "TaskRunning({}, {}, {})".format(self.func.__name__, self.args, self.dependencies)
+            return "TaskRunning({})".format(self.func.__name__)
         else:
             return "Functionless task"
 
@@ -178,6 +178,16 @@ ResourceDict = Dict[str, Union[float, int]]
 
 
 class ResourceRequirements(object, metaclass=ABCMeta):
+    """
+    When a task spawns, it has a set of requirements based on parameters
+    supplied to @spawn.
+    This class represents those resources.
+    This is an Abstract Base Class - see below for classes which inherit from it.
+    Currently, spawned tasks only use DeviceSetRequirements.
+    After mapping, tasks receive EnvironmentRequirements.
+    As of writing this comment, idk what the difference is. Enviroments seem unnecessary and confusing.
+    OptionsRequirements aren't even used anywhere at all.
+    """
     __slots__ = ["resources", "ndevices", "tags"]
 
     tags: FrozenSet[Any]
@@ -227,6 +237,8 @@ class EnvironmentRequirements(ResourceRequirements):
         return "EnvironmentRequirements({}, {})".format(self.resources, self.environment)
 
 
+# This basically stores all the devices a task is *permitted* to run on,
+# taking into account spawn's placement parameter
 class DeviceSetRequirements(ResourceRequirements):
     __slots__ = ["devices"]
     devices: FrozenSet[Device]
@@ -254,6 +266,7 @@ class DeviceSetRequirements(ResourceRequirements):
         return "DeviceSetRequirements({}, {}, {}, exact={})".format(self.resources, self.ndevices, self.devices, self.exact)
 
 
+# CURRENTLY NOT USED
 class OptionsRequirements(ResourceRequirements):
     __slots__ = ["options"]
     options: List[List[Device]]
@@ -282,6 +295,7 @@ class Task:
                  req: ResourceRequirements, name: Optional[str] = None):
         self._mutex = threading.Lock()
         with self._mutex:
+            # This is the name of the task, which is distinct from the TaskID. It inherits its name from the func.
             self._name = name
             self._dependees = []
             self._taskid = taskid
@@ -364,7 +378,7 @@ class Task:
 
     def _check_remaining_dependencies(self):
         if not self._remaining_dependencies and self.assigned:
-            logger.info("Task %r: Scheduling", self)
+            logger.info("[Task] %s: Scheduling", str(self.taskid))
             get_scheduler_context().enqueue_task(self)
 
     def _check_remaining_dependencies_mutex(self):
@@ -399,8 +413,8 @@ class Task:
             if self._state.is_terminal:
                 return False
             else:
-                logger.debug("Task, %s added a dependee, %s",
-                             self.name, dependee)
+                logger.debug("[Task] %s added a dependee, %s",
+                             self.name, dependee.name)
                 self._dependees.append(dependee)
                 return True
 
@@ -451,7 +465,7 @@ class Task:
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
-        logger.info("Task %r: %r -> %r", self, self._state, new_state)
+        logger.info("[Task] %r: %r -> %r", str(self._taskid), self._state, new_state)
         self._state = new_state
         ctx = get_scheduler_context()
 
@@ -490,8 +504,6 @@ class ComputeTask(Task):
             # but not after potentially getting scheduled.
             taskid.task = self
 
-            logger.debug("Task %r: Creating", self)
-
             self.num_unspawned_deps = num_unspawned_deps
             # If this task is not waiting for any dependent tasks,
             # enqueue onto the spawned queue.
@@ -504,6 +516,7 @@ class ComputeTask(Task):
                 get_scheduler_context().enqueue_spawned_task(self)
             else:
                 self._state = TaskWaiting()
+            logger.debug("Task %r: Creating", self)
 
     def notify_unspawned_dependees(self):
         """ Notify all dependees who wait for this task.
@@ -545,9 +558,6 @@ class ComputeTask(Task):
         assert isinstance(self.req, EnvironmentRequirements), \
             "Task was not assigned a specific environment requirement before running."
         try:
-            # Allocate the resources used by this task (blocking)
-            for d in self.req.devices:
-                ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
             # Run the task and assign the new task state
             try:
                 assert isinstance(self._state, TaskRunning)
@@ -598,11 +608,21 @@ class ComputeTask(Task):
                 logger.exception("Exception in task")
             finally:
                 logger.info("Finally for task %r", self)
-                # Deallocate all the resources, both from the allocation above
-                # and from the "assignment" done by the scheduler.
+
+                # Deallocate resources
                 for d in self.req.devices:
-                    ctx.scheduler._available_resources. \
-                              deallocate_resources(d, self.req.resources)
+                    for resource, amount in self.req.resources.items():
+                        logger.debug("Task %r deallocating %d %s from device %r", self, amount, resource, d)
+                    ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
+                    ctx.scheduler._device_compute_task_counts[d] -= 1
+
+                # Update parray tracking information
+                # The easiest way to do this is just untrack and re-track the array for anything that could've changed
+                for parray in (self.dataflow.inout + self.dataflow.output):
+                    # TODO (ses): Make this atomic so the GIL can't switch between
+                    ctx.scheduler._available_resources.untrack_parray(parray)
+                    ctx.scheduler._available_resources.track_parray(parray)
+
                 # Protect the case that it notifies dependees and
                 # any dependee task is spawned before setting state.
                 with self._mutex:
@@ -614,6 +634,7 @@ class ComputeTask(Task):
                     # their kernels asynchronously.
                     self._notify_dependees()
                     self._set_state(task_state)
+
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
             raise e
@@ -650,9 +671,6 @@ class DataMovementTask(Task):
             "Task was not assigned a specific environment requirement before running."
 
         try:
-            # Allocate the resources used by this task (blocking)
-            for d in self.req.devices:
-                ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
             # Run the task and assign the new task state
             try:
                 assert isinstance(self._state, TaskRunning)
@@ -707,10 +725,16 @@ class DataMovementTask(Task):
                 logger.exception("Exception in task")
             finally:
                 logger.info("Finally for task %r", self)
-                # Deallocate all the resources, both from the allocation above and from the "assignment" done by
-                # the scheduler.
-                for d in self.req.devices:
-                    ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
+
+                # DON'T deallocate resources!
+                # DataMovementTask has the same resources as the ComputeTask which created it
+                # That ComputeTask will do the deallocation
+                # If we do it here, we overly deallocate
+
+                # Don't update parray tracking information either
+                # The scheduler already registered the new location
+                # If size changes, the ComputeTask will take care of that
+
                 # Protect the case that it notifies dependees and
                 # any dependee task is spawned before setting state.
                 with self._mutex:
@@ -722,6 +746,7 @@ class DataMovementTask(Task):
                     # their kernels asynchronously.
                     self._notify_dependees()
                     self._set_state(task_state)
+
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
             raise e
@@ -1011,23 +1036,44 @@ class WorkerThread(ControllableThread, SchedulerContext):
         return "<{} {} {}>".format(type(self).__name__, self.index, self._status)
 
 
+# Two major TODO (ses) items:
+# 1) Fix the mutexes here. There are places where if the GIL switched, stuff could break
+# 2) Provide a way for the mapper to evict if the resourcepool shows a task can't be mapped anywhere and we need to clear space
 class ResourcePool:
-    _multiplier: float
+    # Importing this at the top of the file breaks due to circular dependencies
+    from parla.parray.core import CPU_INDEX, PArray
+
     _monitor: threading.Condition
     _devices: Dict[Device, Dict[str, float]]
+    _device_indices: List[int]
+    _managed_parrays: Dict[int, Dict[Device, bool]]
 
     # Resource pools track device resources. Environments are a separate issue and are not tracked here. Instead,
     # tasks will consume resources based on their devices even though those devices are bundled into an environment.
 
-    def __init__(self, multiplier):
-        self._multiplier = multiplier
+    def __init__(self):
         self._monitor = threading.Condition(threading.Lock())
-        self._devices = self._initial_resources(multiplier)
+
+        # Devices are stored in a dict keyed by the device.
+        # Each entry stores a dict with cores, memory, etc. info based on the architecture
+        self._devices = self._initial_resources()
+
+        # Parla tracks managed PArrays' locations
+        # Index into dict with id(array), then with device. True means the array is present there
+        # We use the unique id of the array as the key because PArray is an unhashable class
+        self._managed_parrays = {}
 
     @staticmethod
-    def _initial_resources(multiplier):
-        return {dev: {name: amt * multiplier for name, amt in dev.resources.items()} for dev in get_all_devices()}
+    def _initial_resources():
+        return {dev: {name: amt for name, amt in dev.resources.items()} for dev in get_all_devices()}
 
+    ### RESOURCE ALLOCATION CALLS ###
+    # These may be over-engineered, by I (Sean) haven't touched them.
+    # They basically can add or reduce a resource amount (which is just memory right now)
+
+    # Currently, resource allocation is done when the task is MAPPED.
+    # The task itself does not allocate.
+    # By the time it starts running, resources have already been allocated for it.
     def allocate_resources(self, d: Device, resources: ResourceDict, *, blocking: bool = False) -> bool:
         """Allocate the resources described by `dd`.
 
@@ -1039,6 +1085,7 @@ class ResourcePool:
         """
         return self._atomically_update_resources(d, resources, -1, blocking)
 
+    # Currently, resource deallocation is done when the task finishes.
     def deallocate_resources(self, d: Device, resources: ResourceDict) -> None:
         """Deallocate the resources described by `dd`.
 
@@ -1058,8 +1105,14 @@ class ResourcePool:
             is_available = True
             for name, amount in resources.items():
                 dres = self._devices[d]
+
+                # Workaround stupid vcus (I'm getting rid of these at some point)
+                if d.architecture.id == 'gpu' and name == 'vcus':
+                    continue
+
                 if amount > dres[name]:
                     is_available = False
+                logger.debug("Resource check for %d %s on device %r: %s", amount, name, d, "Passed" if is_available else "Failed")
             return is_available
 
     def _atomically_update_resources(self, d: Device, resources: ResourceDict, multiplier, block: bool):
@@ -1075,7 +1128,8 @@ class ResourcePool:
             else:
                 to_release.clear()
 
-            logger.info("Attempted to allocate %s * %r (blocking %s) => %s\n%r", multiplier, (d, resources), block, success, self)
+            logger.info("[ResourcePool] Attempted to allocate %s * %r (blocking %s) => %s", \
+                         multiplier, (d, resources), block, "success" if success else "fail")
             if to_release:
                 logger.info("Releasing resources due to failure: %r", to_release)
 
@@ -1087,6 +1141,9 @@ class ResourcePool:
             return success
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
+        # Workaround stupid vcus (I'm getting rid of these at some point)
+        if dev.architecture.id == 'gpu' and res == 'vcus':
+            return True
         try:
             while True: # contains return
                 dres = self._devices[dev]
@@ -1094,10 +1151,8 @@ class ResourcePool:
                     dres[res] += amount
                     if amount > 0:
                         self._monitor.notify_all()
-                    assert dres[res] <= dev.resources[res] * self._multiplier, \
-                        "{}.{} was over deallocated".format(dev, res)
-                    assert dres[res] >= 0, \
-                        "{}.{} was over allocated".format(dev, res)
+                    assert dres[res] <= dev.resources[res], "{}.{} was over deallocated".format(dev, res)
+                    assert dres[res] >= 0, "{}.{} was over allocated".format(dev, res)
                     return True
                 else:
                     if block:
@@ -1106,6 +1161,87 @@ class ResourcePool:
                         return False
         except KeyError:
             raise ValueError("Resource {}.{} does not exist".format(dev, res))
+
+    ### PARRAY MEMORY TRACKING CALLS ###
+
+    # parrays don't use devices, they use indices
+    # CPU is CPU_INDEX, GPUs are positive integers
+    # This helper function translates from a Device class to its PArray ID quickly
+    def _to_parray_index(self, device):
+        if device.architecture == cpu:
+            return self.CPU_INDEX
+        if device.architecture.id == 'gpu':
+            return device.index
+        raise NotImplementedError("Only cpu and gpu architectures are supported")
+
+    # Start tracking the memory usage of a parray
+    def track_parray(self, parray):
+        logger.debug(f"[ResourcePool] Tracking parray with ID %d in these locations:", id(parray))
+        # Figure out all the locations where a parray exists
+        parray_location_map = {}
+        for device in self._devices:
+            device_id = self._to_parray_index(device)
+            if parray.exists_on_device(device_id):
+                parray_location_map[device] = True
+
+                logger.debug(f"[ResourcePool]   - %r", device)
+                
+                # Update the resource usage at this location
+                self.allocate_resources(device, {'memory' : parray.nbytes})
+            else:
+                parray_location_map[device] = False
+
+        # Insert the location map into our dict, keyed by the parray itself
+        with self._monitor:
+            self._managed_parrays[id(parray)] = parray_location_map
+
+    # Stop tracking the memory usage of a parray
+    def untrack_parray(self, parray):
+        logger.debug(f"[ResourcePool] Untracking parray with ID %d from these locations:", id(parray))
+        # Return resources to the devices
+        for device, parray_exists in self._managed_parrays[id(parray)].items():
+            if parray_exists:
+                self.deallocate_resources(device, {'memory' : parray.nbytes})
+                logger.debug(f"[ResourcePool]   - %r", device)
+
+        # Delete the dictionary entry
+        with self._monitor:
+            del self._managed_parrays[id(parray)]
+
+    # Notify the resource pool that a device has a new instantiation of an array
+    def add_parray_to_device(self, parray, device):
+        logger.debug(f"[ResourcePool] Adding parray with ID %d to device %r", id(parray), device)
+        if self._managed_parrays[id(parray)][device] == True:
+            #raise ValueError("Tried to register a parray on a device where it already existed")
+            logger.debug(f"[ResourcePool]   (It was already there...)")
+            return
+        with self._monitor:
+            self._managed_parrays[id(parray)][device] = True
+        self.allocate_resources(device, {'memory' : parray.nbytes})
+
+    # Notify the resource pool that an instantiation of an array has been deleted
+    def remove_parray_from_device(self, parray, device):
+        logger.debug(f"[ResourcePool] Removing parray with ID %d from device %r", id(parray), device)
+        if self._managed_parrays[id(parray)][device] == False:
+            #raise ValueError("Tried to remove a parray from a device where it didn't exist")
+            logger.debug(f"[ResourcePool]   (It wasn't there...)")
+            return
+        with self._monitor:
+            self._managed_parrays[id(parray)][device] = False
+        self.deallocate_resources(device, {'memory' : parray.nbytes})
+
+    # On a parray move, call this to start tracking the parray (if necessary) and update its location
+    def register_parray_move(self, parray, device):
+            if id(parray) not in self._managed_parrays:
+                self.track_parray(parray)
+                # If this new array originates on the dest device, skip the next step
+                if self._managed_parrays[id(parray)][device]:
+                    return
+            self.add_parray_to_device(parray, device)
+
+    def parray_is_on_device(self, parray, device):
+        with self._monitor:
+            return (id(parray) in self._managed_parrays) and (self._managed_parrays[id(parray)][device])
 
     def __repr__(self):
         return "ResourcePool(devices={})".format(self._devices)
@@ -1130,6 +1266,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     _worker_threads: List[WorkerThread]
     _free_worker_threads: Deque[WorkerThread]
     _available_resources: ResourcePool
+    _device_compute_task_counts: Dict[Device, int]
     period: float
 
     def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 1.4012985e-20):
@@ -1141,7 +1278,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         #            Each device needs a dedicated thread.
         n_threads = sum(d.resources.get("vcus", 1) for e in environments for d in e.placement)
 
-        # TODO: Figure out what these are for
         self._environments = TaskEnvironmentRegistry(*environments)
 
         # Empty list for storing reported exceptions at runtime
@@ -1156,7 +1292,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._monitor = threading.Condition(threading.Lock())
 
         # Track, allocate, and deallocate resources (devices)
-        self._available_resources = ResourcePool(multiplier=1.0)
+        self._available_resources = ResourcePool()
 
         # Spawned task queues
         # Tasks that have been spawned but not mapped are stored here.
@@ -1178,6 +1314,9 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         # The device queues where scheduled tasks go to be launched from
         self._device_queues = {dev: deque() for dev in self._available_resources.get_resources()}
+
+        # The number of in-flight compute tasks on each device
+        self._device_compute_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
 
         # Dictinary mapping data block to task lists.
         self._datablock_dict = defaultdict(list)
@@ -1283,6 +1422,106 @@ class Scheduler(ControllableThread, SchedulerContext):
         :return: True if the assignment succeeded, False otherwise.
         """
         logger.debug(f"[Scheduler] Mapping %r.", task)
+
+
+        # Sean: The goal of the mapper look at data locality and load balancing
+        # and pick a suitable set of devices on which to run a task.
+        # Currently, it just supports single-device tasks (like everything else...)
+        # Tasks have a set of requirements passed to them by @spawn. We need to
+        # match those requirements and find the most suitable device.
+        possible_devices = task.req.devices
+        max_suitability = None
+        best_device = None
+        best_device_owns_dependency = False
+        best_device_local_data = 0
+        for device in possible_devices:
+            # Ensure that the device has enough resources for the task
+            if not self._available_resources.check_resources_availability(device, task.req.resources):
+                continue
+            
+            # THIS IS THE MEAT OF THE MAPPING POLICY
+            # We calculate a few constants based on data locality and load balancing
+            # We then add those together with tunable weights to determine a suitability
+            # The device with the highest suitability is the lucky winner
+
+            # First, we calculate data on the device and data to be moved to the device
+            local_data = 0
+            nonlocal_data = 0
+            for parray in task.dataflow.input + task.dataflow.inout:
+                if self._available_resources.parray_is_on_device(parray, device):
+                    local_data += parray.nbytes
+                else:
+                    nonlocal_data += parray.nbytes
+
+            # These values are really big, so I'm normalizing them to the size of the
+            # device memory so my monkey brain can fathom the numbers
+            local_data /= device.resources['memory']
+            nonlocal_data /= device.resources['memory']
+
+            # Figure out whether the task has a dependency running on this device
+            this_device_owns_dependency = False
+            for dependency in task.dependencies:
+                if device in dependency.req.devices:
+                    this_device_owns_dependency = True
+                    break
+
+            # If the best device owns a dependency, but this one doesn't,
+            # AND the best device has more local data, we can skip this device
+            # TODO (ses): Ignore this if the dependency has finished running!
+            if best_device_owns_dependency and not this_device_owns_dependency and best_device_local_data >= local_data:
+                continue
+            
+            # Next we calculate the load-balancing factor
+            # For now this is just a count of tasks on the device queue (TODO (ses): better heuristics later...)
+            dev_load = self._device_compute_task_counts[device]
+
+            # Normalize this too so we have numbers between 0 and 1
+            dev_load /= self._active_task_count
+
+            # TODO (ses): Move these magic numbers somewhere better
+            local_data_weight = 30.0
+            nonlocal_data_weight = 10.0
+            load_weight = 1.0
+
+            # Calculate the suitability
+            suitability = local_data_weight * local_data \
+                        - nonlocal_data_weight * nonlocal_data \
+                        - load_weight * dev_load
+
+            """
+            def myformat(num):
+                return "{:.3f}".format(num)
+
+            print(f"dev={device}", end='   ')
+            print(f"dep={this_device_owns_dependency}", end='   ')
+            print(f"local={myformat(local_data)}", end='   ')
+            print(f"nonlocal={myformat(nonlocal_data)}", end='   ')
+            print(f"load={myformat(dev_load)}", end='   ')
+            print(f"suit={myformat(suitability)}")
+            """
+
+            # Update whether or not this is the most suitable device
+            if max_suitability is None or suitability > max_suitability:
+                max_suitability = suitability
+                best_device = device
+                best_device_owns_dependency = this_device_owns_dependency
+                best_device_local_data = local_data
+        
+        if best_device is None:
+            logger.debug(f"[Scheduler] Failed to map %r.", task)
+            return False
+
+        # Stick this info in an environment (I based this code on the commented out stuff below)
+        task_env_gen = self._environments.find_all(placement={best_device}, tags={}, exact=True)
+        task_env = next(task_env_gen)
+        task.req = EnvironmentRequirements(task.req.resources, task_env, task.req.tags)
+
+        task.set_assigned()
+        logger.debug(f"[Scheduler] Mapped %r.", task)
+        return True
+
+        # Sean: I don't understand the old way. Just commenting it out and acting like it doesn't exist.
+        """
         # Build a list of environments with "qualities" assigned based on how well they match a possible
         # option for the task
         env_match_quality = defaultdict(lambda: 0)
@@ -1317,6 +1556,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 return True
         logger.debug(f"[Scheduler] Failed to map %r.", task)
         return False
+        """
 
     def fill_curr_spawned_task_queue(self):
         """ It moves tasks on the new spawned task queue to
@@ -1387,13 +1627,13 @@ class Scheduler(ControllableThread, SchedulerContext):
     def _map_tasks(self):
         # The first loop iterates a spawned task queue
         # and constructs a mapped task subgrpah.
-        logger.debug("[Scheduler] Map Phase")
+        #logger.debug("[Scheduler] Map Phase")
         self.fill_curr_spawned_task_queue()
         while True:
             task: Optional[Task] = self._dequeue_spawned_task()
             if task:
                 if not task.assigned:
-                    is_assigned = self._assignment_policy(task)
+                    is_assigned = self._assignment_policy(task) # This is what actually maps the task
                     assert isinstance(is_assigned, bool)
                     if not is_assigned:
                         self.enqueue_spawned_task(task)
@@ -1408,6 +1648,20 @@ class Scheduler(ControllableThread, SchedulerContext):
                             self._construct_datamove_task(data, task, OperandType.OUT)
                         for data in task.dataflow.inout:
                             self._construct_datamove_task(data, task, OperandType.INOUT)
+
+                        # Update parray tracking and task count on the device
+                        for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
+                            if len(task.req.environment.placement) > 1:
+                                raise NotImplementedError("Multidevice not supported")
+                            for device in task.req.environment.placement:
+                                self._available_resources.register_parray_move(parray, device)
+                                self._device_compute_task_counts[device] += 1
+
+                        # Allocate additional resources used by this task (blocking)
+                        for device in task.req.devices:
+                            for resource, amount in task.req.resources.items():
+                                logger.debug("Task %r allocating %d %s on device %r", task, amount, resource, device)
+                            self._available_resources.allocate_resources(device, task.req.resources, blocking=True)
 
                         # Only computation needs to set a assigned flag.
                         # Data movement task is set as assigned when it is created.
@@ -1431,11 +1685,13 @@ class Scheduler(ControllableThread, SchedulerContext):
         """ Currently this doesn't do any intelligent scheduling (ordering).
             Dequeue all ready tasks and send them to device queues in order.
         """
-        logger.debug("[Scheduler] Schedule Phase")
+        #logger.debug("[Scheduler] Schedule Phase")
         while True:
             task: Optional[Task] = self._dequeue_task()
-            if not task or not task.assigned:
-                logger.debug("Task %r: Failed to assign", task)
+            if not task:
+                break
+            if not task.assigned:
+                logger.debug("[Scheduler] Task %r: Failed to assign", task)
                 break
             for d in task.req.devices:
                 logger.info(f"[Scheduler] Enqueuing %r to device %r", task, d)
@@ -1473,7 +1729,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     def _launch_tasks(self):
         """ Iterate through free devices and launch tasks on them
         """
-        logger.debug("[Scheduler] Launch Phase")
+        #logger.debug("[Scheduler] Launch Phase")
         with self._monitor:
             for dev, queue in self._device_queues.items():
                 # Make sure there's an available WorkerThread
@@ -1482,10 +1738,12 @@ class Scheduler(ControllableThread, SchedulerContext):
                 if len(queue) > 0: # If there are tasks on the queue.
                     try:
                         task = queue.pop() # Grab a task.
-                        if dev.architecture is cpu:
+                        if dev.architecture.id == 'cpu':
                             self._launch_cpu_task(queue, task, dev)
-                        else:
+                        elif dev.architecture.id == 'gpu':
                             self._launch_gpu_task(queue, task, dev)
+                        else:
+                            raise Exception("Unsupported architecture")
                     finally:
                         pass
 
@@ -1497,9 +1755,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                 self._map_tasks()
                 self._schedule_tasks()
                 self._launch_tasks()
-                logger.debug("[Scheduler] Sleeping!")
+                #logger.debug("[Scheduler] Sleeping!")
                 time.sleep(self.period)
-                logger.debug("[Scheduler] Awake!")
+                #logger.debug("[Scheduler] Awake!")
 
         except Exception:
             logger.exception("Unexpected exception in Scheduler")
