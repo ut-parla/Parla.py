@@ -15,7 +15,6 @@ from typing import Optional, Collection, Union, Dict, List, Any, Tuple, FrozenSe
 from parla.device import get_all_devices, Device
 from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
 from parla.cpu_impl import cpu
-from parla.cuda import gpu
 
 # Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level = logging.INFO)
@@ -986,7 +985,7 @@ class ResourcePool:
                 dres = self._devices[d]
 
                 # Workaround stupid vcus (I'm getting rid of these at some point)
-                if d.architecture == gpu and name == 'vcus':
+                if d.architecture.id == 'gpu' and name == 'vcus':
                     continue
 
                 if amount > dres[name]:
@@ -1021,7 +1020,7 @@ class ResourcePool:
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
         # Workaround stupid vcus (I'm getting rid of these at some point)
-        if dev.architecture == gpu and res == 'vcus':
+        if dev.architecture.id == 'gpu' and res == 'vcus':
             return True
         try:
             while True: # contains return
@@ -1049,7 +1048,7 @@ class ResourcePool:
     def _to_parray_index(self, device):
         if device.architecture == cpu:
             return self.CPU_INDEX
-        if device.architecture == gpu:
+        if device.architecture.id == 'gpu':
             return device.index
         raise NotImplementedError("Only cpu and gpu architectures are supported")
 
