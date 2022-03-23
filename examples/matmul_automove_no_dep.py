@@ -32,7 +32,8 @@ def main():
 
         blocks = ngpus
         block_size = n // ngpus
-        ordr = 'F'
+        h_ordr = 'C'
+        d_ordr = 'F'
         print("BlockSize: ", block_size, "GPUS: ", ngpus)
 
         # Overdecomposing doesn't actually seem to help in this case
@@ -42,8 +43,8 @@ def main():
         # testing later.
 
         np.random.seed(0)
-        a_cpu = np.random.rand(n, n).astype(dtype=np.float32, order=ordr)
-        b_cpu = np.random.rand(n, n).astype(dtype=np.float32, order=ordr)
+        a_cpu = np.random.rand(n, n).astype(dtype=np.float32, order=h_ordr)
+        b_cpu = np.random.rand(n, n).astype(dtype=np.float32, order=h_ordr)
 
         print("Finished Data Allocation", flush=True)
         # Partition the two arrays and set up the
@@ -66,8 +67,9 @@ def main():
         for i in range(blocks):
             if distribute:
                 with cp.cuda.Device(i):
-                    a_part.append(cp.asarray(a_cpu[i * block_size : (i + 1) * block_size]))
-                    b_part.append(cp.asarray(b_cpu[i * block_size : (i + 1) * block_size]))
+                    a_part.append(cp.asarray(a_cpu[i * block_size : (i + 1) * block_size], order=d_ordr))
+                    b_part.append(cp.asarray(b_cpu[i * block_size : (i + 1) * block_size], order=d_ordr))
+                    cp.cuda.stream.get_current_stream().synchronize()
             else:
                 a_part.append(a_cpu[i * block_size : (i + 1) * block_size])
                 b_part.append(b_cpu[i * block_size : (i + 1) * block_size])
@@ -75,7 +77,7 @@ def main():
         for i in range(blocks):
             c_part.append(list())
             for j in range(blocks):
-                c_part[i].append(np.empty((0, 0), dtype=np.float32, order=ordr))
+                c_part[i].append(np.empty((0, 0), dtype=np.float32, order=h_ordr))
 
         #print(len(c_part), len(c_part[0]), c_part[0][0].shape)
 
@@ -91,7 +93,7 @@ def main():
             #reset cblocks to None
             for i in range(blocks):
                 for j in range(blocks):
-                    c_part[i][j].update(np.empty((0, 0), dtype=np.float32, order=ordr))
+                    c_part[i][j].update(np.empty((0, 0), dtype=np.float32, order=h_ordr))
 
             if reset:
                 #reset coherence to only be in starting locations
@@ -111,7 +113,7 @@ def main():
                     b_block = b_part[j]
                     c_block = c_part[i][j]
 
-                    memsize = 2*block_size**2 + block_size*n*2*4
+                    memsize = (2*block_size**2 + block_size*n*2)*4
 
                     if fixed_placement:
                         loc = gpu(i%ngpus)
