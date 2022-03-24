@@ -145,6 +145,21 @@ class PArray:
         with self._coherence_lock:
             operation = self._coherence.read(device_id)
             self._process_operation(operation)
+            stream = cupy.cuda.get_current_stream()
+            # The coherence lock does not protect GPU calls.
+            # This could cause a data race when multiple readers on one data exist.
+            # LOAD operation is an asynchronous CUDA copy which does not block
+            # a CPU thread. This is problematic since other readers
+            # could trigger another LOAD operation from a location where
+            # it is still being copied. This stream synchronization blocks
+            # a CPU core until all copies are done.
+            # TODO(lhc): this synchronization overhead could be alleviated
+            #            if we do static dependency analysis and allow
+            #            ONLY siblings to simultaneously copy data
+            #            without this synchronization.
+            #            In this case, sync. is required for different levels
+            #            on a task graph.
+            stream.synchronize()
 
     def _coherence_write(self, device_id: int = None) -> None:
         """Tell the coherence protocol a write happened on a device.
