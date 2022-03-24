@@ -60,6 +60,7 @@ num_tests = args.trials
 
 loc = gpu
 
+save_file = True
 check_nan = False
 check_error = True
 
@@ -262,6 +263,7 @@ def cholesky_blocked_inplace(a):
 def main():
     @spawn(placement=cpu)
     async def test_blocked_cholesky():
+        global n
 
         if args.matrix is None:
             print("Generating matrix of size: ", n)
@@ -269,6 +271,9 @@ def main():
             # Construct input data
             a = np.random.rand(n, n)
             a = a @ a.T
+
+            if save_file:
+                np.save(f"chol_{n}", a)
         else:
             print("Loading matrix from file: ", args.matrix)
             a = np.load(args.matrix)

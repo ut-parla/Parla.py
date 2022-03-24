@@ -43,6 +43,7 @@ num_tests = args.trials
 
 loc = gpu
 
+save_file = True
 check_nan = False
 check_error = True
 
@@ -177,14 +178,10 @@ def cholesky_blocked_inplace(a, block_size):
                 out = a[j][j].array
                 rhs = a[j][k].array
                 out = update(rhs, rhs, out)
-                #if (out is None):
-                #    print("gemm1 problem on exit", flush=True)
 
                 stream = cp.cuda.get_current_stream()
                 stream.synchronize()
                 a[j][j].update(out)
-                #stream.synchronize()
-                #print("SYRK A[j, j]", a[j][j].array, flush=True)
                 #print(f"-SYRK: ({j}, {k}) - Requires rw({j},{j})  r({j}, {k})", flush=True)
 
         # Cholesky on block
@@ -194,19 +191,12 @@ def cholesky_blocked_inplace(a, block_size):
             #print(f"+POTRF: ({j}) - Requires rw({j},{j})", flush=True)
             dblock = a[j][j].array
 
-            #if True or (dblock is None):
-            #    print("potrf", j, dblock, flush=True)
             log_memory()
             dblock = cholesky(dblock)
-
-            #if dblock is None:
-            #    print("POTRF problem on exit", flush=True)
 
             stream = cp.cuda.get_current_stream()
             stream.synchronize()
             a[j][j].update(dblock)
-            #stream.synchronize()
-            #print("POTRF A[j, j]", a[j][j].array, flush=True)
             #print(f"-POTRF: ({j}) - Requires rw({j},{j})", flush=True)
         for i in range(j+1, len(a)):
             for k in range(j):
@@ -220,17 +210,11 @@ def cholesky_blocked_inplace(a, block_size):
                     rhs2 = a[j][k].array
 
                     stream = cp.cuda.get_current_stream()
-                    #stream.synchronize()
 
                     log_memory()
                     out = update(rhs1, rhs2, out)
-                    #if out is None:
-                    #    print("gemm2 problem on exit", flush=True)
-                    #stream = cp.cuda.get_current_stream()
                     stream.synchronize()
                     a[i][j].update(out)
-                    #stream.synchronize()
-                    #print("GEMM A[i, j]", a[i][j].array, flush=True)
                     #print(f"-GEMM: ({i}, {j}, {k}) - Requires rw({i},{j}), r({i}, {k}), r({j}, {k})", flush=True)
 
             # Triangular solve
@@ -242,16 +226,10 @@ def cholesky_blocked_inplace(a, block_size):
                 panel = a[i][j].array
 
                 log_memory()
-                #if True or (factor is None) or (panel is None):
-                #    print("trsm", i, j, factor, panel, flush=True)
                 out = ltriang_solve(factor, panel)
-                #if out is None:
-                #    print("trsm problem on exit", flush=True)
                 stream = cp.cuda.get_current_stream()
                 stream.synchronize()
                 a[i][j].update(out)
-                #stream.synchronize()
-                #print("TRSM A[i, j]", a[i][j].array, flush=True)
                 #print(f"-TRSM: ({i}, {j}) - Requires rw({i},{j}), r({j}, {j})", flush=True)
 
 
@@ -260,6 +238,7 @@ def cholesky_blocked_inplace(a, block_size):
 def main():
     @spawn(placement=cpu)
     async def test_blocked_cholesky():
+        global n
 
         if args.matrix is None:
             print("Generating matrix of size: ", n)
@@ -267,6 +246,9 @@ def main():
             # Construct input data
             a = np.random.rand(n, n)
             a = a @ a.T
+
+            if save_file:
+                np.save(f"chol_{n}", a)
         else:
             print("Loading matrix from file: ", args.matrix)
             a = np.load(args.matrix)
