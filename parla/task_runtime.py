@@ -251,11 +251,9 @@ class OptionsRequirements(ResourceRequirements):
 
     @property
     def possibilities(self) -> Iterable[DeviceSetRequirements]:
-        return (
-            opt for ds in self.options for opt in DeviceSetRequirements(
-                self.resources, self.ndevices, ds, self.tags
-            ).possibilities
-        )
+        return (opt
+                for ds in self.options
+                for opt in DeviceSetRequirements(self.resources, self.ndevices, ds, self.tags).possibilities)
 
     def __parla_placement__(self):
         return list(set(d for ds in self.options for d in ds))
@@ -1590,8 +1588,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         task_locals.global_tasks += [taskid]
         datamove_task = DataMovementTask(compute_task, taskid,
                                          compute_task.req, target_data, operand_type,
-                                         str(compute_task.taskid) + "."
-                                        + str(hex(id(target_data))) + ".dmt")
+                                         str(compute_task.taskid) + "." +
+                                         str(hex(id(target_data))) + ".dmt")
         self.incr_active_tasks()
         compute_task._add_dependency_mutex(datamove_task)
         target_data_id = id(target_data)
