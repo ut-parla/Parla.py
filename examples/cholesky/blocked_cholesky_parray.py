@@ -26,15 +26,25 @@ from parla.parray import asarray_batch
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-b', type=int, default=32*5)
-parser.add_argument('-nblocks', type=int, default=16)
+parser.add_argument('-b', type=int, default=2000)
+parser.add_argument('-nblocks', type=int, default=20)
 parser.add_argument('-trials', type=int, default=1)
+parser.add_argument('-matrix', default=None)
+
 args = parser.parse_args()
 
+
 block_size = args.b
-n = block_size*args.nblocks
+
+if args.matrix is None:
+    n = block_size*args.nblocks
+
 num_tests = args.trials
 
+loc = gpu
+
+check_nan = False
+check_error = True
 
 try:
     from parla.cuda import get_memory_log, summarize_memory, log_memory, clean_memory
@@ -73,8 +83,8 @@ def cholesky(a):
 @cholesky.variant(gpu)
 def cholesky_gpu(a):
     a = cp.linalg.cholesky(a)
-    if cp.any(cp.isnan(a)):
-      raise np.linalg.LinAlgError
+    #if cp.any(cp.isnan(a)):
+    #  raise np.linalg.LinAlgError
     return a
 
 @specialized
@@ -99,8 +109,8 @@ def cupy_trsm_wrapper(a, b):
     cublas_handle = device.get_cublas_handle()
     trsm = cublas.dtrsm
     uplo = cublas.CUBLAS_FILL_MODE_LOWER
-    a = cp.array(a, dtype=np.float64, order='F')
-    b = cp.array(b, dtype=np.float64, order='F')
+    a = cp.asarray(a, dtype=np.float64, order='F')
+    b = cp.asarray(b, dtype=np.float64, order='F')
     trans = cublas.CUBLAS_OP_T
     side = cublas.CUBLAS_SIDE_RIGHT
 
@@ -134,7 +144,7 @@ def update_gpu(a, b, c):
 def flatten(t):
     return [item for sublist in t for item in sublist]
 
-def cholesky_blocked_inplace(a):
+def cholesky_blocked_inplace(a, block_size):
     """
     This is a less naive version of dpotrf with one level of blocking.
     Blocks are currently assumed to evenly divide the axes lengths.
@@ -143,14 +153,14 @@ def cholesky_blocked_inplace(a):
     select the entry within the given block.
     """
     # TODO (bozhi): these should be guaranteed by the partitioner
-    if len(a) * a[0][0].shape[0] != len(a[0]) * a[0][0].shape[1]:
-        raise ValueError("A square matrix is required.")
-    if len(a) != len(a[0]):
-        raise ValueError("Non-square blocks are not supported.")
+    #if len(a) * a[0][0].shape[0] != len(a[0]) * a[0][0].shape[1]:
+    #    raise ValueError("A square matrix is required.")
+    #if len(a) != len(a[0]):
+    #    raise ValueError("Non-square blocks are not supported.")
 
     #print("Starting..", flush=True)
     #print("Initial Array", a, flush=True)
-    block_size = a[0][0].array.shape[0]
+    #block_size = a[0][0].array.shape[0]
     # Define task spaces
     gemm1 = TaskSpace("gemm1")        # Inter-block GEMM
     subcholesky = TaskSpace("subcholesky")  # Cholesky on block
@@ -170,8 +180,8 @@ def cholesky_blocked_inplace(a):
                 #if (out is None):
                 #    print("gemm1 problem on exit", flush=True)
 
-                #stream = cp.cuda.get_current_stream()
-                #stream.synchronize()
+                stream = cp.cuda.get_current_stream()
+                stream.synchronize()
                 a[j][j].update(out)
                 #stream.synchronize()
                 #print("SYRK A[j, j]", a[j][j].array, flush=True)
@@ -192,8 +202,8 @@ def cholesky_blocked_inplace(a):
             #if dblock is None:
             #    print("POTRF problem on exit", flush=True)
 
-            #stream = cp.cuda.get_current_stream()
-            #stream.synchronize()
+            stream = cp.cuda.get_current_stream()
+            stream.synchronize()
             a[j][j].update(dblock)
             #stream.synchronize()
             #print("POTRF A[j, j]", a[j][j].array, flush=True)
@@ -209,7 +219,7 @@ def cholesky_blocked_inplace(a):
                     rhs1 = a[i][k].array
                     rhs2 = a[j][k].array
 
-                    #stream = cp.cuda.get_current_stream()
+                    stream = cp.cuda.get_current_stream()
                     #stream.synchronize()
 
                     log_memory()
@@ -217,7 +227,7 @@ def cholesky_blocked_inplace(a):
                     #if out is None:
                     #    print("gemm2 problem on exit", flush=True)
                     #stream = cp.cuda.get_current_stream()
-                    #stream.synchronize()
+                    stream.synchronize()
                     a[i][j].update(out)
                     #stream.synchronize()
                     #print("GEMM A[i, j]", a[i][j].array, flush=True)
@@ -237,8 +247,8 @@ def cholesky_blocked_inplace(a):
                 out = ltriang_solve(factor, panel)
                 #if out is None:
                 #    print("trsm problem on exit", flush=True)
-                #stream = cp.cuda.get_current_stream()
-                #stream.synchronize()
+                stream = cp.cuda.get_current_stream()
+                stream.synchronize()
                 a[i][j].update(out)
                 #stream.synchronize()
                 #print("TRSM A[i, j]", a[i][j].array, flush=True)
@@ -250,33 +260,46 @@ def cholesky_blocked_inplace(a):
 def main():
     @spawn(placement=cpu)
     async def test_blocked_cholesky():
-        assert not n % block_size
 
-        np.random.seed(10)
-        # Construct input data
-        a = np.random.rand(n, n)
-        a = a @ a.T
+        if args.matrix is None:
+            print("Generating matrix of size: ", n)
+            np.random.seed(10)
+            # Construct input data
+            a = np.random.rand(n, n)
+            a = a @ a.T
+        else:
+            print("Loading matrix from file: ", args.matrix)
+            a = np.load(args.matrix)
+            print("Loaded matrix from file. Shape=", a.shape)
+            n = a.shape[0]
 
         # Copy and layout input
+        print("Blocksize: ", block_size)
+        assert not n % block_size
         a1 = a.copy()
+        #a_temp = a1.reshape(n//block_size, block_size, n//block_size, block_size).swapaxes(1, 2)
 
-        temp = a1.reshape(n//block_size, block_size, n//block_size, block_size).swapaxes(1, 2)
+        n_gpus = cp.cuda.runtime.getDeviceCount()
 
         for k in range(num_tests):
+            ap = a1.copy()
 
-            ap = temp.copy()
-            ap_parray_list = list()
+            ap_list = list()
             for i in range(n//block_size):
-                ap_parray_list.append(list())
+                ap_list.append(list())
                 for j in range(n//block_size):
-                    ap_parray_list[i].append(ap[i][j])
+                    with cp.cuda.Device(i%n_gpus):
+                        ap_list[i].append(cp.asarray(a1[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size], order='F'))
+                        cp.cuda.Device().synchronize()
 
-            ap_parray = asarray_batch(ap_parray_list)
+            ap_parray = asarray_batch(ap_list)
 
+            print("Starting Cholesky")
+            print("------------")
             start = time.perf_counter()
 
             # Call Parla Cholesky result and wait for completion
-            await cholesky_blocked_inplace(ap_parray)
+            await cholesky_blocked_inplace(ap_parray, block_size)
 
             #print(ap)
             end = time.perf_counter()
@@ -286,7 +309,7 @@ def main():
             def copy_back():
                 for i in range(n//block_size):
                     for j in range(n//block_size):
-                        a1[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_parray[i][j].array
+                        ap[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_parray[i][j].array
 
             await ts
 
@@ -295,11 +318,14 @@ def main():
             summarize_memory()
             clean_memory()
             print("--------")
-
+            print(ap)
             # Check result
-            computed_L = np.tril(a1)
-            error = np.max(np.absolute(a - computed_L @ computed_L.T))
-            print("Error", error)
+            print("Is NAN: ", np.isnan(np.sum(ap)))
+
+            if check_error:
+                computed_L = np.tril(ap)
+                error = np.max(np.absolute(a - computed_L @ computed_L.T))
+                print("Error", error)
 
 if __name__ == '__main__':
     with Parla():
