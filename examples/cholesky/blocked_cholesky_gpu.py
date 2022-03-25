@@ -43,16 +43,26 @@ import sys
 import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-b', type=int, default=32*5)
-parser.add_argument('-nblocks', type=int, default=16)
+parser.add_argument('-b', type=int, default=2000)
+parser.add_argument('-nblocks', type=int, default=20)
 parser.add_argument('-trials', type=int, default=1)
+parser.add_argument('-matrix', default=None)
+
 args = parser.parse_args()
 
+
 block_size = args.b
-n = block_size*args.nblocks
+
+if args.matrix is None:
+    n = block_size*args.nblocks
+
 num_tests = args.trials
 
 loc = gpu
+
+save_file = True
+check_nan = False
+check_error = True
 
 @specialized
 @jit(float64[:,:](float64[:,:]), nopython=True, nogil=True)
@@ -100,8 +110,11 @@ def cupy_trsm_wrapper(a, b):
     cublas_handle = device.get_cublas_handle()
     trsm = cublas.dtrsm
     uplo = cublas.CUBLAS_FILL_MODE_LOWER
-    a = cp.array(a, dtype=np.float64, order='F')
-    b = cp.array(b, dtype=np.float64, order='F')
+
+    #print(a.order, b.order, flush=True)
+    a = cp.asarray(a, dtype=np.float64, order='F')
+    b = cp.asarray(b, dtype=np.float64, order='F')
+
     trans = cublas.CUBLAS_OP_T
     side = cublas.CUBLAS_SIDE_RIGHT
 
@@ -162,31 +175,40 @@ def cholesky_blocked_inplace(a):
                 out = clone_here(a[j][j])
                 rhs = clone_here(a[j][k])
 
-                #stream = cp.cuda.get_current_stream()
+                stream = cp.cuda.get_current_stream()
                 #stream.synchronize()
 
                 out = update(rhs, rhs, out)
 
-                #stream = cp.cuda.get_current_stream()
-                #stream.synchronize()
+                is_nan = check_nan and np.isnan(np.min(out))
+                if is_nan:
+                    print(f"SYRK[{j}, {k}]: ", is_nan, flush=True)
+
+                stream.synchronize()
                 log_memory()
                 a[j][j] = out
-                #stream.synchronize()
+                stream.synchronize()
 
         # Cholesky on block
         mem = 8*2* block_size**2
         @spawn(subcholesky[j], [gemm1[j, 0:j]], placement=loc, memory=mem)
         def t2():
             dblock = clone_here(a[j][j])
-            #stream = cp.cuda.get_current_stream()
+            stream = cp.cuda.get_current_stream()
             #stream.synchronize()
+
             #print(j, dblock, flush=True)
             dblock = cholesky(dblock)
+
+
+            is_nan = check_nan and np.isnan(np.min(dblock))
+            if is_nan:
+                print(f"POTRF[{j}, {j}]: ", is_nan, flush=True)
             #stream = cp.cuda.get_current_stream()
-            #stream.synchronize()
+            stream.synchronize()
             log_memory()
             a[j][j] = dblock
-            #stream.synchronize()
+            stream.synchronize()
 
         for i in range(j+1, len(a)):
             for k in range(j):
@@ -199,15 +221,18 @@ def cholesky_blocked_inplace(a):
                     out = clone_here(a[i][j])
                     rhs1 = clone_here(a[i][k])
                     rhs2 = clone_here(a[j][k])
-                    #stream = cp.cuda.get_current_stream()
+                    stream = cp.cuda.get_current_stream()
                     #stream.synchronize()
 
                     out = update(rhs1, rhs2, out)
-                    #stream = cp.cuda.get_current_stream()
-                    #stream.synchronize()
+
+                    is_nan = check_nan and np.isnan(np.min(out))
+                    if is_nan:
+                        print(f"GEMM[{i}, {j}, {k}]", is_nan, flush=True)
+                    stream.synchronize()
                     log_memory()
                     a[i][j] = out
-                    #stream.synchronize()
+                    stream.synchronize()
 
 
             # Triangular solve
@@ -219,36 +244,52 @@ def cholesky_blocked_inplace(a):
                 factor = clone_here(a[j][j])
                 panel = clone_here(a[i][j])
 
-                #stream = cp.cuda.get_current_stream()
+                stream = cp.cuda.get_current_stream()
+
                 #stream.synchronize()
                 out = ltriang_solve(factor, panel)
-                #stream = cp.cuda.get_current_stream()
-                #stream.synchronize()
+
+                is_nan = check_nan and np.isnan(np.min(out))
+                if is_nan:
+                    print(f"TRSM[{i}, {j}]: ", is_nan, flush=True)
+
+                stream.synchronize()
                 log_memory()
                 a[i][j] = out
-                #stream.synchronize()
+                stream.synchronize()
 
     return subcholesky[len(a)-1]
 
 def main():
     @spawn(placement=cpu)
     async def test_blocked_cholesky():
-        assert not n % block_size
+        global n
 
-        np.random.seed(10)
-        # Construct input data
-        a = np.random.rand(n, n)
-        a = a @ a.T
+        if args.matrix is None:
+            print("Generating matrix of size: ", n)
+            np.random.seed(10)
+            # Construct input data
+            a = np.random.rand(n, n)
+            a = a @ a.T
+
+            if save_file:
+                np.save(f"chol_{n}", a)
+        else:
+            print("Loading matrix from file: ", args.matrix)
+            a = np.load(args.matrix)
+            print("Loaded matrix from file. Shape=", a.shape)
+            n = a.shape[0]
 
         # Copy and layout input
-
+        print("Blocksize: ", block_size)
+        assert not n % block_size
         a1 = a.copy()
-        a_temp = a1.reshape(n//block_size, block_size, n//block_size, block_size).swapaxes(1, 2)
+        #a_temp = a1.reshape(n//block_size, block_size, n//block_size, block_size).swapaxes(1, 2)
 
         n_gpus = cp.cuda.runtime.getDeviceCount()
 
         for k in range(num_tests):
-            ap = a_temp.copy()
+            ap = a1.copy()
 
 
             ap_list = list()
@@ -256,7 +297,10 @@ def main():
                 ap_list.append(list())
                 for j in range(n//block_size):
                     with cp.cuda.Device(i%n_gpus):
-                        ap_list[i].append(cp.asarray(ap[i][j]))
+                        ap_list[i].append(cp.asarray(a1[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size], order='F'))
+
+            print("Starting Cholesky")
+            print("------------")
 
             start = time.perf_counter()
             # Call Parla Cholesky result and wait for completion
@@ -274,16 +318,18 @@ def main():
             def copy_back():
                 for i in range(n//block_size):
                     for j in range(n//block_size):
-                        a1[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_list[i][j].get()
+                        ap[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_list[i][j].get()
 
             await ts
 
 
-
             # Check result
-            computed_L = np.tril(a1)
-            error = np.max(np.absolute(a - computed_L @ computed_L.T))
-            print("Error", error)
+            print("Is NAN: ", np.isnan(np.sum(ap)))
+
+            if check_error:
+                computed_L = np.tril(ap)
+                error = np.max(np.absolute(a - computed_L @ computed_L.T))
+                print("Error", error)
 
 if __name__ == '__main__':
     with Parla():

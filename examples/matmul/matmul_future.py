@@ -14,7 +14,7 @@ from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
 
 import concurrent.futures 
 
-ngpus = 4
+ngpus = 1
 
 
 # set up two n x n arrays to multiply together.
@@ -37,19 +37,18 @@ for i in range(ngpus):
         a_part.append(cp.array(a_cpu[i * block_size : (i + 1) * block_size]))
         b_part.append(cp.array(b_cpu[i * block_size : (i + 1) * block_size]))
         c_part.append(cp.empty_like(b_part[-1]))
-        cp.cuda.Device().synchronize()
 
 print("NGPU", ngpus)
 
 start = time.perf_counter()
 
-def worker(inp):
-    i, a_block = inp
+def worker(i, a_block, c_part):
     with cp.cuda.Device(i):
-        print("Shape:", a_block.shape)
+        #start_t = time.time()
+        c_block = c_part[:, i * block_size : (i + 1) * block_size]
+        #print("Sizes:", a_block.shape, c_block.shape, flush=True)
         start_t = time.time()
         L = a_block @ a_block.T
-        cp.cuda.Device().synchronize()
         end_t = time.time()
     print(end_t - start_t, flush=True)
     return 
@@ -57,7 +56,7 @@ def worker(inp):
 start = time.perf_counter()
 
 with concurrent.futures.ThreadPoolExecutor() as executor:
-    futures = [executor.submit(worker, (i, a_part[i])) for i in range(ngpus) ]
+    futures = [executor.submit(i, a_part[i], c_part[i]) for i in range(ngpus) ]
     results = [f.result() for f in futures]
 
 end = time.perf_counter()
