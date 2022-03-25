@@ -113,6 +113,9 @@ class Coherence:
         # data is not ready if it need to be copied from somewhere (has an load operations in progress)
         # and becomes ready is no data movement in progress
         # if copy is subarray, value would be a Dict{slices_hash: bool}
+        # this provide a order when multiple threads are accessing the same data
+        # for example, if multiple threads read the same data on the same device,
+        # only one of them will need to performance datamovement and other are just wait ready = True
         self._data_ready = {n: True for n in range(num_gpu)}
         self._data_ready[CPU_INDEX] = True
 
