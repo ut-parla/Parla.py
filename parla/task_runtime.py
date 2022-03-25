@@ -511,6 +511,7 @@ class ComputeTask(Task):
                 self.notify_unspawned_dependees()
                 self._state = TaskRunning(func, args, None)
                 get_scheduler_context().incr_active_tasks()
+                get_scheduler_context().scheduler.incr_active_compute_tasks()
                 # Enqueue this task right after spawning on the spawend queue.
                 # The task could have dependencies.
                 get_scheduler_context().enqueue_spawned_task(self)
@@ -620,6 +621,8 @@ class ComputeTask(Task):
                 # We assume all IN and INOUT params don't change size
                 for parray in (self.dataflow.output):
                     ctx.scheduler._available_resources.update_parray_nbytes(parray, self.req.devices)
+
+                ctx.scheduler.decr_active_compute_tasks()
 
                 # Protect the case that it notifies dependees and
                 # any dependee task is spawned before setting state.
@@ -1317,6 +1320,9 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Start with one count that is removed when the scheduler is "exited"
         self._active_task_count = 1
 
+        # For load-balancing purposes
+        self._active_compute_task_count = 0
+
         # Period scheduler sleeps between loops (see run function)
         self.period = period
 
@@ -1403,6 +1409,14 @@ class Scheduler(ControllableThread, SchedulerContext):
         if done:
             self.stop()
 
+    def incr_active_compute_tasks(self):
+        with self._monitor:
+            self._active_compute_task_count += 1
+
+    def decr_active_compute_tasks(self):
+        with self._monitor:
+            self._active_compute_task_count -= 1
+
     def enqueue_spawned_task(self, task: Task):
         """Enqueue a spawned task on the spawned task queue.
            Scheduler iterates the queue and assigns resources
@@ -1463,7 +1477,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         possible_devices = task.req.devices
         max_suitability = None
         best_device = None
-        best_device_owns_dependency = False
         best_device_local_data = 0
         for device in possible_devices:
             # Ensure that the device has enough resources for the task
@@ -1490,44 +1503,43 @@ class Scheduler(ControllableThread, SchedulerContext):
             nonlocal_data /= device.resources['memory']
 
             # Figure out whether the task has a dependency running on this device
-            this_device_owns_dependency = False
+            this_device_owns_dependency = 0
             for dependency in task.dependencies:
                 if device in dependency.req.devices:
-                    this_device_owns_dependency = True
+                    this_device_owns_dependency = 1
                     break
 
-            # If the best device owns a dependency, but this one doesn't,
-            # AND the best device has more local data, we can skip this device
-            # TODO (ses): Ignore this if the dependency has finished running!
-            if best_device_owns_dependency and not this_device_owns_dependency and best_device_local_data >= local_data:
-                continue
-            
             # Next we calculate the load-balancing factor
             # For now this is just a count of tasks on the device queue (TODO (ses): better heuristics later...)
             dev_load = self._device_compute_task_counts[device]
 
             # Normalize this too so we have numbers between 0 and 1
-            dev_load /= self._active_task_count
+            if self._active_compute_task_count > 0:
+                dev_load /= self._active_compute_task_count
+            else:
+                dev_load = 0
 
             # TODO (ses): Move these magic numbers somewhere better
             local_data_weight = 30.0
             nonlocal_data_weight = 10.0
             load_weight = 1.0
+            dependency_weight = 0.5
 
             # Calculate the suitability
             suitability = local_data_weight * local_data \
                         - nonlocal_data_weight * nonlocal_data \
-                        - load_weight * dev_load
+                        - load_weight * dev_load \
+                        + dependency_weight * this_device_owns_dependency
 
             """
             def myformat(num):
                 return "{:.3f}".format(num)
 
             print(f"dev={device}", end='   ')
-            print(f"dep={this_device_owns_dependency}", end='   ')
             print(f"local={myformat(local_data)}", end='   ')
             print(f"nonlocal={myformat(nonlocal_data)}", end='   ')
             print(f"load={myformat(dev_load)}", end='   ')
+            print(f"dep={myformat(this_device_owns_dependency)}", end='   ')
             print(f"suit={myformat(suitability)}")
             """
 
@@ -1535,7 +1547,6 @@ class Scheduler(ControllableThread, SchedulerContext):
             if max_suitability is None or suitability > max_suitability:
                 max_suitability = suitability
                 best_device = device
-                best_device_owns_dependency = this_device_owns_dependency
                 best_device_local_data = local_data
         
         if best_device is None:
