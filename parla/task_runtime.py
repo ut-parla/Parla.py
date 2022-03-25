@@ -266,8 +266,9 @@ class OptionsRequirements(ResourceRequirements):
 
 class Task:
     __slots__ = [
-        '_mutex', '_name', '_taskid', '_successors', '_predecessors', '_req',
-        '_assigned'
+        '_mutex', '_name', '_taskid', '_state', '_successors', '_predecessors',
+        '_req', '_assigned', '_dependent_events', '_num_blocking_predecessors',
+        '__dict__'
     ]
 
     def __init__(self, dependencies: Collection["Task"], taskid,
@@ -287,8 +288,7 @@ class Task:
             # If it is, it sets to True. Otherwise, it sets to False.
             self._assigned = False
             # Dependent tasks' event objects for runahead scheduling.
-            self.dependent_events = []
-            self.events = []
+            self._dependent_events = []
 
     @property
     def taskid(self) -> 'TaskID':
@@ -305,6 +305,14 @@ class Task:
     @req.setter
     def req(self, new_req):
         self._req = new_req
+
+    @property
+    def dependent_events(self):
+        return self._dependent_events
+
+    @dependent_events.setter
+    def dependent_events(self, events):
+        self._dependent_events = events
 
     # Deprecated: use predecessors
     @property
@@ -437,22 +445,30 @@ class Task:
     def __repr__(self):
         return "<Task {} nrem_deps={} state={} assigned={assigned}>". \
                format(self.name or "", self._num_blocking_predecessors,
-                      type(self._state).__name__, **self.__dict__)
+                      type(self._state).__name__, assigned=self._assigned)
 
 
 class ComputeTask(Task):
+    __slots__ = [
+        '_func', '_args', '_state', 'events', 'dataflow',
+        'num_unspawned_predecessors'
+    ]
+
     def __init__(self, func, args, dependencies: Collection["Task"], taskid: 'TaskID',
                  req: ResourceRequirements, dataflow: "Dataflow",
                  name: Optional[str] = None,
                  num_unspawned_deps: int = 0):
         super(ComputeTask, self).__init__(dependencies, taskid, req, name)
+        self._state = TaskWaiting()
         with self._mutex:
             # This task could be spawend when it is ready.
             # To set its state Running when it is running later,
             # store functions and arguments as member variables.
             self._func = func
             self._args = args
+            self.events = []
             self.dataflow = dataflow  # input/output/inout of the task
+
             # Expose the self reference to other threads as late as possible,
             # but not after potentially getting scheduled.
             taskid.task = self
@@ -461,9 +477,7 @@ class ComputeTask(Task):
             # If this task is not waiting for any dependent tasks,
             # enqueue onto the spawned queue.
             if self.num_unspawned_predecessors == 0:
-                self._activate()
-            else:
-                self._state = TaskWaiting()
+                self._ready_to_map()
             logger.debug("Task %r: Creating", self)
 
     def __notify_spawned_successors(self):
@@ -480,7 +494,7 @@ class ComputeTask(Task):
             dt.decr_num_unspawned_deps(self)
             self._successors.append(dt)
 
-    def _activate(self):
+    def _ready_to_map(self):
         assert self.num_unspawned_predecessors == 0
         self.__notify_spawned_successors()
         self._state = TaskRunning(self._func, self._args, None)
@@ -495,7 +509,7 @@ class ComputeTask(Task):
             self._num_blocking_predecessors += 1
             self._predecessors.append(predecessor)
             if self.num_unspawned_predecessors == 0:
-                self._activate()
+                self._ready_to_map()
 
     def run(self):
         ctx = get_scheduler_context()
@@ -598,7 +612,7 @@ class DataMovementTask(Task):
         with self._mutex:
             # A data movement task is created after mapping phase.
             # Therefore, this class is already assigned to devices.
-            self.assigned = True
+            self._assigned = True
             self._target_data = target_data
             self._operand_type = operand_type
             # TODO(lhc): temporary task running state.
@@ -607,7 +621,7 @@ class DataMovementTask(Task):
 
     def run(self):
         logger.debug(f"[DataMovementTask %s] Starting", self.name)
-        assert self.assigned, "Task was not assigned before running."
+        assert self._assigned, "Task was not assigned before running."
         assert isinstance(self.req, EnvironmentRequirements), \
             "Task was not assigned a specific environment requirement before running."
 
@@ -1013,7 +1027,7 @@ class ParrayTracker():
     """
     nbytes: int
     locations: Dict[Device, bool]
-    
+
     def __init__(self):
         self.nbytes = 0
         self.locations = {}
@@ -1219,12 +1233,12 @@ class ResourcePool:
 
     # On a parray move, call this to start tracking the parray (if necessary) and update its location
     def register_parray_move(self, parray, device):
-            if id(parray) not in self._managed_parrays:
-                self.track_parray(parray)
-                # If this new array originates on the dest device, skip the next step
-                if self._managed_parrays[id(parray)].locations[device]:
-                    return
-            self.add_parray_to_device(parray, device)
+        if id(parray) not in self._managed_parrays:
+            self.track_parray(parray)
+            # If this new array originates on the dest device, skip the next step
+            if self._managed_parrays[id(parray)].locations[device]:
+                return
+        self.add_parray_to_device(parray, device)
 
     def parray_is_on_device(self, parray, device):
         with self._monitor:
@@ -1398,6 +1412,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         """Enqueue a task on the resource allocation queue.
            Note that this enqueue has no data race.
         """
+        assert task._assigned
         self._ready_queue.appendleft(task)
 
     def _dequeue_task(self, timeout=None) -> Optional[Task]:
