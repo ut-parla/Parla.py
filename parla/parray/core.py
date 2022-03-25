@@ -5,6 +5,7 @@ from parla.task_runtime import get_current_devices
 from parla.device import Device
 
 from .coherence import MemoryOperation, Coherence, CPU_INDEX
+from typing import List
 
 import threading
 import numpy
@@ -43,7 +44,9 @@ class PArray:
         self._array[location] = array
         self._coherence = Coherence(location, num_devices)  # coherence protocol for managing data among multi device
 
-        self._coherence_lock = threading.Lock()  # a lock to greb when update coherence and move data
+        # a condition variable to acquire when moving data on the device
+        self._coherence_cv = {n:threading.Condition() for n in range(num_devices)}
+        self._coherence_cv[CPU_INDEX] = threading.Condition()
 
         self.size = array.size
         self.nbytes = array.nbytes
@@ -114,6 +117,7 @@ class PArray:
                 else:  # GPU to GPU
                     dst_data = cupy.empty_like(array)
                     dst_data.data.copy_from_device_async(array.data, array.nbytes)
+                    cupy.cuda.stream.get_current_stream().synchronize()
                     self._array[this_device] = dst_data
 
     def evict_all(self) -> None:
@@ -142,24 +146,8 @@ class PArray:
             device_id = self._current_device_index
 
         # update protocol and get operation
-        with self._coherence_lock:
-            operation = self._coherence.read(device_id)
-            self._process_operation(operation)
-            stream = cupy.cuda.get_current_stream()
-            # The coherence lock does not protect GPU calls.
-            # This could cause a data race when multiple readers on one data exist.
-            # LOAD operation is an asynchronous CUDA copy which does not block
-            # a CPU thread. This is problematic since other readers
-            # could trigger another LOAD operation from a location where
-            # it is still being copied. This stream synchronization blocks
-            # a CPU core until all copies are done.
-            # TODO(lhc): this synchronization overhead could be alleviated
-            #            if we do static dependency analysis and allow
-            #            ONLY siblings to simultaneously copy data
-            #            without this synchronization.
-            #            In this case, sync. is required for different levels
-            #            on a task graph.
-            stream.synchronize()
+        operation = self._coherence.read(device_id) # locks involve
+        self._process_operations([operation]) # condition variable involve
 
     def _coherence_write(self, device_id: int = None) -> None:
         """Tell the coherence protocol a write happened on a device.
@@ -175,33 +163,41 @@ class PArray:
         if not device_id:
             device_id = self._current_device_index
 
-        # update protocol and get list of operations
-        # use lock to avoid race in between data movement and protocol updating
-        # TODO(Yineng): improve the lock or propose a lock free protocol
-        with self._coherence_lock:
-            operations = self._coherence.write(device_id)
-            for op in operations:
-                self._process_operation(op)
+        # update protocol and get operation
+        operations = self._coherence.write(device_id) # locks involve
+        self._process_operations(operations) # condition variable involve
 
     # Device management methods:
 
-    def _process_operation(self, operation: MemoryOperation) -> None:
+    def _process_operations(self, operations: List[MemoryOperation]) -> None:
         """
         Process the given memory operations.
         Data will be moved, and protocol states is kept unchanged.
         """
-        if operation.inst == MemoryOperation.NOOP:
-            return  # do nothing
-        elif operation.inst == MemoryOperation.LOAD:
-            self._copy_data_between_device(operation.dst, operation.src)
-        elif operation.inst == MemoryOperation.EVICT:
-            self._array[operation.src] = None  # decrement the reference counter, relying on GC to free the memory
-        elif operation.inst == MemoryOperation.ERROR:
-            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
-                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
-        else:
-            raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
-                               f"detail: opcode {operation.inst}, dst {operation.dst}, src {operation.src}")
+        for op in operations:
+            if op.inst == MemoryOperation.NOOP:
+                pass  # do nothing
+            elif op.inst == MemoryOperation.CHECK_DATA:
+                if not self._coherence.data_is_ready(op.src):  # if data is not ready, wait
+                    with self._coherence_cv[op.src]:
+                        while not self._coherence.data_is_ready(op.src):
+                            self._coherence_cv[op.src].wait()
+            elif op.inst == MemoryOperation.LOAD:
+                with self._coherence_cv[op.dst]:  # hold the CV when moving data
+                    with self._coherence_cv[op.src]:  # wait on src until it is ready
+                        while not self._coherence.data_is_ready(op.src):
+                            self._coherence_cv[op.src].wait()
+                    self._copy_data_between_device(op.dst, op.src)  # copy data
+                    self._coherence.set_data_as_ready(op.dst)  # mark it as done
+                    self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
+            elif op.inst == MemoryOperation.EVICT:
+                self._array[op.src] = None  # decrement the reference counter, relying on GC to free the memory
+                self._coherence.set_data_as_ready(op.src)  # mark it as done
+            elif op.inst == MemoryOperation.ERROR:
+                raise RuntimeError("PArray gets an error from coherence protocol")
+            else:
+                raise RuntimeError(f"PArray gets invalid memory operation from coherence protocol, "
+                                   f"detail: opcode {op.inst}, dst {op.dst}, src {op.src}")
 
     def _copy_data_between_device(self, dst, src) -> None:
         """
@@ -216,8 +212,10 @@ class PArray:
             dst_data = cupy.empty_like(src_data)
             dst_data.data.copy_from_device_async(src_data.data, src_data.nbytes)
             self._array[dst] = dst_data
+            cupy.cuda.stream.get_current_stream().synchronize()
         else: # copy from GPU to CPU
             self._array[CPU_INDEX] = cupy.asnumpy(self._array[src])
+            cupy.cuda.stream.get_current_stream().synchronize()
 
     @staticmethod
     def _get_current_device() -> Device:
