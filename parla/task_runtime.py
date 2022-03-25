@@ -1548,7 +1548,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         task.req = EnvironmentRequirements(task.req.resources, task_env, task.req.tags)
 
         task.set_assigned()
-        logger.debug(f"[Scheduler] Mapped %r.", task)
+        logger.debug(f"[Scheduler] Mapped %r to %r.", task, best_device)
         return True
 
         # Sean: I don't understand the old way. Just commenting it out and acting like it doesn't exist.
@@ -1588,6 +1588,34 @@ class Scheduler(ControllableThread, SchedulerContext):
         logger.debug(f"[Scheduler] Failed to map %r.", task)
         return False
         """
+
+    # Random assignment policy, just used for testing
+    def _random_assignment_policy(self, task:Task):
+        logger.debug(f"[Scheduler] RANDOMLY Mapping %r.", task)
+
+        possible_devices = task.req.devices
+        valid_devices = list()
+        for device in possible_devices:
+            # Ensure that the device has enough resources for the task
+            if self._available_resources.check_resources_availability(device, task.req.resources):
+                valid_devices.append(device)
+        
+        if len(valid_devices) == 0:
+            logger.debug(f"[Scheduler] Failed to map %r.", task)
+            return False
+
+        # Pick a random valid device
+        best_device = random.choice(valid_devices)
+
+        # Stick this info in an environment
+        task_env_gen = self._environments.find_all(placement={best_device}, tags={}, exact=True)
+        task_env = next(task_env_gen)
+        task.req = EnvironmentRequirements(task.req.resources, task_env, task.req.tags)
+
+        task.set_assigned()
+        logger.debug(f"[Scheduler] RANDOMLY Mapped %r to %r.", task, best_device)
+        return True
+
 
     def fill_curr_spawned_task_queue(self):
         """ It moves tasks on the new spawned task queue to
@@ -1665,6 +1693,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             if task:
                 if not task.assigned:
                     is_assigned = self._assignment_policy(task) # This is what actually maps the task
+                    #is_assigned = self._random_assignment_policy(task) # USE THIS INSTEAD TO TEST RANDOM
                     assert isinstance(is_assigned, bool)
                     if not is_assigned:
                         self.enqueue_spawned_task(task)
