@@ -275,6 +275,7 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         # Use a stack per thread per GPU component just in case.
         self._object_stack = _GPUStacksLocal()
         self.event = None
+        self.lock = threading.Lock()
 
     def _make_stream(self):
         with self.gpu.cupy_device:
@@ -357,19 +358,30 @@ class GPUComponentInstance(EnvironmentComponentInstance):
         return False
 
     def initialize_thread(self) -> None:
-        for gpu in self.gpus:
-            # Trigger cuBLAS/etc. initialization for this GPU in this thread.
-            with cupy.cuda.Device(gpu.index) as device:
-                a = cupy.asarray([2.])
-                cupy.cuda.get_current_stream().synchronize()
-                with cupy.cuda.Stream(False, True) as stream:
-                    cupy.asnumpy(cupy.sqrt(a))
-                    device.cublas_handle
-                    device.cusolver_handle
-                    device.cusolver_sp_handle
-                    device.cusparse_handle
-                    stream.synchronize()
+
+        with self.lock:
+            for gpu in self.gpus:
+                # Trigger cuBLAS/etc. initialization for this GPU in this thread.
+                with cupy.cuda.Device(gpu.index) as device:
+                    h_a = numpy.asarray([2.0])
+                    d_a = cupy.asarray(h_a)
                     device.synchronize()
+
+                    with cupy.cuda.Stream(False, True) as stream:
+                        h_result = cupy.asnumpy(cupy.sqrt(d_a))
+                        device.synchronize()
+
+                        device.cublas_handle
+                        device.synchronize()
+
+                        device.cusolver_handle
+                        device.synchronize()
+
+                        device.cusolver_sp_handle
+                        device.synchronize()
+
+                        device.cusparse_handle
+                        device.synchronize()
 
 class GPUComponent(EnvironmentComponentDescriptor):
     """A single GPU CUDA component which configures the environment to use the specific GPU using a single
