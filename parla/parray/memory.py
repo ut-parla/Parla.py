@@ -234,6 +234,14 @@ class MultiDeviceBuffer:
 
                 if index_map is None:  # None means 1:1 map to all elements at this axis
                     local_index = global_index
+                elif isinstance(index_map, dict) and len(index_map) == 1:
+                    # special case, this axis was indexed by a int, so
+                    # dimension was reduced by 1, 
+                    # need to ignore this axis, just check index match or not
+                    if list(index_map.keys())[0] == global_index:  # false if type or value doesn't match 
+                        continue
+                    else:
+                        local_index = None
                 elif isinstance(index_map, tuple):
                     if isinstance(global_index, int):  # int vs slice
                         local_index = MultiDeviceBuffer._map_int_with_slice(global_index, index_map)
@@ -274,19 +282,27 @@ class MultiDeviceBuffer:
                 # if None, it means index out of range at this axis
                 if local_index is None:
                     # check next copy
-                    local_slices = []
+                    local_slices = None
                     break
 
                 local_slices.append(local_index)
 
-            if local_slices:  # result is found
+            if local_slices is None:  # result is not found for this subarray
+                if subarray_index == len(self._indices_map[device_id]) - 1:  # this is the last subarray
+                    local_slices = None  # non slices is found  
+                else: # check next subarray
+                    local_slices = []  # clear intermidate result
+            else:
                 final_subarray_index = subarray_index
                 break
 
-        if not local_slices:
+        if local_slices is None:
             raise IndexError(f"index out of range, index:{global_slices}")
         elif not_tuple:
-            return final_subarray_index, local_slices[0]
+            if len(local_slices) == 0:  # only be possible when special case int vs int exists and all axis are ignored
+                return final_subarray_index, slice(None, None, None)
+            else:
+                return final_subarray_index, local_slices[0]
         else:
             return final_subarray_index, tuple(local_slices)
 
@@ -369,31 +385,50 @@ class MultiDeviceBuffer:
             subarray_index, local_slices = self.map_local_slices(device_id, global_slices)
             self._buffer[device_id][subarray_index].__setitem__(local_slices, value)
 
+
+    def _move_data(self, copy_func, dst, src, subarray_index, dst_slices, src_slices):
+        """
+        Helper function for copy_data_between_device
+        """
+        if dst_slices is None and src_slices is None:  # Complete to Complete
+            self._buffer[dst] = copy_func(self._buffer[src])
+        elif dst_slices is None and src_slices is not None:  # Incomplete to Complete
+            self._buffer[dst][src_slices] = copy_func(self._buffer[src][subarray_index])
+        elif dst_slices is not None and src_slices is None:  # Complete to incomplete
+            if self._buffer[dst] is None:
+                self._buffer[dst] = []
+            self._buffer[dst].append(copy_func(self._buffer[src][dst_slices]))
+        else:  # incomplete to incomplete
+            raise ValueError("Copy from subarray to subarray is unsupported")
+
     def copy_data_between_device(self, dst, src) -> None:
         """
         Copy data from src to dst.
         """
-        src_slices = self.get_global_slices(src, 0)
-        dst_slices = self.get_global_slices(dst, 0)
+        # a function to copy data between GPU devices async
+        def copy_from_device_async(src):
+            dst_data = cupy.empty_like(src)
+            dst_data.data.copy_from_device_async(src.data, src.nbytes)
+            return dst_data
 
+        if self._indices_map[src] is None:
+            src_slices_list = [None]
+        else:
+            src_slices_list = [self.get_global_slices(src, i) for i in range(len(self._indices_map[src]))]
 
-        def _move_data(copy_func):
-            if dst_slices is None and src_slices is None:  # Complete to Complete
-                self._buffer[dst] = copy_func(self._buffer[src])
-            elif dst_slices is None and src_slices is not None:  # Incomplete to Complete
-                self._buffer[dst][src_slices] = copy_func(self._buffer[src])
-            elif dst_slices is not None and src_slices is None:  # Complete to incomplete
-                self._buffer[dst] = copy_func(self._buffer[src][dst_slices])
-            else:  # incomplete to incomplete
-                # TODO: support this
-                raise ValueError("Copy from subarray to subarray is unsupported")
+        # TRICK: if there are multiple subarray in this device, always pick the last one
+        # this is because load of data always comes together with create indices mapping
+        # so the indices mapping will put at the end of self._indices_map
+        dst_slices = self.get_global_slices(dst, -1)
 
-        if src == CPU_INDEX:  # copy from CPU to GPU
-            _move_data(cupy.array)
-        elif dst != CPU_INDEX:  # copy from GPU to GPU
-            _move_data(cupy.copy)
-        else:  # copy from GPU to CPU
-            _move_data(cupy.asnumpy)
+        for subarray_index in range(len(src_slices_list)):
+            src_slices = src_slices_list[subarray_index]
+            if src == CPU_INDEX:  # copy from CPU to GPU
+                self._move_data(cupy.asarray, dst, src, subarray_index, dst_slices, src_slices)
+            elif dst != CPU_INDEX:  # copy from GPU to GPU
+                self._move_data(copy_from_device_async, dst, src, subarray_index, dst_slices, src_slices)
+            else:  # copy from GPU to CPU
+                self._move_data(cupy.asnumpy, dst, src, subarray_index, dst_slices, src_slices)
 
     def get_slices_hash(self, global_slices: SlicesType) -> int:
         """
@@ -429,3 +464,10 @@ class MultiDeviceBuffer:
         Return True if there is a copy in this device
         """
         return device_id in self._buffer and self._buffer[device_id] is not None
+
+    def clear(self, device_id) -> None:
+        """
+        Clear data in device_id
+        """
+        self._indices_map[device_id] = None
+        self._buffer[device_id] = None

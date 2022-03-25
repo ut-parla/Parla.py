@@ -22,26 +22,33 @@ def main():
 
         ts = TaskSpace("CopyBack")
 
-        print(ts[0:1, 0:2])
-
         @spawn(ts[0], placement=gpu[0], inout=[a[0]])
-        def task2():
+        def task1():
             a[0] += 10
-            print(a[0])
+            print(f"Task 1: {a[0].array}", flush=True)
 
-        # @spawn(ts[1], placement=gpu, input=[a[1]])
-        # def task3():
-        #     a[1] += 10
-
-        @spawn(ts[2], placement=gpu[1], inout=[b[0]])
+        @spawn(ts[1], placement=gpu[0], inout=[a[1]])
         def task2():
-            b[0] += 10
-            print(b[0])
+            a[1] += 20
+            print(f"Task 2: {a[1].array}", flush=True)
 
-        # @spawn(ts[3], placement=gpu, input=[b[1]])
-        # def task3():
-        #     a[1] += 10
+        @spawn(ts[2], placement=gpu[0], inout=[b[0]])
+        def task3():
+            b[0] += 30
+            print(f"Task 3: {b[0].array}", flush=True)
 
+        @spawn(ts[3], placement=gpu[1], inout=[b[1]])
+        def task4():
+            b[1] += 40
+            print(f"Task 4: {b[1].array}", flush=True)
+
+        @spawn(ts[4], [ts[0:2]], placement=gpu[1], output=[a])
+        def task5():
+            print(f"Task 5: {a}", flush=True)
+
+
+        await ts
+        print(a)
         
 
 if __name__ == '__main__':

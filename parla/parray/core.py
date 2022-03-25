@@ -41,7 +41,7 @@ class PArray:
     _coherence_cv: Dict[int, threading.Condition]
 
     def __init__(self, array: ndarray, parent: "PArray" = None, slices=None) -> None:
-        if parent:  # create a view (a subarray) of a PArray
+        if parent is not None:  # create a view (a subarray) of a PArray
             # inherit parent's buffer and coherence states
             # so this PArray will becomes a 'view' of its parents
             self._array = parent._array
@@ -209,7 +209,7 @@ class PArray:
 
         Note: should be called within the current task context
         """
-        if not device_id:
+        if device_id is None:
             device_id = self._current_device_index
 
         # update protocol and get operation
@@ -229,7 +229,7 @@ class PArray:
 
         Note: should be called within the current task context
         """
-        if not device_id:
+        if device_id is None:
             device_id = self._current_device_index
 
         # update protocol and get operation
@@ -251,20 +251,20 @@ class PArray:
                     with self._coherence_cv[op.src]:
                         while not self._coherence.data_is_ready(op.src):
                             self._coherence_cv[op.src].wait()
-            elif op.inst == MemoryOperation.LOAD:
+            elif op.inst == MemoryOperation.LOAD or op.inst == MemoryOperation.LOAD_SUB:
                 with self._coherence_cv[op.dst]:  # hold the CV when moving data
                     with self._coherence_cv[op.src]:  # wait on src until it is ready
                         while not self._coherence.data_is_ready(op.src):
                             self._coherence_cv[op.src].wait()
+                    if op.inst == MemoryOperation.LOAD_SUB:
+                        self._array.set_slices_mapping(op.dst, slices)  # build slices mapping first
                     self._array.copy_data_between_device(op.dst, op.src)  # copy data
                     cupy.cuda.stream.get_current_stream().synchronize()
                     self._coherence.set_data_as_ready(op.dst, slices)  # mark it as done
                     self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
-            elif op.inst == MemoryOperation.UPDATE_MAP:
-                self._array.set_slices_mapping(op.src, slices)
             elif op.inst == MemoryOperation.EVICT:
-                self._array[op.src] = None  # decrement the reference counter, relying on GC to free the memory
-                self._coherence.set_data_as_ready(op.src, slices)  # mark it as done
+                self._array.clear(op.src)  # decrement the reference counter, relying on GC to free the memory
+                self._coherence.set_data_as_ready(op.src, None)  # mark it as done
             elif op.inst == MemoryOperation.ERROR:
                 raise RuntimeError("PArray gets an error from coherence protocol")
             else:
