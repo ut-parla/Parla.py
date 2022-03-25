@@ -260,7 +260,10 @@ class PArray:
                         self._array.set_slices_mapping(op.dst, slices)  # build slices mapping first
                     self._array.copy_data_between_device(op.dst, op.src)  # copy data
                     cupy.cuda.stream.get_current_stream().synchronize()
-                    self._coherence.set_data_as_ready(op.dst, slices)  # mark it as done
+                    if op.inst == MemoryOperation.LOAD_SUB:
+                        self._coherence.set_data_as_ready(op.dst, slices)  # mark it as done
+                    else:
+                        self._coherence.set_data_as_ready(op.dst, None)
                     self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
             elif op.inst == MemoryOperation.EVICT:
                 self._array.clear(op.src)  # decrement the reference counter, relying on GC to free the memory

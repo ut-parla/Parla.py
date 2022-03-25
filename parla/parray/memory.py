@@ -194,6 +194,9 @@ class MultiDeviceBuffer:
         last_element = input_end - input_step + (input_end - input_begin) % input_step
         mapped_end = MultiDeviceBuffer._map_int_with_slice(last_element, target_slice)
 
+        if mapped_begin is None or mapped_end is None:
+            return None
+
         # adjust step
         if input_step % target_step != 0:
             return None
@@ -440,7 +443,12 @@ class MultiDeviceBuffer:
         hash_value = 0
         prime = 31
         if not isinstance(global_slices, tuple):
-            return hash(global_slices)
+            if isinstance(global_slices, list):
+                hash_value = hash(tuple(global_slices))
+            elif isinstance(global_slices, slice):
+                hash_value = hash(global_slices.indices(self.shape[0]))
+            else:
+                hash_value = hash(global_slices)
         else:
             if len(self.shape) < len(global_slices):
                 raise IndexError(f"index out of range, index:{global_slices}")

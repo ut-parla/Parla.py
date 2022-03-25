@@ -181,7 +181,7 @@ class Coherence:
                 else:
                     # change all states to SHARED
                     for hash, state in self._local_states[id].items():
-                        self._local_states[hash] = self.SHARED
+                        self._local_states[id][hash] = self.SHARED
             else:  # write back the latest complete array
                 if self._versions[id] >= latest_complete_version:
                     latest_complete_version = self._versions[id]
