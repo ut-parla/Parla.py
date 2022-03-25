@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from parla.cpu_impl import cpu
-from parla.task_runtime import get_current_devices
+from parla import task_runtime
 from parla.device import Device
 
 from .coherence import MemoryOperation, Coherence, CPU_INDEX
@@ -226,7 +226,7 @@ class PArray:
 
         Note: should be called within the current task context
         """
-        return get_current_devices()[0]
+        return task_runtime.get_current_devices()[0]
 
     def _auto_move(self, device_id: int = None, do_write: bool = False) -> None:
         """ Automatically move data to current device.

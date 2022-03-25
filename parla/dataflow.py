@@ -4,10 +4,10 @@ It is used to provide data-aware scheduling,
 and also eager-fashion automatic data movement.
 """
 
-from typing import Collection, Any
+from typing import List, Any
 from itertools import chain
 
-from parla.task_runtime import get_current_devices
+from parla import task_runtime
 from parla.cpu_impl import cpu
 from parla.parray.coherence import CPU_INDEX
 
@@ -46,25 +46,25 @@ class Dataflow:
     The data reference of input/output/inout of a task
     """
 
-    def __init__(self, input: Collection[Any], output: Collection[Any], inout: Collection[Any]):
+    def __init__(self, input: List[Any], output: List[Any], inout: List[Any]):
         self._input = input
         self._output = output
         self._inout = inout
 
     @property
-    def input(self):
+    def input(self) -> List:
         if self._input == None:
             return []
         return self._input
 
     @property
-    def output(self):
+    def output(self) -> List:
         if self._output == None:
             return []
         return self._output
 
     @property
-    def inout(self):
+    def inout(self) -> List:
         if self._inout == None:
             return []
         return self._inout
@@ -75,7 +75,7 @@ class Dataflow:
         Only PArray is supported.
         """
         # query the current device id
-        device = get_current_devices()[0]
+        device = task_runtime.get_current_devices()[0]
         if device.architecture == cpu:
             device_id = CPU_INDEX
         else:  # arch is GPU
