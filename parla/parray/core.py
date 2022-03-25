@@ -193,8 +193,10 @@ class PArray:
             dst_data = cupy.empty_like(src_data)
             dst_data.data.copy_from_device_async(src_data.data, src_data.nbytes)
             self._array[dst] = dst_data
+            cupy.cuda.stream.get_current_stream().synchronize()
         else: # copy from GPU to CPU
             self._array[CPU_INDEX] = cupy.asnumpy(self._array[src])
+            cupy.cuda.stream.get_current_stream().synchronize()
 
     @staticmethod
     def _get_current_device() -> Device:
