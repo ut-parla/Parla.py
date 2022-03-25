@@ -265,6 +265,11 @@ class OptionsRequirements(ResourceRequirements):
 
 
 class Task:
+    __slots__ = [
+        '_mutex', '_name', '_taskid', '_successors', '_predecessors', '_req',
+        '_assigned'
+    ]
+
     def __init__(self, dependencies: Collection["Task"], taskid,
                  req: ResourceRequirements, name: Optional[str] = None):
         self._mutex = threading.Lock()
@@ -276,11 +281,11 @@ class Task:
             # Maintain dependencies as a list object.
             # Therefore, bi-directional edges exist among dependent tasks.
             # Some of these dependencies are moved to a data movement task.
-            self._set_dependencies(dependencies)
+            self.predecessors = dependencies
             self._req = req
             # This flag specifies if a task is assigned device.
             # If it is, it sets to True. Otherwise, it sets to False.
-            self.assigned = False
+            self._assigned = False
             # Dependent tasks' event objects for runahead scheduling.
             self.dependent_events = []
             self.events = []
@@ -301,10 +306,11 @@ class Task:
     def req(self, new_req):
         self._req = new_req
 
+    # Deprecated: use predecessors
     @property
     def dependencies(self) -> Tuple["Task"]:
-        with self._mutex:
-            return self._predecessors
+        with self._mutex: # TODO(bozhi) Why?
+            return tuple(self._predecessors)
 
     @property
     def successors(self) -> Tuple["Task"]:
@@ -329,59 +335,38 @@ class Task:
 
     def set_assigned(self):
         with self._mutex:
-            self.assigned = True
+            self._assigned = True
 
     def is_assigned(self):
         with self._mutex:
-            if self.assigned:
-                return True
-            else:
-                return False
+            return self._assigned
 
-    def _set_dependencies(self, predecessors: List['Task']):
-        self._predecessors = predecessors
-        self._remaining_dependencies = len(predecessors)
+    @property
+    def predecessors(self) -> Tuple["Task"]:
+        return tuple(self._predecessors)
+
+    @predecessors.setter
+    def predecessors(self, predecessors: Collection['Task']):
+        self._predecessors: List[Task] = list(predecessors)
+        self._num_blocking_predecessors: int = len(predecessors)
         for dep in predecessors:
             # If a dependency is TaskID, not Task object,
             # it implies that it is not yet spawned.
             # Ignore it.
-            if isinstance(dep, TaskID):
-                continue
-            if not dep._add_successor(self):
-                self._remaining_dependencies -= 1
+            if not isinstance(dep, TaskID) and not dep._add_successor(self):
+                self._num_blocking_predecessors -= 1
 
-    def _set_dependencies_mutex(self, dependencies):
-        with self._mutex:
-            return self._set_dependencies(dependencies)
-
-    def _check_remaining_dependencies(self):
-        if not self._remaining_dependencies and self.assigned:
+    def _maybe_ready_to_schedule(self):
+        if not self._num_blocking_predecessors and self._assigned:
             logger.info("[Task] %s: Scheduling", str(self.taskid))
             get_scheduler_context().enqueue_task(self)
 
-    def _check_remaining_dependencies_mutex(self):
-        with self._mutex:
-            self._check_remaining_dependencies()
+    def is_blocked(self) -> bool:
+        return bool(self._num_blocking_predecessors)
 
-    def bool_check_remaining_dependencies(self):
-        if not self._remaining_dependencies:
-            return False
-        else:
-            return True
-
-    def bool_check_remaining_dependencies_mutex(self):
-        with self._mutex:
-            if not self._remaining_dependencies:
-                return False
-            else:
-                return True
-
-    def is_dependent(self, cand: "Task"):
-        with self._mutex:
-            if cand in self._predecessors:
-                return True
-            else:
-                return False
+    def is_dependent_on(self, cand: "Task"):
+        with self._mutex: # TODO(bozhi): Why?
+            return cand in self._predecessors
 
     def _add_successor_mutex(self, successor: "Task") -> bool:
         """Add the successor if self is not completed, otherwise return False."""
@@ -412,24 +397,24 @@ class Task:
             return self._add_predecessor(dependency)
 
     def _add_predecessor(self, predecessor: 'Task') -> bool:
-        self._remaining_dependencies += 1
+        self._num_blocking_predecessors += 1
         self._predecessors.append(predecessor)
         if not predecessor._add_successor_mutex(self):
-            self._remaining_dependencies -= 1
+            self._num_blocking_predecessors -= 1
             return False
         return True
 
     def _complete_dependency_mutex(self, events):
         with self._mutex:
-            self._remaining_dependencies -= 1
+            self._num_blocking_predecessors -= 1
             # Add events from one dependent task.
             # (We are aiming to multiple device tasks, and it would
             #  be possible to have multiple events)
             if events is not None:
                 self.dependent_events.append(events)
-            self._check_remaining_dependencies()
+            self._maybe_ready_to_schedule()
             logger.info(f"[Task %s] Task dependency completed. \
-                (remaining: %d)", self.name, self._remaining_dependencies)
+                (remaining: %d)", self.name, self._num_blocking_predecessors)
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
@@ -440,8 +425,8 @@ class Task:
         if isinstance(new_state, TaskException):
             ctx.scheduler.report_exception(new_state.exc)
         elif isinstance(new_state, TaskRunning):
-            self._set_dependencies(new_state.dependencies)
-            self._check_remaining_dependencies()
+            self.predecessors = new_state.dependencies
+            self._maybe_ready_to_schedule()
             new_state.clear_dependencies()
         if new_state.is_terminal:
             ctx.decr_active_tasks()
@@ -451,7 +436,7 @@ class Task:
 
     def __repr__(self):
         return "<Task {} nrem_deps={} state={} assigned={assigned}>". \
-               format(self.name or "", self._remaining_dependencies,
+               format(self.name or "", self._num_blocking_predecessors,
                       type(self._state).__name__, **self.__dict__)
 
 
@@ -507,7 +492,7 @@ class ComputeTask(Task):
     def decr_num_unspawned_deps(self, predecessor: "Task"):
         with self._mutex:
             self.num_unspawned_predecessors -= 1
-            self._remaining_dependencies += 1
+            self._num_blocking_predecessors += 1
             self._predecessors.append(predecessor)
             if self.num_unspawned_predecessors == 0:
                 self._activate()
@@ -515,7 +500,7 @@ class ComputeTask(Task):
     def run(self):
         ctx = get_scheduler_context()
         task_state = TaskException(RuntimeError("Unknown fatal error"))
-        assert self.assigned, "Task was not assigned before running."
+        assert self._assigned, "Task was not assigned before running."
         assert isinstance(self.req, EnvironmentRequirements), \
             "Task was not assigned a specific environment requirement before running."
         try:
@@ -1588,7 +1573,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 dep_task_id = dep_task_tuple[0]
                 dep_task = dep_task_tuple[1]
                 # Only checks dependent tasks if they use the same data blocks.
-                if compute_task.is_dependent(dep_task):
+                if compute_task.is_dependent_on(dep_task):
                     if not datamove_task._add_predecessor(dep_task):
                         completed_tasks.append(dep_task_id)
             dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
@@ -1596,7 +1581,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         # If a task has no dependency after it is assigned to devices,
         # immediately enqueue a corresponding data movement task to
         # the ready queue.
-        if not datamove_task.bool_check_remaining_dependencies():
+        if not datamove_task.is_blocked():
             self.enqueue_task(datamove_task)
 
     def _map_tasks(self):
@@ -1607,7 +1592,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         while True:
             task: Optional[Task] = self._dequeue_spawned_task()
             if task:
-                if not task.assigned:
+                if not task._assigned:
                     is_assigned = self._assignment_policy(task)  # This is what actually maps the task
                     assert isinstance(is_assigned, bool)
                     if not is_assigned:
@@ -1646,7 +1631,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # If a task has no dependency after it is assigned to devices,
                         # immediately enqueue a corresponding data movement task to
                         # the ready queue.
-                        if not task.bool_check_remaining_dependencies():
+                        if not task.is_blocked():
                             self.enqueue_task(task)
                             logger.debug(f"[Scheduler] Enqueued %r on ready queue", task)
                 else:
@@ -1667,7 +1652,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             task: Optional[Task] = self._dequeue_task()
             if not task:
                 break
-            if not task.assigned:
+            if not task._assigned:
                 logger.debug("[Scheduler] Task %r: Failed to assign", task)
                 break
             for d in task.req.devices:
