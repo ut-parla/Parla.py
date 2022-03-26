@@ -593,6 +593,28 @@ class ComputeTask(Task):
                     # Already waited all dependent events.
                     # Initialize the dependent event list.
                     self.dependent_events = []
+
+                    #Mark state of inout and out to written
+                    #Invalidate other copies
+
+                    write_flag = True
+
+                    #TODO: Replace with the new function that does this that I can't remember the name of right now
+                    dev_type = get_current_devices()[0]
+                    dev_no = -1
+                    if (dev_type.architecture is not cpu):
+                        dev_no = dev_type.index
+
+                    #Note: This should NEVER perform a copy. Only invalidate the data.
+                    #Note Note: If it does ever perform a copy, its probably fine but slow?
+                    #TODO: Add new parray syntax to disable copy and only invalidate (useful for OUTs)
+                    for data in self.dataflow.output:
+                        data._auto_move(device_id = dev_no, do_write = write_flag)
+
+                    for data in self.dataflow.inout:
+                        data._auto_move(device_id = dev_no, do_write = write_flag)
+
+                    #Run the task body via magic yield callback
                     task_state = self._state.func(self, *self._state.args)
                     env.record_events()
                     if len(self.events) > 0:
@@ -698,7 +720,7 @@ class DataMovementTask(Task):
                     # Already waited all dependent events.
                     # Initialize the dependent event list.
                     self.dependent_events = []
-                    write_flag = True
+                    write_flag = False
                     if (self._operand_type == OperandType.IN):
                         write_flag = False
                     # Move data to current device
@@ -1040,13 +1062,13 @@ class ParrayTracker():
     which is stored in PArrays. This is tracked separately from the PArray's
     tracking information because the Scheduler knows where a given PArray will
     be in the future. This class holds tracking information.
-    
+
     Currently it's a dumb class, basically just a C-struct, whose members are
     managed by the ResourcePool.
     """
     nbytes: int
     locations: Dict[Device, bool]
-    
+
     def __init__(self):
         self.nbytes = 0
         self.locations = {}
@@ -1204,7 +1226,7 @@ class ResourcePool:
                 parray_tracker.locations[device] = True
 
                 logger.debug(f"[ResourcePool]   - %r", device)
-                
+
                 # Update the resource usage at this location
                 self.allocate_resources(device, {'memory' : parray.nbytes})
             else:
@@ -1469,7 +1491,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             # Ensure that the device has enough resources for the task
             if not self._available_resources.check_resources_availability(device, task.req.resources):
                 continue
-            
+
             # THIS IS THE MEAT OF THE MAPPING POLICY
             # We calculate a few constants based on data locality and load balancing
             # We then add those together with tunable weights to determine a suitability
@@ -1501,7 +1523,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             # TODO (ses): Ignore this if the dependency has finished running!
             if best_device_owns_dependency and not this_device_owns_dependency and best_device_local_data >= local_data:
                 continue
-            
+
             # Next we calculate the load-balancing factor
             # For now this is just a count of tasks on the device queue (TODO (ses): better heuristics later...)
             dev_load = self._device_compute_task_counts[device]
@@ -1537,7 +1559,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 best_device = device
                 best_device_owns_dependency = this_device_owns_dependency
                 best_device_local_data = local_data
-        
+
         if best_device is None:
             logger.debug(f"[Scheduler] Failed to map %r.", task)
             return False
@@ -1647,8 +1669,10 @@ class Scheduler(ControllableThread, SchedulerContext):
                 if compute_task.is_dependent(dep_task):
                     if not datamove_task._add_dependency(dep_task):
                         completed_tasks.append(dep_task_id)
-            dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
-        self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
+            #dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
+
+        if operand_type != OperandType.IN:
+            self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
         # If a task has no dependency after it is assigned to devices,
         # immediately enqueue a corresponding data movement task to
         # the ready queue.
@@ -1675,8 +1699,11 @@ class Scheduler(ControllableThread, SchedulerContext):
                         #            will use logical values to make it easy to understand.
                         for data in task.dataflow.input:
                             self._construct_datamove_task(data, task, OperandType.IN)
-                        for data in task.dataflow.output:
-                            self._construct_datamove_task(data, task, OperandType.OUT)
+
+                        #OUTPUT only doesn't need a datamovement task.
+                        #for data in task.dataflow.output:
+                        #    self._construct_datamove_task(data, task, OperandType.OUT)
+
                         for data in task.dataflow.inout:
                             self._construct_datamove_task(data, task, OperandType.INOUT)
 
