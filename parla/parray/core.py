@@ -114,6 +114,7 @@ class PArray:
                 else:  # GPU to GPU
                     dst_data = cupy.empty_like(array)
                     dst_data.data.copy_from_device_async(array.data, array.nbytes)
+                    cupy.cuda.get_current_stream().synchronize()
                     self._array[this_device] = dst_data
 
     def evict_all(self) -> None:
@@ -215,6 +216,7 @@ class PArray:
             src_data = self._array[src]
             dst_data = cupy.empty_like(src_data)
             dst_data.data.copy_from_device_async(src_data.data, src_data.nbytes)
+            cupy.cuda.stream.get_current_stream().synchronize()
             self._array[dst] = dst_data
         else: # copy from GPU to CPU
             self._array[CPU_INDEX] = cupy.asnumpy(self._array[src])
