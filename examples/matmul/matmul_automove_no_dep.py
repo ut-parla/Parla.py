@@ -57,7 +57,7 @@ def main():
 
         distribute=True
         reset=True
-        fixed_placement=True
+        fixed_placement=False
         verbose=False
         sync=False
 
@@ -113,7 +113,7 @@ def main():
                     b_block = b_part[j]
                     c_block = c_part[i][j]
 
-                    memsize = (2*block_size**2 + block_size*n*2)*4
+                    memsize = (block_size**2)*4
 
                     if fixed_placement:
                         loc = gpu(i%ngpus)
