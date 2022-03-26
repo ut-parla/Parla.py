@@ -1774,28 +1774,25 @@ class Scheduler(ControllableThread, SchedulerContext):
     # For example, in the future, the runtime will allow two task colocations
     # of computation, moving data in, and moving data out.
     # TODO(lhc): for now, the CPU/GPU launchers are same.
+    # Note that we don't check resource availability here.
+    # The mapper only maps tasks which have enough resources to run.
+    # It's guaranteed for the task to have enough resources
 
     def _launch_cpu_task(self, queue, task: Task, dev: Device):
-        if self._available_resources.check_resources_availability(dev, task.req.resources):
-            worker = self._free_worker_threads.pop() # grab a worker
-            logger.info(f"[Scheduler] Launching CPU task, %r on %r",
-                        task, worker)
-            # Assign the task to the worker (this notifies the worker's monitor)
-            worker.assign_task(task)
-            logger.debug(f"[Scheduler] Launched %r", task)
-        else:
-            queue.appendleft(task)
+        worker = self._free_worker_threads.pop() # grab a worker
+        logger.info(f"[Scheduler] Launching CPU task, %r on %r",
+                    task, worker)
+        # Assign the task to the worker (this notifies the worker's monitor)
+        worker.assign_task(task)
+        logger.debug(f"[Scheduler] Launched %r", task)
 
     def _launch_gpu_task(self, queue, task: Task, dev: Device):
-        if self._available_resources.check_resources_availability(dev, task.req.resources):
-            worker = self._free_worker_threads.pop() # grab a worker
-            logger.info(f"[Scheduler] Launching GPU task, %r on %r",
-                        task, worker)
-            # Assign the task to the worker (this notifies the worker's monitor)
-            worker.assign_task(task)
-            logger.debug(f"[Scheduler] Launched %r", task)
-        else:
-            queue.appendleft(task)
+        worker = self._free_worker_threads.pop() # grab a worker
+        logger.info(f"[Scheduler] Launching GPU task, %r on %r",
+                    task, worker)
+        # Assign the task to the worker (this notifies the worker's monitor)
+        worker.assign_task(task)
+        logger.debug(f"[Scheduler] Launched %r", task)
 
     def _launch_tasks(self):
         """ Iterate through free devices and launch tasks on them
