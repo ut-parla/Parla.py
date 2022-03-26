@@ -379,25 +379,6 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         # Compute the flat dependency set (including unwrapping TaskID objects)
         deps = tasks(*dependencies)._flat_tasks
 
-        # _flat_tasks appends two types of objects to deps.
-        # If a task corresponding to a task id listed on the dependencies
-        # is already spawned (materialized), it appends the task object.
-        # Otherwise, a task corresponding to the task id is not yet spawned
-        # and, in this case, appends its id which is not spawned yet as a key,
-        # and the dependee task id which waits for the dependent task to the
-        # wait_dependees_collection dictionary wrapper.
-        # The tasks on that dictionary is not spawned until all
-        # dependent tasks are spawned.
-        spawned_deps = []
-        for dep in list(deps):
-            if isinstance(dep, TaskID):
-                # If the dep is not yet spawned, temporarily removes it from
-                # a task's dependency list.
-                unspawned_dependencies.add(dep, taskid)
-            else:
-                spawned_deps.append(dep)
-        num_unspawned_deps = len(deps) - len(spawned_deps)
-
         if inspect.iscoroutine(body):
             # An already running coroutine does not need changes since we assume
             # it was changed correctly when the original function was spawned.
@@ -425,11 +406,10 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         task = task_runtime.get_scheduler_context().spawn_task(
             function=_task_callback,
             args=(separated_body,),
-            deps=spawned_deps,
+            deps=deps,
             taskid=taskid,
             req=req,
             dataflow=dataflow,
-            num_unspawned_deps=num_unspawned_deps,
             name=getattr(body, "__name__", None))
 
         logger.debug("Created: %s %r", taskid, body)
