@@ -341,16 +341,6 @@ class Task:
             return tuple(self._predecessors)
 
     @property
-    def successors(self) -> Tuple["Task"]:
-        """
-        A tuple of the currently known tasks that depend on self.
-
-        Successor tasks may be added at any time during the life of this task
-        but are never removed.
-        """
-        return tuple(self._successors)
-
-    @property
     def result(self):
         if isinstance(self._state, TaskCompleted):
             return self._state.ret
@@ -358,8 +348,73 @@ class Task:
             raise self._state.exc
 
     @abstractmethod
-    def run(self):
+    def _run(self) -> Optional[TaskState]:
+        """Execution of the task."""
         raise NotImplementedError()
+    
+    @abstractmethod
+    def _post_run(self):
+        """Cleanup works after executing the task."""
+        raise NotImplementedError()
+    
+    def run(self):
+        assert self._assigned, "Task was not assigned before running."
+        assert isinstance(self.req, EnvironmentRequirements), \
+            "Task was not assigned a specific environment requirement before running."
+        try:
+            # A default state to avoid exceptions during catch
+            task_state = TaskException(RuntimeError("Unknown fatal error"))
+            # Run the task and assign the new task state
+            try:
+                assert isinstance(self._state, TaskRunning)
+                # TODO(lhc): This assumes Parla only has two devices.
+                #            The reason why I am trying to do is importing
+                #            Parla's cuda.py is expensive.
+                #            Whenever we import cuda.py, cupy compilation
+                #            is invoked. We should remove or avoid that.
+
+                # First, create device/stream/event instances.
+                # Second, gets the created event instance.
+                # Third, it scatters the event to successors who wait for
+                # the current task.
+                env = self.req.environment
+                with _scheduler_locals._environment_scope(env), env:
+                    events = env.get_events_from_components()
+                    self._wait_for_predecessor_events(env)
+                    task_state = self._run()
+                    # Events could be multiple for multiple devices task.
+                    env.record_events()
+                    if len(events) > 0:
+                        # If any event created by the current task exist,
+                        # notify successors and make them wait for that event,
+                        # not Parla task completion.
+                        self._notify_successors_mutex(events)
+                    env.sync_events()
+                task_state = task_state or TaskCompleted(None)
+            except Exception as e:
+                task_state = TaskException(e)
+                logger.exception("Exception in task")
+            finally:
+                logger.info("Finally for task %r", self)
+
+                self._post_run()
+
+                # Protect the case that it notifies successors and
+                # any successor task is spawned before setting state.
+                with self._mutex:
+                    # Regardless of the previous notification,
+                    # (So, before leaving the current run(), the above)
+                    # it should notify successors since
+                    # new successors could be added after the above
+                    # notifications, while other devices are running
+                    # their kernels asynchronously.
+                    self._notify_successors()
+                    self._set_state(task_state)
+
+        except Exception as e:
+            logger.exception("Task %r: Exception in task handling", self)
+            raise e
+
 
     def set_assigned(self):
         with self._mutex:
@@ -405,11 +460,10 @@ class Task:
         """Add the successor if self is not completed, otherwise return False."""
         if self._state.is_terminal:
             return False
-        else:
-            logger.debug("Task, %s added a successor, %s",
-                         self.name, successor)
-            self._successors.append(successor)
-            return True
+        logger.debug("Task %s added a successor, %s",
+                        self.name, successor)
+        self._successors.append(successor)
+        return True
 
     def _notify_successors_mutex(self, events=None):
         with self._mutex:
@@ -513,7 +567,7 @@ class ComputeTask(Task):
             dt = d_tid.task
             assert isinstance(dt, ComputeTask), type(dt)
             dt._handle_predecessor_spawn(self)
-            self._successors.append(dt)
+            self._add_successor(dt)
 
     def _ready_to_map(self):
         assert self.num_unspawned_predecessors == 0
@@ -531,76 +585,24 @@ class ComputeTask(Task):
             if self.num_unspawned_predecessors == 0:
                 self._ready_to_map()
 
-    def run(self):
+    def _run(self):
+        return self._state.func(self, *self._state.args)
+
+    def _post_run(self):
         ctx = get_scheduler_context()
-        task_state = TaskException(RuntimeError("Unknown fatal error"))
-        assert self._assigned, "Task was not assigned before running."
-        assert isinstance(self.req, EnvironmentRequirements), \
-            "Task was not assigned a specific environment requirement before running."
-        try:
-            # Run the task and assign the new task state
-            try:
-                assert isinstance(self._state, TaskRunning)
-                # TODO(lhc): This assumes Parla only has two devices.
-                #            The reason why I am trying to do is importing
-                #            Parla's cuda.py is expensive.
-                #            Whenever we import cuda.py, cupy compilation
-                #            is invoked. We should remove or avoid that.
+        # Deallocate resources
+        for d in self.req.devices:
+            for resource, amount in self.req.resources.items():
+                logger.debug("Task %r deallocating %d %s from device %r", self, amount, resource, d)
+            ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
+            ctx.scheduler._device_compute_task_counts[d] -= 1
 
-                # First, create device/stream/event instances.
-                # Second, gets the created event instance.
-                # Third, it scatters the event to successors who wait for
-                # the current task.
-                env = self.req.environment
-                with _scheduler_locals._environment_scope(env), env:
-                    events = env.get_events_from_components()
-                    self._wait_for_predecessor_events(env)
-                    task_state = self._state.func(self, *self._state.args)
-                    env.record_events()
-                    if len(events) > 0:
-                        # If any event created by the current task exist,
-                        # notify successors and make them wait for that event,
-                        # not Parla task completion.
-                        self._notify_successors_mutex(events)
-                    env.sync_events()
-                if task_state is None:
-                    task_state = TaskCompleted(None)
-            except Exception as e:
-                task_state = TaskException(e)
-                logger.exception("Exception in task")
-            finally:
-                logger.info("Finally for task %r", self)
+        # Update OUT parrays which may have changed size from 0 to something
+        # We assume all IN and INOUT params don't change size
+        for parray in (self.dataflow.output):
+            ctx.scheduler._available_resources.update_parray_nbytes(parray, self.req.devices)
 
-                # Deallocate resources
-                for d in self.req.devices:
-                    for resource, amount in self.req.resources.items():
-                        logger.debug("Task %r deallocating %d %s from device %r", self, amount, resource, d)
-                    ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
-                    ctx.scheduler._device_compute_task_counts[d] -= 1
-
-                # Update OUT parrays which may have changed size from 0 to something
-                # We assume all IN and INOUT params don't change size
-                for parray in (self.dataflow.output):
-                    ctx.scheduler._available_resources.update_parray_nbytes(parray, self.req.devices)
-
-                ctx.scheduler.decr_active_compute_tasks()
-
-                # Protect the case that it notifies successors and
-                # any successor task is spawned before setting state.
-                with self._mutex:
-                    # Regardless of the previous notification,
-                    # (So, before leaving the current run(), the above)
-                    # it should notify successors since
-                    # new successors could be added after the above
-                    # notifications, while other devices are running
-                    # their kernels asynchronously.
-                    self._notify_successors()
-                    self._set_state(task_state)
-
-        except Exception as e:
-            logger.exception("Task %r: Exception in task handling", self)
-            raise e
-
+        ctx.scheduler.decr_active_compute_tasks()
 
 class OperandType(Enum):
     IN = 0
@@ -624,77 +626,28 @@ class DataMovementTask(Task):
             self._target_data = target_data
             self._operand_type = operand_type
 
-    def run(self):
-        logger.debug(f"[DataMovementTask %s] Starting", self.name)
-        assert self._assigned, "Task was not assigned before running."
-        assert isinstance(self.req, EnvironmentRequirements), \
-            "Task was not assigned a specific environment requirement before running."
-
-        try:
-            # A default state to avoid exceptions inside catch
-            task_state = TaskException(RuntimeError("Unknown fatal error"))
-            # Run the task and assign the new task state
-            try:
-                assert isinstance(self._state, TaskRunning)
-                # First, create device/stream/event instances.
-                # Second, gets the created event instance.
-                # Third, it scatters the event to successors who wait for
-                # the current task.
-                env = self.req.environment
-                with _scheduler_locals._environment_scope(env), env:
-                    events = env.get_events_from_components()
-                    self._wait_for_predecessor_events(env)
-                    write_flag = True
-                    if (self._operand_type == OperandType.IN):
-                        write_flag = False
+    def _run(self):
+        write_flag = True
+        if (self._operand_type == OperandType.IN):
+            write_flag = False
                     # Move data to current device
-                    dev_type = get_current_devices()[0]
-                    dev_no = -1
-                    if (dev_type.architecture is not cpu):
-                        dev_no = dev_type.index
-                    self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
-                    # Events could be multiple for multiple devices task.
-                    env.record_events()
-                    if len(events) > 0:
-                        # If any event created by the current task exist,
-                        # notify successors and make them wait for that event,
-                        # not Parla task completion.
-                        self._notify_successors_mutex(events)
-                    env.sync_events()
-                # TODO(lhc):
-                #if task_state is None:
-                task_state = TaskCompleted(None)
-            except Exception as e:
-                task_state = TaskException(e)
-                logger.exception("Exception in task")
-            finally:
-                logger.info("Finally for task %r", self)
+        dev_type = get_current_devices()[0]
+        dev_no = -1
+        if (dev_type.architecture is not cpu):
+            dev_no = dev_type.index
+        self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
+        return TaskCompleted(None)
 
-                # DON'T deallocate resources!
-                # DataMovementTask has the same resources as the ComputeTask which created it
-                # That ComputeTask will do the deallocation
-                # If we do it here, we overly deallocate
+    def _post_run(self):
+        # DON'T deallocate resources!
+        # DataMovementTask has the same resources as the ComputeTask which created it
+        # That ComputeTask will do the deallocation
+        # If we do it here, we overly deallocate
 
-                # Don't update parray tracking information either
-                # The scheduler already registered the new location
-                # If size changes, the ComputeTask will take care of that
-
-                # Protect the case that it notifies successors and
-                # any successor task is spawned before setting state.
-                with self._mutex:
-                    # Regardless of the previous notification,
-                    # (So, before leaving the current run(), the above)
-                    # it should notify successors since
-                    # new successors could be added after the above
-                    # notifications, while other devices are running
-                    # their kernels asynchronously.
-                    self._notify_successors()
-                    self._set_state(task_state)
-
-        except Exception as e:
-            logger.exception("Task %r: Exception in task handling", self)
-            raise e
-
+        # Don't update parray tracking information either
+        # The scheduler already registered the new location
+        # If size changes, the ComputeTask will take care of that
+        return
 
 class _TaskLocals(threading.local):
     def __init__(self):
