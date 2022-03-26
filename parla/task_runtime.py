@@ -394,7 +394,7 @@ class Task:
 
     def is_dependent_on(self, cand: "Task"):
         with self._mutex: # TODO(bozhi): Why?
-            return cand in self._predecessors
+            return cand in self.predecessors
 
     def _add_successor_mutex(self, successor: "Task") -> bool:
         """Add the successor if self is not completed, otherwise return False."""
@@ -424,10 +424,13 @@ class Task:
         with self._mutex:
             return self._add_predecessor(dependency)
 
-    def _add_predecessor(self, predecessor: 'Task') -> bool:
+    def _add_predecessor(self, predecessor: 'Task', symmetric=True) -> bool:
+        """
+        :param symmetric: If true, add self as succesor to predecessor as well
+        """
         self._num_blocking_predecessors += 1
         self._predecessors.append(predecessor)
-        if not predecessor._add_successor_mutex(self):
+        if symmetric and not predecessor._add_successor_mutex(self):
             self._num_blocking_predecessors -= 1
             return False
         return True
@@ -509,7 +512,7 @@ class ComputeTask(Task):
         for d_tid in successors:
             dt = d_tid.task
             assert isinstance(dt, ComputeTask), type(dt)
-            dt.decr_num_unspawned_deps(self)
+            dt._handle_predecessor_spawn(self)
             self._successors.append(dt)
 
     def _ready_to_map(self):
@@ -521,11 +524,10 @@ class ComputeTask(Task):
         # The task could have dependencies.
         get_scheduler_context().enqueue_spawned_task(self)
 
-    def decr_num_unspawned_deps(self, predecessor: "Task"):
+    def _handle_predecessor_spawn(self, predecessor: "Task"):
         with self._mutex:
             self.num_unspawned_predecessors -= 1
-            self._num_blocking_predecessors += 1
-            self._predecessors.append(predecessor)
+            self._add_predecessor(predecessor, symmetric=False)
             if self.num_unspawned_predecessors == 0:
                 self._ready_to_map()
 
