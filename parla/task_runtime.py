@@ -1306,8 +1306,8 @@ class Scheduler(ControllableThread, SchedulerContext):
     _free_worker_threads: Deque[WorkerThread]
     _available_resources: ResourcePool
     _device_mapped_compute_task_counts: Dict[Device, int]
-    _device_compute_task_counts: Dict[Device, int]
-    _device_datamove_task_counts: Dict[Device, int]
+    _device_launched_compute_task_counts: Dict[Device, int]
+    _device_launched_datamove_task_counts: Dict[Device, int]
     _num_colocatable_tasks: int
     period: float
 
@@ -1368,8 +1368,8 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         # The number of in-flight compute tasks on each device
         self._device_mapped_compute_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
-        self._device_compute_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
-        self._device_datamove_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
+        self._device_launched_compute_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
+        self._device_launched_datamove_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
 
         # Dictinary mapping data block to task lists.
         self._datablock_dict = defaultdict(list)
@@ -1671,22 +1671,22 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     # TODO(lhc): should be refactored by decorator later.
 
-    def update_launched_task_count_mutex(self, task, dev, weight):
+    def update_launched_task_count_mutex(self, task, dev, counts):
         with self._monitor:
             if isinstance(task, ComputeTask):
-                self._device_compute_task_counts[dev] += weight
+                self._device_launched_compute_task_counts[dev] += counts
             else:
-                self._device_datamove_task_counts[dev] += weight
+                self._device_launched_datamove_task_counts[dev] += counts
 
-    def update_launched_task_count(self, task, dev, weight):
+    def update_launched_task_count(self, task, dev, counts):
         if isinstance(task, ComputeTask):
-            self._device_compute_task_counts[dev] += weight
+            self._device_launched_compute_task_counts[dev] += counts
         else:
-            self._device_datamove_task_counts[dev] += weight
+            self._device_launched_datamove_task_counts[dev] += counts
 
-    def update_mapped_compute_task_count(self, dev, weight):
+    def update_mapped_compute_task_count(self, dev, counts):
         with self._monitor:
-           self._device_mapped_compute_task_counts[dev] += weight
+           self._device_mapped_compute_task_counts[dev] += counts
 
     def _construct_datamove_task(self, target_data, compute_task: ComputeTask, operand_type: OperandType):
         """
@@ -1839,16 +1839,16 @@ class Scheduler(ControllableThread, SchedulerContext):
                 datamove_queue = self._datamove_task_dev_queues[dev]
                 if len(compute_queue) > 0:
                     try:
-#print("num of compute tasks on dev:", dev, " :", self._device_compute_task_counts)
-                        if self._device_compute_task_counts[dev] \
+#print("num of compute tasks on dev:", dev, " :", self._device_launched_compute_task_counts)
+                        if self._device_launched_compute_task_counts[dev] \
                                 < (self._num_colocatable_tasks + 1):
                             self._launch_task(compute_queue, dev)
                     finally:
                         pass
                 if len(datamove_queue) > 0:
                     try:
-#print("num of data move tasks on dev:", dev, " :", self._device_datamove_task_counts)
-                        if self._device_datamove_task_counts[dev] \
+#print("num of data move tasks on dev:", dev, " :", self._device_launched_datamove_task_counts)
+                        if self._device_launched_datamove_task_counts[dev] \
                                 < (self._num_colocatable_tasks + 1):
                             self._launch_task(datamove_queue, dev)
                     finally:
