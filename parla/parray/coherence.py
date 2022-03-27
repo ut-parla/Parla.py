@@ -130,7 +130,7 @@ class Coherence:
             else:
                 return MemoryOperation.check_data(device_id)  # check if the data is ready
 
-    def write(self, device_id: int) -> List[MemoryOperation]:
+    def write(self, device_id: int, copy: bool=True) -> List[MemoryOperation]:
         """ Tell the protocol that this device write to the copy.
 
         Args:
@@ -150,7 +150,10 @@ class Coherence:
                     prev_owner = self._owner
 
                     self._data_ready[device_id] = False
-                    operations = [MemoryOperation.load(dst=device_id, src=prev_owner)]
+                    if copy:
+                        operations = [MemoryOperation.load(dst=device_id, src=prev_owner)]
+                    else:
+                        operations = [MemoryOperation.noop()]
 
                     # evict data from other devices
                     for device, state in self._local_states.items():
@@ -168,7 +171,11 @@ class Coherence:
                     # load data from previous owner
                     prev_owner = self._owner
                     self._data_ready[device_id] = False
-                    operations = [MemoryOperation.load(dst=device_id, src=prev_owner)]
+
+                    if copy:
+                        operations = [MemoryOperation.load(dst=device_id, src=prev_owner)]
+                    else:
+                        operations = [MemoryOperation.noop()]
 
                     # evict data from previous owner
                     self._local_states[prev_owner] = self.INVALID
