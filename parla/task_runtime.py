@@ -17,7 +17,7 @@ from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
 from parla.cpu_impl import cpu
 
 # Logger configuration (uncomment and adjust level if needed)
-#logging.basicConfig(level = logging.INFO)
+#logging.basicConfig(level = logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -423,8 +423,7 @@ class Task:
         if self._state.is_terminal:
             return False
         else:
-            logger.debug("Task, %s added a dependee, %s",
-                         self.name, dependee)
+            logger.debug("Task, %s added a dependee, %s", self.name, dependee.name)
             self._dependees.append(dependee)
             return True
 
@@ -1043,13 +1042,13 @@ class ParrayTracker():
     which is stored in PArrays. This is tracked separately from the PArray's
     tracking information because the Scheduler knows where a given PArray will
     be in the future. This class holds tracking information.
-    
+
     Currently it's a dumb class, basically just a C-struct, whose members are
     managed by the ResourcePool.
     """
     nbytes: int
     locations: Dict[Device, bool]
-    
+
     def __init__(self):
         self.nbytes = 0
         self.locations = {}
@@ -1207,7 +1206,7 @@ class ResourcePool:
                 parray_tracker.locations[device] = True
 
                 logger.debug(f"[ResourcePool]   - %r", device)
-                
+
                 # Update the resource usage at this location
                 self.allocate_resources(device, {'memory' : parray.nbytes})
             else:
@@ -1482,7 +1481,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             # Ensure that the device has enough resources for the task
             if not self._available_resources.check_resources_availability(device, task.req.resources):
                 continue
-            
+
             # THIS IS THE MEAT OF THE MAPPING POLICY
             # We calculate a few constants based on data locality and load balancing
             # We then add those together with tunable weights to determine a suitability
@@ -1548,7 +1547,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 max_suitability = suitability
                 best_device = device
                 best_device_local_data = local_data
-        
+
         if best_device is None:
             logger.debug(f"[Scheduler] Failed to map %r.", task)
             return False
@@ -1610,7 +1609,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             # Ensure that the device has enough resources for the task
             if self._available_resources.check_resources_availability(device, task.req.resources):
                 valid_devices.append(device)
-        
+
         if len(valid_devices) == 0:
             logger.debug(f"[Scheduler] Failed to map %r.", task)
             return False
