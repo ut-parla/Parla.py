@@ -62,6 +62,9 @@ class PArray:
             # which is the combine of parent id and slice hash
             self.parent_ID = parent.ID
             self.ID = parent.ID * 31 + self._slices_hash  # use a prime number to avoid collision
+
+            self.size = parent.size
+            self.nbytes = parent.nbytes
         else:  # initialize a new PArray
             # per device buffer of data
             self._array = MultiDeviceBuffer(num_gpu)
@@ -84,8 +87,8 @@ class PArray:
             self.parent_ID = None  # no parent
             self.ID = id(self._array)
 
-        self.size = array.size
-        self.nbytes = array.nbytes
+            self.size = array.size
+            self.nbytes = array.nbytes
 
     # Properties:
 
@@ -138,27 +141,27 @@ class PArray:
 
     # Public API:
 
+    def exists_on_device(self, device_id):
+        return (self._array._buffer[device_id] is not None)
+
     def update(self, array) -> None:
         """ Update the copy on current device.
+        Previous copy on other device are lost.
+        This will replace the internal buffer and coherence object completly.
 
         Args:
             array: :class:`cupy.ndarray` or :class:`numpy.array` object
 
         Note: should be called within the current task context
         Note: data should be put in OUT/INOUT fields of spawn
-        Note: `array` should has the same shape with this array's shape
         """
-        self.size = array.size
-        self.nbytes = array.nbytes
-
         this_device = self._current_device_index
 
-        # check shape is consistent
-        if array.shape != self._array.shape:
-            raise ValueError(f"array shape is not consistent with current one, "
-                             f"given array shape: {array.shape}, "
-                             f"current array shape: {self._array.shape} ")
+        # clean up data
+        self._array._buffer = {n: None for n in range(num_gpu)}
+        self._array._buffer[CPU_INDEX] = None
 
+        # copy new data to buffer
         if isinstance(array, numpy.ndarray):
             if this_device != CPU_INDEX:  # CPU to GPU
                 self._array.set(this_device, cupy.asarray(array))
@@ -174,6 +177,18 @@ class PArray:
                     dst_data = cupy.empty_like(array)
                     dst_data.data.copy_from_device_async(array.data, array.nbytes)
                     self._array.set(this_device, dst_data)
+
+        # update size
+        self.size = array.size
+        self.nbytes = array.nbytes
+
+        # reset coherence
+        self._coherence = Coherence(this_device, num_gpu)
+
+        # update shape
+        self._array.shape = array.shape
+
+        cupy.cuda.stream.get_current_stream().synchronize()
 
     # slicing/indexing
 

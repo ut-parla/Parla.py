@@ -78,21 +78,6 @@ class MultiDeviceBuffer:
             else:
                 self._buffer[device_id].append(array)
 
-    def clear(self, device_id: int, subarray_index:int = 0):
-        """
-        Clean the copy from buffer, `subarray_index` is ignored if this is a complete copy
-        """
-        if self._indices_map[device_id] is not None:  # subarray
-            del self._indices_map[device_id][subarray_index]
-            del self._buffer[device_id][subarray_index]
-            
-            if len(self._indices_map[device_id]) == 0:
-                self._indices_map[device_id] = None
-            if len(self._buffer[device_id]) == 0:
-                self._buffer[device_id] = None
-        else:
-            self._buffer[device_id] = None
-
     def get(self, device_id: int) -> ndarray | List[ndarray] | None:
         """
         Return the copy at a device
