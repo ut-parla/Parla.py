@@ -12,20 +12,24 @@ class MemoryOperation:
     """
     A memory operation representation.
     """
+    inst: int
+    dst: int
+    src: int
+
+    # OpCode
     ERROR = -1
     NOOP = 0
     LOAD = 1
     EVICT = 2
     CHECK_DATA = 3
-    LOAD_SUB = 4
 
-    inst: int
-    dst: int
-    src: int
-
+    # Flag
     SWITCH_DEVICE_FLAG = 101  # if the flag is set, it means dst is not the current device
+    SKIP_SRC_CHECK = 102      # if the flag is set, no need to hold condition variable of src
+    LOAD_SUBARRAY = 103       # if the flag is set, it means a subarray of src should be loaded
+    ENSURE_IS_COMPLETE = 104  # if the flag is set, check data will also check if the data is complete
 
-    def __init__(self, inst: int = NOOP, dst: int = -1, src: int = -1, flag: int = None):
+    def __init__(self, inst: int = NOOP, dst: int = -1, src: int = -1, flag: int = []):
         self.inst = inst
         self.dst = dst
         self.src = src
@@ -42,16 +46,27 @@ class MemoryOperation:
         return MemoryOperation(MemoryOperation.ERROR)
 
     @staticmethod
-    def load(dst: int, src: int, on_different_device: bool = False) -> MemoryOperation:
+    def load(dst: int, src: int, on_different_device: bool = False, skip_src_check: bool = False, is_subarray: bool = False) -> MemoryOperation:
         """ load all data from src to dst 
         
-        Need to switch device if "on_different_device" is true
+        Need to switch device if `on_different_device` is true
         This could known by checking flag = SWITCH_DEVICE_FLAG
+        
+        Skip checking condition variable of src if `skip_src_check` is set
+        This could known by checking flag = MemoryOperation.SKIP_SRC_CHECK
+
+        If `is_subarray` is True, it means a subarray of src will be loaded
+        This could known by checking flag = MemoryOperation.LOAD_SUBARRAY
         """
+        flag = []
+        if is_subarray:
+            flag.append(MemoryOperation.LOAD_SUBARRAY)
         if on_different_device:
-            return MemoryOperation(MemoryOperation.LOAD, dst, src, flag=MemoryOperation.SWITCH_DEVICE_FLAG)
-        else:
-            return MemoryOperation(MemoryOperation.LOAD, dst, src)
+            flag.append(MemoryOperation.SWITCH_DEVICE_FLAG)
+        if skip_src_check:  
+            flag.append(MemoryOperation.SKIP_SRC_CHECK)
+        
+        return MemoryOperation(MemoryOperation.LOAD, dst, src, flag)
 
     @staticmethod
     def evict(src: int) -> MemoryOperation:
@@ -59,14 +74,18 @@ class MemoryOperation:
         return MemoryOperation(MemoryOperation.EVICT, src=src)
 
     @staticmethod
-    def check_data(src: int) -> MemoryOperation:
-        """ check if the data is ready, wait if not """
-        return MemoryOperation(MemoryOperation.CHECK_DATA, src=src)
+    def check_data(src: int, ensure_is_complete:bool = False) -> MemoryOperation:
+        """ check if the data is ready, wait if not 
 
-    @staticmethod
-    def load_subarray(dst: int, src: int) -> MemoryOperation:
-        """ load a subarray from src to dst """
-        return MemoryOperation(MemoryOperation.LOAD_SUB, dst, src)
+        If `ensure_is_complete` is True
+        if means need to wait until and data is completed and ready.
+        This could known by checking flag = MemoryOperation.ENSURE_IS_COMPLETE
+        """
+        flag = []
+        if ensure_is_complete:
+            flag.append(MemoryOperation.ENSURE_IS_COMPLETE)
+
+        return MemoryOperation(MemoryOperation.CHECK_DATA, src=src, flag=flag)
 
 
 class Coherence:
@@ -105,8 +124,8 @@ class Coherence:
         self._versions[CPU_INDEX] = -1
 
         # fields used to support fine grained data movement
-        self._is_complete = {n: False for n in range(num_gpu)}  # does the device own a complete copy?
-        self._is_complete[CPU_INDEX] = False
+        self._is_complete = {n: None for n in range(num_gpu)}  # does the device own a complete copy? None means neither
+        self._is_complete[CPU_INDEX] = None
 
         self._local_states[init_owner] = self.MODIFIED      # initial state is MODIFIED
         self.owner = init_owner                             # the device that has the complete copy (take the role of main memory)
@@ -127,11 +146,15 @@ class Coherence:
         # held the lock when updating states
         self._lock = threading.Lock()
 
-    def data_is_ready(self, device_id: int) -> bool:
+    def data_is_ready(self, device_id: int, ensure_is_complete: bool = False) -> bool:
         """
         Return True if data on `device_id` is ready to use, and there is no copy in progress.
+
+        If `ensure_is_complete` is True, return false is the data is not complete even if it is ready
         """
-        if isinstance(self._data_ready[device_id], dict):
+        if isinstance(self._data_ready[device_id], dict):  # there are subarrays on this devices
+            if ensure_is_complete:
+                return False   # data should be complete
             return not (False in self._data_ready[device_id].values())  # all subarray need to be ready
         else:
             return self._data_ready[device_id]
@@ -154,7 +177,8 @@ class Coherence:
         """True if owner's has latest version"""
         return self._versions[self.owner] == self._latest_version
 
-    def _write_back_to(self, device_id:int, new_state:int, on_different_device:bool = False) -> List[MemoryOperation]:
+    def _write_back_to(self, device_id:int, new_state:int, on_different_device:bool = False, 
+                       this_device_id: int = None, skip_src_check_id: int = None) -> List[MemoryOperation]:
         """
         Generate the list of write back MemoryOperation.
         Which make `device_id` has the latest version with a complete copy.
@@ -163,6 +187,8 @@ class Coherence:
             device_id: id of this device
             new_state: new state of `dcvice_id`
             on_different_device: True if this device is not current deivce
+            this_device_id: if `on_different_device` is True, this means current device ID. If None, ignore
+            skip_src_check_id: skip checking this device's src condition variable when it is not None
 
         Note: version will be updated
         """
@@ -182,7 +208,7 @@ class Coherence:
                     # invalidate all subarray
                     self._local_states[id] = self.INVALID
                     self._versions[id] = -1
-                    self._is_complete[id] = False
+                    self._is_complete[id] = None
                 else:
                     # change all states to SHARED
                     for hash, state in self._local_states[id].items():
@@ -202,6 +228,11 @@ class Coherence:
 
         if new_state == self.MODIFIED:
             evict_list = list(target)
+
+            # `this_device_id` is the device id of the final destionation
+            # so should write it back but not evict it
+            if this_device_id is not None:
+                evict_list.remove(this_device_id)
         else:
             evict_list = []
 
@@ -210,7 +241,8 @@ class Coherence:
 
         # update latest version
         self._versions[device_id] = self._latest_version
-        return [MemoryOperation.load(device_id, t, on_different_device) for t in target] + [MemoryOperation.evict(t) for t in evict_list]
+        return [MemoryOperation.load(device_id, t, on_different_device=on_different_device, skip_src_check=(skip_src_check_id == t)) for t in target] \
+               + [MemoryOperation.evict(t) for t in evict_list]
 
     def read(self, device_id: int, slices_hash: int = None) -> List[MemoryOperation]:
         """ Tell the protocol that this device read from the copy.
@@ -229,7 +261,7 @@ class Coherence:
 
         with self._lock:
             if slices_hash is not None: # move a subarray
-                if self._is_complete[device_id]:  # use existing complete data at this device
+                if self._is_complete[device_id] is True:  # use existing complete data at this device
                     device_local_state = self._local_states[device_id]
                 else:
                     if not isinstance(self._local_states[device_id], dict):
@@ -242,15 +274,12 @@ class Coherence:
                     else:
                         device_local_state = self.INVALID
                     self._is_complete[device_id] = False  # this is a subarray
-            elif not self._is_complete[device_id]:
+            elif self._is_complete[device_id] is False:
                 # special case: need a complete copy but there are already subarrays in this deivce
                 # writeback this subarrays and then copy complete data from owner
-                #
-                # to avoid race, ensure subarrays on this device are ready before move them
-                operations.append(MemoryOperation.check_data(device_id)) 
 
                 # write back to owner 
-                operations.extend(self._write_back_to(self.owner, self.SHARED, on_different_device=True))
+                operations.extend(self._write_back_to(self.owner, self.SHARED, on_different_device=True, this_device_id=device_id))
                 
                 # copy from owner
                 operations.append(MemoryOperation.load(device_id, self.owner))
@@ -279,9 +308,9 @@ class Coherence:
 
             if device_id == self.owner:
                 if device_local_state == self.SHARED:
-                    operations.append(MemoryOperation.check_data(device_id))  # check if the data is ready
+                    operations.append(MemoryOperation.check_data(device_id, ensure_is_complete=True))  # check if the data is ready
                 elif device_local_state == self.MODIFIED:
-                    operations.append(MemoryOperation.check_data(device_id))
+                    operations.append(MemoryOperation.check_data(device_id, ensure_is_complete=True))
                     # no need to check data is ready since assume no overlapping writers
                 else:  # update it to latest
                     self._data_ready[device_id] = False
@@ -299,14 +328,14 @@ class Coherence:
                         else:
                             self.owner = device_id
                     else:  # since we assume all array are disjoint, so could load directly
-                        operations.append(MemoryOperation.load_subarray(dst=device_id, src=self.owner)) 
+                        operations.append(MemoryOperation.load(dst=device_id, src=self.owner, is_subarray=True)) 
 
                         self._data_ready[device_id][slices_hash] = False
                         self._versions[device_id][slices_hash] = self._versions[self.owner]
                 elif device_local_state == self.MODIFIED:
-                    operations.append(MemoryOperation.check_data(device_id))
+                    operations.append(MemoryOperation.check_data(device_id, ensure_is_complete=self._is_complete[device_id]))
                 else:
-                    operations.append(MemoryOperation.check_data(device_id))
+                    operations.append(MemoryOperation.check_data(device_id, ensure_is_complete=self._is_complete[device_id]))
 
             # update status
             if self._is_complete[device_id]:
@@ -333,7 +362,7 @@ class Coherence:
 
         with self._lock:
             if slices_hash is not None: # move a subarray
-                if self._is_complete[device_id]:  # use existing complete data at this device
+                if self._is_complete[device_id] is True:  # use existing complete data at this device
                     device_local_state = self._local_states[device_id]
                 else:
                     if not isinstance(self._local_states[device_id], dict):
@@ -346,7 +375,7 @@ class Coherence:
                     else:
                         device_local_state = self.INVALID
                     self._is_complete[device_id] = False  # this is a subarray
-            elif not self._is_complete[device_id]:
+            elif self._is_complete[device_id] is False:
                 # special case: need a complete copy but there are already subarrays in this deivce
                 # writeback this subarrays and then copy complete data from owner
                 #
@@ -354,14 +383,15 @@ class Coherence:
                 # operations.append(MemoryOperation.check_data(device_id))
 
                 # write back to owner 
-                operations.extend(self._write_back_to(self.owner, self.MODIFIED, on_different_device=True))
+                operations.extend(self._write_back_to(self.owner, self.MODIFIED, 
+                                  on_different_device=True, this_device_id=device_id, skip_src_check_id=device_id))
                 
                 # copy from owner
                 operations.append(MemoryOperation.load(device_id, self.owner))
 
                 # update status
                 self._data_ready[self.owner] = False
-                self._data_ready[device_id] = False
+                self._data_ready[device_id] = False  # won't deadlock since `skip_src_check_id` is set
 
                 self._is_complete[device_id] = True
                 self._versions[device_id] = self._versions[self.owner]
@@ -369,7 +399,7 @@ class Coherence:
                 self._local_states[self.owner] = self.INVALID  # owner is invalid too
 
                 # change owner
-                self.owner = max(self.owner, device_id)
+                self.owner = device_id
 
                 # skip the rest code
                 return operations
@@ -401,7 +431,7 @@ class Coherence:
                         else:
                             self.owner = device_id
                     else:  # since we assume all array are disjoint, so could load directly
-                        operations.append(MemoryOperation.load_subarray(dst=device_id, src=self.owner))
+                        operations.append(MemoryOperation.load(dst=device_id, src=self.owner, is_subarray=True))
 
                         self._data_ready[device_id][slices_hash] = False
                         self._versions[device_id][slices_hash] = self._versions[self.owner] + 1
@@ -422,9 +452,9 @@ class Coherence:
                         self._versions[device_id][slices_hash] += 1
                         self._latest_version = max(self._latest_version, self._versions[device_id][slices_hash])
 
-                    operations.append(MemoryOperation.check_data(device_id))
+                    operations.append(MemoryOperation.check_data(device_id, ensure_is_complete=self._is_complete[device_id]))
                 else:
-                    operations.append(MemoryOperation.check_data(device_id))
+                    operations.append(MemoryOperation.check_data(device_id, ensure_is_complete=self._is_complete[device_id]))
 
             # update status
             if self._is_complete[device_id]:

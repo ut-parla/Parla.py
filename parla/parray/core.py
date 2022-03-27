@@ -264,12 +264,16 @@ class PArray:
                     with self._coherence_cv[op.src]:
                         while not self._coherence.data_is_ready(op.src):
                             self._coherence_cv[op.src].wait()
-            elif op.inst == MemoryOperation.LOAD or op.inst == MemoryOperation.LOAD_SUB:
+            elif op.inst == MemoryOperation.LOAD:
                 with self._coherence_cv[op.dst]:  # hold the CV when moving data
-                    with self._coherence_cv[op.src]:  # wait on src until it is ready
-                        while not self._coherence.data_is_ready(op.src):
-                            self._coherence_cv[op.src].wait()
-                    if op.inst == MemoryOperation.LOAD_SUB:
+
+                    # if the flag is set, skip this checking
+                    if not MemoryOperation.SKIP_SRC_CHECK in op.flag:
+                        with self._coherence_cv[op.src]:  # wait on src until it is ready
+                            while not self._coherence.data_is_ready(op.src):
+                                self._coherence_cv[op.src].wait()
+
+                    if MemoryOperation.LOAD_SUBARRAY in op.flag:
                         self._array.set_slices_mapping(op.dst, slices)  # build slices mapping first
 
                     # check flag to see if dst is current device
@@ -282,7 +286,10 @@ class PArray:
                     cupy.cuda.stream.get_current_stream().synchronize()
 
                     # data is ready now
-                    self._coherence.set_data_as_ready(op.dst, self._slices_hash)  # mark it as done
+                    if MemoryOperation.LOAD_SUBARRAY in op.flag:
+                        self._coherence.set_data_as_ready(op.dst, self._slices_hash)  # mark it as done
+                    else:
+                         self._coherence.set_data_as_ready(op.dst)
                     self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
             elif op.inst == MemoryOperation.EVICT:
                 self._array.clear(op.src)  # decrement the reference counter, relying on GC to free the memory
