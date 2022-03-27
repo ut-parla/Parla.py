@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from parla.cpu_impl import cpu
-from parla.task_runtime import get_current_devices
+from parla.task_runtime import get_current_devices, get_scheduler_context
 from parla.device import Device
 
 from .coherence import MemoryOperation, Coherence, CPU_INDEX
@@ -47,6 +47,9 @@ class PArray:
 
         self.size = array.size
         self.nbytes = array.nbytes
+
+        # Register the parray with the scheduler
+        get_scheduler_context().scheduler._available_resources.track_parray(self)
 
     # Properties:
 
