@@ -610,7 +610,9 @@ class ComputeTask(Task):
                     #Note Note: If it does ever perform a copy, its probably fine but slow?
                     #TODO: Add new parray syntax to disable copy and only invalidate (useful for OUTs)
                     for data in self.dataflow.output:
+                        #print("Doing OUT invalidation for ", data._name, flush=True)
                         data._auto_move(device_id = dev_no, do_write = write_flag, do_copy=False)
+                        #print("Finished OUT invalidation for ", data._name, flush=True)
 
                     for data in self.dataflow.inout:
                         data._auto_move(device_id = dev_no, do_write = write_flag, do_copy=False)
@@ -640,10 +642,11 @@ class ComputeTask(Task):
                     ctx.scheduler.update_mapped_compute_task_count(d, -1)
                     ctx.scheduler.update_launched_task_count_mutex(self, d, -1)
 
-                # Update OUT parrays which may have changed size from 0 to something
+                # Create tracking infor for OUT parrays. This is when they are registered to exist.
+                # Updates their size which may have changed size from 0 to something
                 # We assume all IN and INOUT params don't change size
                 for parray in (self.dataflow.output):
-                    ctx.scheduler._available_resources.update_parray_nbytes(parray, self.req.devices)
+                    ctx.scheduler._available_resources.track_parray(parray)
 
                 ctx.scheduler.decr_active_compute_tasks()
 
@@ -1777,15 +1780,15 @@ class Scheduler(ControllableThread, SchedulerContext):
                         for data in task.dataflow.input:
                             self._construct_datamove_task(data, task, OperandType.IN)
 
-                        #OUTPUT only doesn't need a datamovement task.
-                        #for data in task.dataflow.output:
-                        #    self._construct_datamove_task(data, task, OperandType.OUT)
-
                         for data in task.dataflow.inout:
                             self._construct_datamove_task(data, task, OperandType.INOUT)
 
+                        for data in task.dataflow.output:
+                            target_data_id = id(data)
+                            self._datablock_dict[target_data_id].append((str(task.taskid), task))
+
                         # Update parray tracking and task count on the device
-                        for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
+                        for parray in (task.dataflow.input + task.dataflow.inout):
                             if len(task.req.environment.placement) > 1:
                                 raise NotImplementedError("Multidevice not supported")
                             for device in task.req.environment.placement:
