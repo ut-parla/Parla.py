@@ -1362,15 +1362,15 @@ class Scheduler(ControllableThread, SchedulerContext):
           Second, construct a data movement task.
         """
         # Construct data movement task.
-        taskid = TaskID(str(compute_task.taskid)+"."+str(hex(id(target_data)))+".dmt."+str(len(task_locals.global_tasks)), (len(task_locals.global_tasks),))
+        taskid = TaskID(str(compute_task.taskid)+"."+str(hex(target_data.ID))+".dmt."+str(len(task_locals.global_tasks)), (len(task_locals.global_tasks),))
         task_locals.global_tasks += [taskid]
         datamove_task = DataMovementTask(compute_task, taskid,
                                          compute_task.req, target_data, operand_type,
                                          str(compute_task.taskid) + "." +
-                                         str(hex(id(target_data))) + ".dmt")
+                                         str(hex(target_data.ID)) + ".dmt")
         self.incr_active_tasks()
         compute_task._add_dependency_mutex(datamove_task)
-        target_data_id = id(target_data)
+        target_data_id = target_data.ID
         is_overlapped = False
         if target_data_id in self._datablock_dict:
             # Get task lists using the target data block.
@@ -1385,6 +1385,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                         completed_tasks.append(dep_task_id)
             dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
         self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
+
+        if target_data.parent_ID is not None:
+            self._datablock_dict[target_data.parent_ID].append((str(compute_task.taskid), compute_task))
         # If a task has no dependency after it is assigned to devices,
         # immediately enqueue a corresponding data movement task to
         # the ready queue.

@@ -60,6 +60,7 @@ class PArray:
 
             # a unique ID for this subarray
             # which is the combine of parent id and slice hash
+            self.parent_ID = parent.ID
             self.ID = parent.ID * 31 + self._slices_hash  # use a prime number to avoid collision
         else:  # initialize a new PArray
             # per device buffer of data
@@ -80,6 +81,7 @@ class PArray:
             self._slices_hash = None
 
             # use id() of buffer as unique ID
+            self.parent_ID = None  # no parent
             self.ID = id(self._array)
 
     # Properties:

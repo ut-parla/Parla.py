@@ -279,7 +279,7 @@ class Coherence:
                 # writeback this subarrays and then copy complete data from owner
 
                 # write back to owner 
-                operations.extend(self._write_back_to(self.owner, self.SHARED, on_different_device=True, this_device_id=device_id))
+                operations.extend(self._write_back_to(self.owner, self.SHARED, on_different_device=True))
                 
                 # copy from owner
                 operations.append(MemoryOperation.load(device_id, self.owner))
@@ -384,7 +384,7 @@ class Coherence:
 
                 # write back to owner 
                 operations.extend(self._write_back_to(self.owner, self.MODIFIED, 
-                                  on_different_device=True, this_device_id=device_id, skip_src_check_id=device_id))
+                                  on_different_device=True, skip_src_check_id=device_id))
                 
                 # copy from owner
                 operations.append(MemoryOperation.load(device_id, self.owner))
