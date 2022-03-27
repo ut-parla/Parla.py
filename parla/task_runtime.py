@@ -1303,7 +1303,6 @@ class ResourcePool:
     def get_resources(self):
         return [dev for dev in self._devices]
 
-
 class AssignmentFailed(Exception):
     pass
 
@@ -1313,6 +1312,7 @@ def shuffled(lst: Iterable[_T]) -> List[_T]:
     lst = list(lst)
     random.shuffle(lst)
     return lst
+
 
 class Scheduler(ControllableThread, SchedulerContext):
     # See __init__ function below for comments on the functionality of these members
@@ -1486,8 +1486,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         :return: True if the assignment succeeded, False otherwise.
         """
-        logger.debug(f"[Scheduler] Mapping %r.", task)
-
+        logger.debug("[Scheduler] Mapping %r.", task)
 
         # Sean: The goal of the mapper look at data locality and load balancing
         # and pick a suitable set of devices on which to run a task.
@@ -1499,15 +1498,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         best_device = None
         best_device_local_data = 0
         for device in possible_devices:
-            # Ensure that the device has enough resources for the task
-            if not self._available_resources.check_resources_availability(device, task.req.resources):
-                continue
-
-            # THIS IS THE MEAT OF THE MAPPING POLICY
-            # We calculate a few constants based on data locality and load balancing
-            # We then add those together with tunable weights to determine a suitability
-            # The device with the highest suitability is the lucky winner
-
             # First, we calculate data on the device and data to be moved to the device
             local_data = 0
             nonlocal_data = 0
@@ -1516,6 +1506,24 @@ class Scheduler(ControllableThread, SchedulerContext):
                     local_data += parray.nbytes
                 else:
                     nonlocal_data += parray.nbytes
+
+
+            # Ensure that the device has enough resources for the task
+            resource_requirements = task.req.resources.copy()
+            logger.debug("%r", resource_requirements is task.req.resources)
+            if 'memory' in resource_requirements:
+                resource_requirements['memory'] += nonlocal_data
+            else:
+                resource_requirements['memory'] = nonlocal_data
+
+            if not self._available_resources.check_resources_availability(device, resource_requirements):
+                logger.debug("Not enough resources on %r", device)
+                continue
+
+            # THIS IS THE MEAT OF THE MAPPING POLICY
+            # We calculate a few constants based on data locality and load balancing
+            # We then add those together with tunable weights to determine a suitability
+            # The device with the highest suitability is the lucky winner
 
             # These values are really big, so I'm normalizing them to the size of the
             # device memory so my monkey brain can fathom the numbers
