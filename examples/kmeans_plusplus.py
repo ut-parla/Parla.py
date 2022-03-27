@@ -99,7 +99,7 @@ def kmeans(data: cp.ndarray, K: int, centroids: cp.ndarray):
         for i in range(K):
             condition = assignment == i
             # build new clusters
-            cluster = data[condition]
+            cluster = data.array[condition]
             # compute new centroids
             if cluster.size != 0:
                 new_centroids[i] = cp.mean(cluster, axis=0)
