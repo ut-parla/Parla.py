@@ -1048,13 +1048,13 @@ class ParrayTracker():
     which is stored in PArrays. This is tracked separately from the PArray's
     tracking information because the Scheduler knows where a given PArray will
     be in the future. This class holds tracking information.
-    
+
     Currently it's a dumb class, basically just a C-struct, whose members are
     managed by the ResourcePool.
     """
     nbytes: int
     locations: Dict[Device, bool]
-    
+
     def __init__(self):
         self.nbytes = 0
         self.locations = {}
@@ -1212,7 +1212,7 @@ class ResourcePool:
                 parray_tracker.locations[device] = True
 
                 logger.debug(f"[ResourcePool]   - %r", device)
-                
+
                 # Update the resource usage at this location
                 self.allocate_resources(device, {'memory' : parray.nbytes})
             else:
@@ -1491,14 +1491,20 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Tasks have a set of requirements passed to them by @spawn. We need to
         # match those requirements and find the most suitable device.
         possible_devices = task.req.devices
+        ndevices = len(possible_devices)
         max_suitability = None
         best_device = None
         best_device_local_data = 0
+        total_mapped = 0
+        for device in possible_devices:
+            total_mapped += self._device_mapped_compute_task_counts[device]
+
         for device in possible_devices:
             # Ensure that the device has enough resources for the task
             if not self._available_resources.check_resources_availability(device, task.req.resources):
                 continue
-            
+
+
             # THIS IS THE MEAT OF THE MAPPING POLICY
             # We calculate a few constants based on data locality and load balancing
             # We then add those together with tunable weights to determine a suitability
@@ -1528,25 +1534,29 @@ class Scheduler(ControllableThread, SchedulerContext):
             # Next we calculate the load-balancing factor
             # For now this is just a count of tasks on the device queue (TODO (ses): better heuristics later...)
             dev_load = self._device_mapped_compute_task_counts[device]
+            norm_dev_load = dev_load
 
+            #print(dev_load, self._active_compute_task_count)
             # Normalize this too so we have numbers between 0 and 1
-            if self._active_compute_task_count > 0:
-                dev_load /= self._active_compute_task_count
+            if total_mapped > 0:
+                norm_dev_load /= total_mapped
             else:
                 dev_load = 0
 
             # TODO (ses): Move these magic numbers somewhere better
             local_data_weight = 30.0
-            nonlocal_data_weight = 10.0
-            load_weight = 1.0
-            dependency_weight = 0.5
+            nonlocal_data_weight = 30.0
+            load_weight = -1 if norm_dev_load < 1/ndevices else 1 * norm_dev_load
+            dependency_weight = 0
+
 
             # Calculate the suitability
             suitability = local_data_weight * local_data \
                         - nonlocal_data_weight * nonlocal_data \
-                        - load_weight * dev_load \
+                        - load_weight \
                         + dependency_weight * this_device_owns_dependency
 
+            #print(device, "Local Data: ", local_data_weight*(local_data - nonlocal_data), "Load: ", load_weight, "Suit ", suitability)
             """
             def myformat(num):
                 return "{:.3f}".format(num)
@@ -1564,11 +1574,11 @@ class Scheduler(ControllableThread, SchedulerContext):
                 max_suitability = suitability
                 best_device = device
                 best_device_local_data = local_data
-        
+
         if best_device is None:
             logger.debug(f"[Scheduler] Failed to map %r.", task)
             return False
-
+        #print("---------------------")
         # Stick this info in an environment (I based this code on the commented out stuff below)
         task_env_gen = self._environments.find_all(placement={best_device}, tags={}, exact=True)
         task_env = next(task_env_gen)
@@ -1626,7 +1636,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             # Ensure that the device has enough resources for the task
             if self._available_resources.check_resources_availability(device, task.req.resources):
                 valid_devices.append(device)
-        
+
         if len(valid_devices) == 0:
             logger.debug(f"[Scheduler] Failed to map %r.", task)
             return False
