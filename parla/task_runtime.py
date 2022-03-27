@@ -17,7 +17,7 @@ from parla.environments import TaskEnvironmentRegistry, TaskEnvironment
 from parla.cpu_impl import cpu
 
 # Logger configuration (uncomment and adjust level if needed)
-#logging.basicConfig(level = logging.INFO)
+#logging.basicConfig(level = logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -423,8 +423,7 @@ class Task:
         if self._state.is_terminal:
             return False
         else:
-            logger.debug("Task, %s added a dependee, %s",
-                         self.name, dependee)
+            logger.debug("Task, %s added a dependee, %s", self.name, dependee.name)
             self._dependees.append(dependee)
             return True
 
@@ -1503,7 +1502,6 @@ class Scheduler(ControllableThread, SchedulerContext):
             # Ensure that the device has enough resources for the task
             if not self._available_resources.check_resources_availability(device, task.req.resources):
                 continue
-
 
             # THIS IS THE MEAT OF THE MAPPING POLICY
             # We calculate a few constants based on data locality and load balancing
