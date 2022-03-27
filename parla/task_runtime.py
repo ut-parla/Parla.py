@@ -1119,7 +1119,9 @@ class ResourcePool:
         :param d: The device on which resources exist.
         :param resources: The resources to deallocate.
         """
+        logger.debug("[ResourcePool] Acquiring monitor in check_resources_availability()")
         with self._monitor:
+
             is_available = True
             for name, amount in resources.items():
                 dres = self._devices[d]
@@ -1131,9 +1133,11 @@ class ResourcePool:
                 if amount > dres[name]:
                     is_available = False
                 logger.debug("Resource check for %d %s on device %r: %s", amount, name, d, "Passed" if is_available else "Failed")
+            logger.debug("[ResourcePool] Releasing monitor in check_resources_availability()")
             return is_available
 
     def _atomically_update_resources(self, d: Device, resources: ResourceDict, multiplier, block: bool):
+        logger.debug("[ResourcePool] Acquiring monitor in atomically_update_resources()")
         with self._monitor:
             to_release = []
             success = True
@@ -1149,13 +1153,14 @@ class ResourcePool:
             logger.info("[ResourcePool] Attempted to allocate %s * %r (blocking %s) => %s", \
                          multiplier, (d, resources), block, "success" if success else "fail")
             if to_release:
-                logger.info("Releasing resources due to failure: %r", to_release)
+                logger.info("[ResourcePool] Releasing resources due to failure: %r", to_release)
 
             for name, v in to_release:
                 ret = self._update_resource(d, name, -v * multiplier, block)
                 assert ret
 
             assert not success or len(to_release) == 0 # success implies to_release empty
+            logger.debug("[ResourcePool] Releasing monitor in atomically_update_resources()")
             return success
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
@@ -1164,6 +1169,7 @@ class ResourcePool:
             return True
         try:
             while True: # contains return
+                logger.debug("Trying to allocate %d %s on %r", amount, res, dev)
                 dres = self._devices[dev]
                 if -amount <= dres[res]:
                     dres[res] += amount
@@ -1173,6 +1179,8 @@ class ResourcePool:
                     assert dres[res] >= 0, "{}.{} was over allocated".format(dev, res)
                     return True
                 else:
+                    logger.info("If you're seeing this message, you probably have an issue.")
+                    logger.info("The current mapper should never try to allocate resources that aren't actually available")
                     if block:
                         self._monitor.wait()
                     else:
@@ -1213,8 +1221,10 @@ class ResourcePool:
                 parray_tracker.locations[device] = False
 
         # Insert the location map into our dict, keyed by the parray itself
+        logger.debug("[ResourcePool] Acquiring monitor in track_parray()")
         with self._monitor:
             self._managed_parrays[id(parray)] = parray_tracker
+            logger.debug("[ResourcePool] Releasing monitor in track_parray()")
 
     # Stop tracking the memory usage of a parray
     def untrack_parray(self, parray):
@@ -1227,8 +1237,10 @@ class ResourcePool:
                 logger.debug(f"[ResourcePool]   - %r", device)
 
         # Delete the dictionary entry
+        logger.debug("[ResourcePool] Acquiring monitor in untrack_parray()")
         with self._monitor:
             del self._managed_parrays[id(parray)]
+            logger.debug("[ResourcePool] Releasing monitor in untrack_parray()")
 
     # Notify the resource pool that a device has a new instantiation of an array
     def add_parray_to_device(self, parray, device):
@@ -1237,8 +1249,10 @@ class ResourcePool:
             #raise ValueError("Tried to register a parray on a device where it already existed")
             logger.debug(f"[ResourcePool]   (It was already there...)")
             return
+        logger.debug("[ResourcePool] Acquiring monitor in add_parray_to_device()")
         with self._monitor:
             self._managed_parrays[id(parray)].locations[device] = True
+            logger.debug("[ResourcePool] Releasing monitor in add_parray_to_device()")
         self.allocate_resources(device, {'memory' : parray.nbytes})
 
     # Notify the resource pool that an instantiation of an array has been deleted
@@ -1248,8 +1262,10 @@ class ResourcePool:
             #raise ValueError("Tried to remove a parray from a device where it didn't exist")
             logger.debug(f"[ResourcePool]   (It wasn't there...)")
             return
+        logger.debug("[ResourcePool] Acquiring monitor in remove_parray_from_device()")
         with self._monitor:
             self._managed_parrays[id(parray)].locations[device] = False
+            logger.debug("[ResourcePool] Releasing monitor in remove_parray_from_device()")
         self.deallocate_resources(device, {'memory' : parray.nbytes})
 
     # On a parray move, call this to start tracking the parray (if necessary) and update its location
@@ -1262,14 +1278,19 @@ class ResourcePool:
             self.add_parray_to_device(parray, device)
 
     def parray_is_on_device(self, parray, device):
+        logger.debug("[ResourcePool] Acquiring monitor in parray_is_on_device()")
         with self._monitor:
-            return (id(parray) in self._managed_parrays) and (self._managed_parrays[id(parray)].locations[device])
+            ret_bool = (id(parray) in self._managed_parrays) and (self._managed_parrays[id(parray)].locations[device])
+            logger.debug("[ResourcePool] Releasing monitor in parray_is_on_device()")
+            return ret_bool
 
     def update_parray_nbytes(self, parray, devices):
         parray_tracker = self._managed_parrays[id(parray)]
         if parray_tracker.nbytes == 0:
+            logger.debug("[ResourcePool] Acquiring monitor in update_parray_nbytes()")
             with self._monitor:
                 parray_tracker.nbytes = parray.nbytes
+                logger.debug("[ResourcePool] Releasing monitor in update_parray_nbytes()")
 
             # This assumes the parray is valid on every the device ran on
             # TODO: Revisit this when we actually support multidevice
