@@ -84,6 +84,9 @@ class PArray:
             self.parent_ID = None  # no parent
             self.ID = id(self._array)
 
+        self.size = array.size
+        self.nbytes = array.nbytes
+
     # Properties:
 
     @property
@@ -135,7 +138,7 @@ class PArray:
 
     # Public API:
 
-    def update(self, array: ndarray) -> None:
+    def update(self, array) -> None:
         """ Update the copy on current device.
 
         Args:
@@ -145,6 +148,9 @@ class PArray:
         Note: data should be put in OUT/INOUT fields of spawn
         Note: `array` should has the same shape with this array's shape
         """
+        self.size = array.size
+        self.nbytes = array.nbytes
+
         this_device = self._current_device_index
 
         # check shape is consistent

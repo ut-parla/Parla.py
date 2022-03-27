@@ -28,7 +28,7 @@ def main():
         # n is chosen so that all three can be
         # stored within the memory of a single GPU
         # so that strong scaling numbers make sense.
-        n = 12000
+        n = 24000
 
         blocks = ngpus
         block_size = n // ngpus
@@ -56,7 +56,7 @@ def main():
         c_part = []
 
         distribute=True
-        fixed_placement=True
+        fixed_placement=False
         verbose=False
         sync = False
 
@@ -99,7 +99,7 @@ def main():
                     b_block = b_part[j]
                     c_block = c_part[i][j]
 
-                    memsize = 2*block_size**2 + block_size*n*2*4
+                    memsize = (block_size**2 + block_size*n*2)*4
 
                     if fixed_placement:
                         loc = gpu(i%ngpus)
