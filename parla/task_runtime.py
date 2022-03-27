@@ -1202,10 +1202,10 @@ class ResourcePool:
 
     # Start tracking the memory usage of a parray
     def track_parray(self, parray):
-        logger.debug(f"[ResourcePool] Tracking parray with ID %d in these locations:", id(parray))
+        logger.debug(f"[ResourcePool] Tracking parray with ID %d in these locations:", parray.parent_ID)
 
         parray_tracker = ParrayTracker()
-        parray_tracker.nbytes = parray.nbytes
+        parray_tracker.nbytes = parray.nbytes  # maxium bytes
 
         # Figure out all the locations where a parray exists
         for device in self._devices:
@@ -1216,65 +1216,65 @@ class ResourcePool:
                 logger.debug(f"[ResourcePool]   - %r", device)
 
                 # Update the resource usage at this location
-                self.allocate_resources(device, {'memory' : parray.nbytes})
+                self.allocate_resources(device, {'memory' : parray.nbytes_at(device_id)})  # subarrays has smaller size
             else:
                 parray_tracker.locations[device] = False
 
         # Insert the location map into our dict, keyed by the parray itself
         with self._monitor:
-            self._managed_parrays[id(parray)] = parray_tracker
+            self._managed_parrays[parray.parent_ID] = parray_tracker
 
     # Stop tracking the memory usage of a parray
     def untrack_parray(self, parray):
-        logger.debug(f"[ResourcePool] Untracking parray with ID %d from these locations:", id(parray))
+        logger.debug(f"[ResourcePool] Untracking parray with ID %d from these locations:", parray.parent_ID)
         # Return resources to the devices
-        for device, parray_exists in self._managed_parrays[id(parray)].items():
+        for device, parray_exists in self._managed_parrays[parray.parent_ID].items():
             if parray_exists:
-                parray_tracker = self._managed_parrays[id(parray)]
-                self.deallocate_resources(device, {'memory' : parray_tracker.nbytes})
+                parray_tracker = self._managed_parrays[parray.parent_ID]
+                self.deallocate_resources(device, {'memory' : parray_tracker.nbytes_at(self._to_parray_index(device))})
                 logger.debug(f"[ResourcePool]   - %r", device)
 
         # Delete the dictionary entry
         with self._monitor:
-            del self._managed_parrays[id(parray)]
+            del self._managed_parrays[parray.parent_ID]
 
     # Notify the resource pool that a device has a new instantiation of an array
     def add_parray_to_device(self, parray, device):
-        logger.debug(f"[ResourcePool] Adding parray with ID %d to device %r", id(parray), device)
-        if self._managed_parrays[id(parray)].locations[device] == True:
+        logger.debug(f"[ResourcePool] Adding parray with ID %d to device %r", parray.parent_ID, device)
+        if self._managed_parrays[parray.parent_ID].locations[device] == True:
             #raise ValueError("Tried to register a parray on a device where it already existed")
             logger.debug(f"[ResourcePool]   (It was already there...)")
             return
         with self._monitor:
-            self._managed_parrays[id(parray)].locations[device] = True
-        self.allocate_resources(device, {'memory' : parray.nbytes})
+            self._managed_parrays[parray.parent_ID].locations[device] = True
+        self.allocate_resources(device, {'memory' : parray.nbytes_at(self._to_parray_index(device))})
 
     # Notify the resource pool that an instantiation of an array has been deleted
     def remove_parray_from_device(self, parray, device):
-        logger.debug(f"[ResourcePool] Removing parray with ID %d from device %r", id(parray), device)
-        if self._managed_parrays[id(parray)].locations[device] == False:
+        logger.debug(f"[ResourcePool] Removing parray with ID %d from device %r", parray.parent_ID, device)
+        if self._managed_parrays[parray.parent_ID].locations[device] == False:
             #raise ValueError("Tried to remove a parray from a device where it didn't exist")
             logger.debug(f"[ResourcePool]   (It wasn't there...)")
             return
         with self._monitor:
-            self._managed_parrays[id(parray)].locations[device] = False
-        self.deallocate_resources(device, {'memory' : parray.nbytes})
+            self._managed_parrays[parray.parent_ID].locations[device] = False
+        self.deallocate_resources(device, {'memory' : parray.nbytes_at(self._to_parray_index(device))})
 
     # On a parray move, call this to start tracking the parray (if necessary) and update its location
     def register_parray_move(self, parray, device):
-            if id(parray) not in self._managed_parrays:
-                self.track_parray(parray)
-                # If this new array originates on the dest device, skip the next step
-                if self._managed_parrays[id(parray)].locations[device]:
-                    return
-            self.add_parray_to_device(parray, device)
+        if parray.parent_ID not in self._managed_parrays:
+            self.track_parray(parray)
+            # If this new array originates on the dest device, skip the next step
+            if self._managed_parrays[parray.parent_ID].locations[device]:
+                return
+        self.add_parray_to_device(parray, device)
 
     def parray_is_on_device(self, parray, device):
         with self._monitor:
-            return (id(parray) in self._managed_parrays) and (self._managed_parrays[id(parray)].locations[device])
+            return (parray.parent_ID in self._managed_parrays) and (self._managed_parrays[parray.parent_ID].locations[device])
 
     def update_parray_nbytes(self, parray, devices):
-        parray_tracker = self._managed_parrays[id(parray)]
+        parray_tracker = self._managed_parrays[parray.parent_ID]
         if parray_tracker.nbytes == 0:
             with self._monitor:
                 parray_tracker.nbytes = parray.nbytes
@@ -1282,7 +1282,7 @@ class ResourcePool:
             # This assumes the parray is valid on every the device ran on
             # TODO: Revisit this when we actually support multidevice
             for device in devices:
-                self.allocate_resources(device, {'memory': parray.nbytes})
+                self.allocate_resources(device, {'memory': parray.nbytes_at(self._to_parray_index(device))})
 
     def __repr__(self):
         return "ResourcePool(devices={})".format(self._devices)
@@ -1696,7 +1696,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
         self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
 
-        if target_data.parent_ID is not None:
+        if target_data.parent_ID != target_data_id:
             self._datablock_dict[target_data.parent_ID].append((str(compute_task.taskid), compute_task))
         # If a task has no dependency after it is assigned to devices,
         # immediately enqueue a corresponding data movement task to

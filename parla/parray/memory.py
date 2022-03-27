@@ -38,6 +38,22 @@ class MultiDeviceBuffer:
         # the shape of the complete array
         self.shape = ()
 
+    def nbytes_at(self, device_id:int) -> int:
+        """
+        Return the buffer size at `device_id`
+        """
+        buffer = self._buffer[device_id]
+        if buffer is None:
+            return 0
+        elif isinstance(buffer, list): # subarray at this device buffer
+            # size is the sum
+            nbytes = 0
+            for subarray in buffer:
+                nbytes += subarray.nbytes
+            return nbytes
+        else:  # complete array
+            return buffer.nbytes
+
     def set_complete_array(self, array: ndarray) -> int:
         """
         Add array into the buffer (based on array's device).

@@ -63,8 +63,8 @@ class PArray:
             self.parent_ID = parent.ID
             self.ID = parent.ID * 31 + self._slices_hash  # use a prime number to avoid collision
 
-            self.size = parent.size
-            self.nbytes = parent.nbytes
+            self.nbytes = parent.nbytes          # the bytes used by the complete array
+            self.subarray_nbytes = array.nbytes  # the bytes used by this subarray
         else:  # initialize a new PArray
             # per device buffer of data
             self._array = MultiDeviceBuffer(num_gpu)
@@ -84,11 +84,11 @@ class PArray:
             self._slices_hash = None
 
             # use id() of buffer as unique ID
-            self.parent_ID = None  # no parent
-            self.ID = id(self._array)
+            self.parent_ID = id(self._array)  # no parent
+            self.ID = self.parent_ID
 
-            self.size = array.size
             self.nbytes = array.nbytes
+            self.subarray_nbytes = self.nbytes  # no subarray
 
     # Properties:
 
@@ -141,7 +141,22 @@ class PArray:
 
     # Public API:
 
-    def exists_on_device(self, device_id):
+    def nbytes_at(self, device_id:int):
+        """ An estimate of bytes used in `device_id` after data is moved there.
+        It is neither lower bound nor upper bound.
+        """
+        if self._slices:
+            if isinstance(self._coherence._local_states[device_id], dict): # there are subarrays no this device
+                if self._slices_hash in self._coherence._local_states[device_id].keys():  # this subarray is already there
+                    return self._array.nbytes_at(device_id)
+                else:  # the subarray will be moved to there
+                    return self._array.nbytes_at(device_id) + self.subarray_nbytes  # add the incoming subarray size
+            else: # there is a complete copy on this device, no need to prepare subarray
+                return self.nbytes
+        else:
+            return self.nbytes   
+
+    def exists_on_device(self, device_id:int):
         return (self._array._buffer[device_id] is not None)
 
     def update(self, array) -> None:
@@ -179,7 +194,6 @@ class PArray:
                     self._array.set(this_device, dst_data)
 
         # update size
-        self.size = array.size
         self.nbytes = array.nbytes
 
         # reset coherence
@@ -200,12 +214,12 @@ class PArray:
 
         # ndarray.__getitem__() may return a ndarray
         if isinstance(ret, numpy.ndarray):
-            return PArray(None, parent=self, slices=slices)
+            return PArray(ret, parent=self, slices=slices)
         elif isinstance(ret, cupy.ndarray):
             if ret.shape == ():
                 return ret.item()
             else:
-                return PArray(None, parent=self, slices=slices)
+                return PArray(ret, parent=self, slices=slices)
         else:
             return ret
 
