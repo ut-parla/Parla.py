@@ -4,7 +4,6 @@ from typing import List, TYPE_CHECKING, Dict, Union
 import threading
 
 if TYPE_CHECKING:  # False at runtime
-    from memory import MultiDeviceBuffer
     SlicesType = Union[slice, int, tuple]
 
 CPU_INDEX = -1
@@ -24,10 +23,13 @@ class MemoryOperation:
     dst: int
     src: int
 
-    def __init__(self, inst: int = NOOP, dst: int = -1, src: int = -1):
+    SWITCH_DEVICE_FLAG = 101  # if the flag is set, it means dst is not the current device
+
+    def __init__(self, inst: int = NOOP, dst: int = -1, src: int = -1, flag: int = None):
         self.inst = inst
         self.dst = dst
         self.src = src
+        self.flag = flag
 
     @staticmethod
     def noop() -> MemoryOperation:
@@ -40,9 +42,16 @@ class MemoryOperation:
         return MemoryOperation(MemoryOperation.ERROR)
 
     @staticmethod
-    def load(dst: int, src: int) -> MemoryOperation:
-        """ load all data from src to dst """
-        return MemoryOperation(MemoryOperation.LOAD, dst, src)
+    def load(dst: int, src: int, on_different_device: bool = False) -> MemoryOperation:
+        """ load all data from src to dst 
+        
+        Need to switch device if "on_different_device" is true
+        This could known by checking flag = SWITCH_DEVICE_FLAG
+        """
+        if on_different_device:
+            return MemoryOperation(MemoryOperation.LOAD, dst, src, flag=MemoryOperation.SWITCH_DEVICE_FLAG)
+        else:
+            return MemoryOperation(MemoryOperation.LOAD, dst, src)
 
     @staticmethod
     def evict(src: int) -> MemoryOperation:
@@ -72,16 +81,14 @@ class Coherence:
     MODIFIED = 2
 
     _local_states: Dict[int, int | Dict[int, int]]
-    _buffer: MultiDeviceBuffer
     _versions: Dict[int, int | Dict[int, int]]
     _is_complete: Dict[int, bool]
     _data_ready: Dict[int, bool | Dict[int, bool]]
     owner: int
-    _global_state: int
     _latest_version: int
     _lock: threading.Lock
 
-    def __init__(self, init_owner: int, num_gpu: int, buffer: MultiDeviceBuffer):
+    def __init__(self, init_owner: int, num_gpu: int):
         """
         Args:
             init_owner: the owner of the first copy in the system
@@ -100,13 +107,11 @@ class Coherence:
         # fields used to support fine grained data movement
         self._is_complete = {n: False for n in range(num_gpu)}  # does the device own a complete copy?
         self._is_complete[CPU_INDEX] = False
-        self._buffer = buffer                               # underlying buffer corresponding to the protocol
 
         self._local_states[init_owner] = self.MODIFIED      # initial state is MODIFIED
         self.owner = init_owner                             # the device that has the complete copy (take the role of main memory)
         self._versions[init_owner] = 0                      # the first version is 0
         self._is_complete[init_owner] = True                # the copy is complete
-        self._global_state = self.MODIFIED                  # state of the complete system
         self._latest_version = 0                            # the latest version in the system
 
         # is data ready to use in this device?
@@ -131,17 +136,16 @@ class Coherence:
         else:
             return self._data_ready[device_id]
 
-    def set_data_as_ready(self, device_id: int, slices: SlicesType) -> None:
+    def set_data_as_ready(self, device_id: int, slices_hash: int = None) -> None:
         """
         Mark data on `device_id` as ready to use, and there is no copy in progress.
 
         Args:
             device_id: id of this device
-            slices: slices of the subarray to be manipulated
-                    by default equals to None, which means the whole array is manipulated
+            slices_hash: hash code of the slices of the subarray to be manipulated
+                         by default equals to None, which means the whole array is manipulated
         """
-        if slices is not None: # move a subarray
-            slices_hash = self._buffer.get_slices_hash(slices)
+        if slices_hash is not None: # move a subarray
             self._data_ready[device_id][slices_hash] = True
         else:
             self._data_ready[device_id] = True
@@ -150,7 +154,7 @@ class Coherence:
         """True if owner's has latest version"""
         return self._versions[self.owner] == self._latest_version
 
-    def _write_back_to(self, device_id:int, new_state:int) -> List[MemoryOperation]:
+    def _write_back_to(self, device_id:int, new_state:int, on_different_device:bool = False) -> List[MemoryOperation]:
         """
         Generate the list of write back MemoryOperation.
         Which make `device_id` has the latest version with a complete copy.
@@ -158,6 +162,7 @@ class Coherence:
         Args:
             device_id: id of this device
             new_state: new state of `dcvice_id`
+            on_different_device: True if this device is not current deivce
 
         Note: version will be updated
         """
@@ -205,14 +210,14 @@ class Coherence:
 
         # update latest version
         self._versions[device_id] = self._latest_version
-        return [MemoryOperation.load(device_id, t) for t in target] + [MemoryOperation.evict(t) for t in evict_list]
+        return [MemoryOperation.load(device_id, t, on_different_device) for t in target] + [MemoryOperation.evict(t) for t in evict_list]
 
-    def read(self, device_id: int, slices: SlicesType) -> List[MemoryOperation]:
+    def read(self, device_id: int, slices_hash: int = None) -> List[MemoryOperation]:
         """ Tell the protocol that this device read from the copy.
 
         Args:
             device_id: id of this device
-            slices: slices of the subarray to be manipulated
+            slices_hash: hash code of the slices of the subarray to be manipulated
                          by default equals to None, which means the whole array is manipulated
 
         Return:
@@ -223,9 +228,7 @@ class Coherence:
         operations = []
 
         with self._lock:
-            if slices is not None: # move a subarray
-                slices_hash = self._buffer.get_slices_hash(slices)
-
+            if slices_hash is not None: # move a subarray
                 if self._is_complete[device_id]:  # use existing complete data at this device
                     device_local_state = self._local_states[device_id]
                 else:
@@ -239,7 +242,37 @@ class Coherence:
                     else:
                         device_local_state = self.INVALID
                     self._is_complete[device_id] = False  # this is a subarray
-            else:
+            elif not self._is_complete[device_id]:
+                # special case: need a complete copy but there are already subarrays in this deivce
+                # writeback this subarrays and then copy complete data from owner
+                #
+                # to avoid race, ensure subarrays on this device are ready before move them
+                operations.append(MemoryOperation.check_data(device_id)) 
+
+                # write back to owner 
+                operations.extend(self._write_back_to(self.owner, self.SHARED, on_different_device=True))
+                
+                # copy from owner
+                operations.append(MemoryOperation.load(device_id, self.owner))
+
+                # update status
+                self._data_ready[self.owner] = False
+
+                # if there is on going operations on subarrays, no need to set it as False
+                if self.data_is_ready(device_id):
+                    self._data_ready[device_id] = False
+
+                self._is_complete[device_id] = True
+                self._versions[device_id] = self._versions[self.owner]
+                self._local_states[self.owner] = self.SHARED  # owner is updated, so it is in SHARED states
+                self._local_states[device_id] = self.SHARED
+
+                # change owner
+                self.owner = max(self.owner, device_id)
+
+                # skip the rest code
+                return operations
+            else:  # move a complete copy and current device has no subarrays
                 device_local_state = self._local_states[device_id]
                 self._is_complete[device_id] = True  # this is a complete array
 
@@ -285,12 +318,12 @@ class Coherence:
 
             return operations
 
-    def write(self, device_id: int, slices: SlicesType) -> List[MemoryOperation]:
+    def write(self, device_id: int, slices_hash: int = None) -> List[MemoryOperation]:
         """ Tell the protocol that this device write to the copy.
 
         Args:
             device_id: id of this device
-            slices: slices of the subarray to be manipulated
+            slices_hash: hash code of the slices of the subarray to be manipulated
                          by default equals to None, which means the whole array is manipulated
 
         Return:
@@ -299,9 +332,7 @@ class Coherence:
         operations = []
 
         with self._lock:
-            if slices is not None: # move a subarray
-                slices_hash = self._buffer.get_slices_hash(slices)
-
+            if slices_hash is not None: # move a subarray
                 if self._is_complete[device_id]:  # use existing complete data at this device
                     device_local_state = self._local_states[device_id]
                 else:
@@ -315,6 +346,33 @@ class Coherence:
                     else:
                         device_local_state = self.INVALID
                     self._is_complete[device_id] = False  # this is a subarray
+            elif not self._is_complete[device_id]:
+                # special case: need a complete copy but there are already subarrays in this deivce
+                # writeback this subarrays and then copy complete data from owner
+                #
+                # no need to check this since assume no multiwriters
+                # operations.append(MemoryOperation.check_data(device_id))
+
+                # write back to owner 
+                operations.extend(self._write_back_to(self.owner, self.MODIFIED, on_different_device=True))
+                
+                # copy from owner
+                operations.append(MemoryOperation.load(device_id, self.owner))
+
+                # update status
+                self._data_ready[self.owner] = False
+                self._data_ready[device_id] = False
+
+                self._is_complete[device_id] = True
+                self._versions[device_id] = self._versions[self.owner]
+                self._local_states[device_id] = self.MODIFIED
+                self._local_states[self.owner] = self.INVALID  # owner is invalid too
+
+                # change owner
+                self.owner = max(self.owner, device_id)
+
+                # skip the rest code
+                return operations
             else:
                 device_local_state = self._local_states[device_id]
                 self._is_complete[device_id] = True  # this is a complete array

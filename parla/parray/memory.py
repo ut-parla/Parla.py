@@ -389,24 +389,39 @@ class MultiDeviceBuffer:
             self._buffer[device_id][subarray_index].__setitem__(local_slices, value)
 
 
-    def _move_data(self, copy_func, dst, src, subarray_index, dst_slices, src_slices):
+    def _move_data(self, copy_func, dst: int, src: int, subarray_index: int, dst_slices: SlicesType, src_slices: SlicesType, dst_is_current_device:bool = True):
         """
         Helper function for copy_data_between_device
         """
-        if dst_slices is None and src_slices is None:  # Complete to Complete
-            self._buffer[dst] = copy_func(self._buffer[src])
-        elif dst_slices is None and src_slices is not None:  # Incomplete to Complete
-            self._buffer[dst][src_slices] = copy_func(self._buffer[src][subarray_index])
-        elif dst_slices is not None and src_slices is None:  # Complete to incomplete
-            if self._buffer[dst] is None:
-                self._buffer[dst] = []
-            self._buffer[dst].append(copy_func(self._buffer[src][dst_slices]))
-        else:  # incomplete to incomplete
-            raise ValueError("Copy from subarray to subarray is unsupported")
+        if dst_is_current_device:
+            if dst_slices is None and src_slices is None:  # Complete to Complete
+                self._buffer[dst] = copy_func(self._buffer[src])
+            elif dst_slices is None and src_slices is not None:  # Incomplete to Complete
+                self._buffer[dst][src_slices] = copy_func(self._buffer[src][subarray_index])
+            elif dst_slices is not None and src_slices is None:  # Complete to incomplete
+                if self._buffer[dst] is None:
+                    self._buffer[dst] = []
+                self._buffer[dst].append(copy_func(self._buffer[src][dst_slices]))
+            else:  # incomplete to incomplete
+                raise ValueError("Copy from subarray to subarray is unsupported")
+        else:
+            with cupy.cuda.Device(dst):  # switch device
+                if dst_slices is None and src_slices is None:  # Complete to Complete
+                    self._buffer[dst] = copy_func(self._buffer[src])
+                elif dst_slices is None and src_slices is not None:  # Incomplete to Complete
+                    self._buffer[dst][src_slices] = copy_func(self._buffer[src][subarray_index])
+                elif dst_slices is not None and src_slices is None:  # Complete to incomplete
+                    if self._buffer[dst] is None:
+                        self._buffer[dst] = []
+                    self._buffer[dst].append(copy_func(self._buffer[src][dst_slices]))
+                else:  # incomplete to incomplete
+                    raise ValueError("Copy from subarray to subarray is unsupported")
 
-    def copy_data_between_device(self, dst, src) -> None:
+    def copy_data_between_device(self, dst: int, src: int, dst_is_current_device: bool = True) -> None:
         """
         Copy data from src to dst.
+
+        dst is current device if `dst_is_current_device` is True
         """
         # a function to copy data between GPU devices async
         def copy_from_device_async(src):
@@ -427,11 +442,11 @@ class MultiDeviceBuffer:
         for subarray_index in range(len(src_slices_list)):
             src_slices = src_slices_list[subarray_index]
             if src == CPU_INDEX:  # copy from CPU to GPU
-                self._move_data(cupy.asarray, dst, src, subarray_index, dst_slices, src_slices)
+                self._move_data(cupy.asarray, dst, src, subarray_index, dst_slices, src_slices, dst_is_current_device)
             elif dst != CPU_INDEX:  # copy from GPU to GPU
-                self._move_data(copy_from_device_async, dst, src, subarray_index, dst_slices, src_slices)
+                self._move_data(copy_from_device_async, dst, src, subarray_index, dst_slices, src_slices, dst_is_current_device)
             else:  # copy from GPU to CPU
-                self._move_data(cupy.asnumpy, dst, src, subarray_index, dst_slices, src_slices)
+                self._move_data(cupy.asnumpy, dst, src, subarray_index, dst_slices, src_slices)  # dst_is_current_device is no need if dst is CPU
 
     def get_slices_hash(self, global_slices: SlicesType) -> int:
         """
@@ -440,15 +455,15 @@ class MultiDeviceBuffer:
         This could be done by replaing list and slice to tuple
         """
         # little chance to have collision, but what if it happened?
-        hash_value = 0
+        hash_value = 17 # use a none zero hash value, so hash(0) != 0 
         prime = 31
         if not isinstance(global_slices, tuple):
             if isinstance(global_slices, list):
-                hash_value = hash(tuple(global_slices))
+                hash_value = hash_value * prime + hash(tuple(global_slices))
             elif isinstance(global_slices, slice):
-                hash_value = hash(global_slices.indices(self.shape[0]))
+                hash_value = hash_value * prime + hash(global_slices.indices(self.shape[0]))
             else:
-                hash_value = hash(global_slices)
+                hash_value = hash_value * prime + hash(global_slices)
         else:
             if len(self.shape) < len(global_slices):
                 raise IndexError(f"index out of range, index:{global_slices}")

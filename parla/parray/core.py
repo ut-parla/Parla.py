@@ -54,13 +54,20 @@ class PArray:
 
             # inherit parent's condition variables
             self._coherence_cv = parent._coherence_cv
+
+            # identify the slices
+            self._slices_hash = self._array.get_slices_hash(slices)
+
+            # a unique ID for this subarray
+            # which is the combine of parent id and slice hash
+            self.ID = parent.ID * 31 + self._slices_hash  # use a prime number to avoid collision
         else:  # initialize a new PArray
             # per device buffer of data
             self._array = MultiDeviceBuffer(num_gpu)
             location = self._array.set_complete_array(array)
 
             # coherence protocol for managing data among multi device
-            self._coherence = Coherence(location, num_gpu, self._array)
+            self._coherence = Coherence(location, num_gpu)
 
             # no slices since it is a new array rather than a subarray
             self._slices = []
@@ -68,6 +75,12 @@ class PArray:
             # a condition variable to acquire when moving data on the device
             self._coherence_cv = {n:threading.Condition() for n in range(num_gpu)}
             self._coherence_cv[CPU_INDEX] = threading.Condition()
+
+            # there is no slices
+            self._slices_hash = None
+
+            # use id() of buffer as unique ID
+            self.ID = id(self._array)
 
     # Properties:
 
@@ -213,7 +226,7 @@ class PArray:
             device_id = self._current_device_index
 
         # update protocol and get operation
-        operations = self._coherence.read(device_id, slices) # locks involve
+        operations = self._coherence.read(device_id, self._slices_hash) # locks involve
         self._process_operations(operations, slices) # condition variable involve
 
     def _coherence_write(self, device_id: int = None, slices: SlicesType = None) -> None:
@@ -233,7 +246,7 @@ class PArray:
             device_id = self._current_device_index
 
         # update protocol and get operation
-        operations = self._coherence.write(device_id, slices) # locks involve
+        operations = self._coherence.write(device_id, self._slices_hash) # locks involve
         self._process_operations(operations, slices) # condition variable involve
 
     # Device management methods:
@@ -258,12 +271,18 @@ class PArray:
                             self._coherence_cv[op.src].wait()
                     if op.inst == MemoryOperation.LOAD_SUB:
                         self._array.set_slices_mapping(op.dst, slices)  # build slices mapping first
-                    self._array.copy_data_between_device(op.dst, op.src)  # copy data
+
+                    # check flag to see if dst is current device
+                    dst_is_current_device = op.flag != MemoryOperation.SWITCH_DEVICE_FLAG
+
+                    # copy data
+                    self._array.copy_data_between_device(op.dst, op.src, dst_is_current_device)
+
+                    # sync stream before set it as ready, so asyc call is ensured to be done
                     cupy.cuda.stream.get_current_stream().synchronize()
-                    if op.inst == MemoryOperation.LOAD_SUB:
-                        self._coherence.set_data_as_ready(op.dst, slices)  # mark it as done
-                    else:
-                        self._coherence.set_data_as_ready(op.dst, None)
+
+                    # data is ready now
+                    self._coherence.set_data_as_ready(op.dst, self._slices_hash)  # mark it as done
                     self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
             elif op.inst == MemoryOperation.EVICT:
                 self._array.clear(op.src)  # decrement the reference counter, relying on GC to free the memory
