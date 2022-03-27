@@ -204,7 +204,7 @@ async def start(data, K, task):
 
         kmeanspp_timer_end = perf_counter()
         print(f"K-Means plus plus takes {kmeanspp_timer_end - kmeanspp_timer_begin} seconds")
-
+    await task[0]
     # 3. NEW: input/inout
     @spawn(task[1], [task[0]], placement=gpu, input=[data], inout=[centroids])
     async def start_kmeans():

@@ -10,6 +10,31 @@ import time
 from parla import Parla, get_all_devices
 
 from parla.cuda import gpu
+from parla.cpu import cpu
+
+from parla.function_decorators import specialized
+from parla.tasks import *
+from parla.ldevice import LDeviceGridBlocked
+
+import cupy as cp
+from cupy.cuda import cublas
+from cupy.cuda import device
+from cupy.linalg import _util
+
+from parla.parray import asarray_batch
+
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-b', type=int, default=32*5)
+parser.add_argument('-nblocks', type=int, default=16)
+parser.add_argument('-trials', type=int, default=1)
+args = parser.parse_args()
+
+block_size = args.b
+n = block_size*args.nblocks
+num_tests = args.trials
+
 
 try:
     from parla.cuda import get_memory_log, summarize_memory, log_memory, clean_memory
@@ -23,34 +48,9 @@ except (ImportError, AttributeError):
     def clean_memory():
         pass
 
-from parla.cpu import cpu
-
-from parla.function_decorators import specialized
-from parla.tasks import *
-
-#from parla.task_runtime import get_current_devices
-from parla.ldevice import LDeviceGridBlocked
-from parla.array import clone_here
-
-import cupy as cp
-from cupy.cuda import cublas
-from cupy.cuda import device
-from cupy.linalg import _util
 
 from scipy import linalg
 import sys
-
-import argparse
-
-parser = argparse.ArgumentParser()
-parser.add_argument('-b', type=int, default=32*5)
-parser.add_argument('-nblocks', type=int, default=16)
-parser.add_argument('-trials', type=int, default=1)
-args = parser.parse_args()
-
-block_size = args.b
-n = block_size*args.nblocks
-num_tests = args.trials
 
 loc = gpu
 
@@ -73,9 +73,8 @@ def cholesky(a):
 @cholesky.variant(gpu)
 def cholesky_gpu(a):
     a = cp.linalg.cholesky(a)
-    #if cp.any(cp.isnan(a)):
-    #    print(a, flush=True)
-    #    raise np.linalg.LinAlgError
+    if cp.any(cp.isnan(a)):
+      raise np.linalg.LinAlgError
     return a
 
 @specialized
@@ -132,6 +131,9 @@ def update_gpu(a, b, c):
     c = update_kernel(a, b, c)
     return c
 
+def flatten(t):
+    return [item for sublist in t for item in sublist]
+
 def cholesky_blocked_inplace(a):
     """
     This is a less naive version of dpotrf with one level of blocking.
@@ -146,6 +148,9 @@ def cholesky_blocked_inplace(a):
     if len(a) != len(a[0]):
         raise ValueError("Non-square blocks are not supported.")
 
+    #print("Starting..", flush=True)
+    #print("Initial Array", a, flush=True)
+    block_size = a[0][0].array.shape[0]
     # Define task spaces
     gemm1 = TaskSpace("gemm1")        # Inter-block GEMM
     subcholesky = TaskSpace("subcholesky")  # Cholesky on block
@@ -156,77 +161,89 @@ def cholesky_blocked_inplace(a):
         for k in range(j):
             # Inter-block GEMM
             mem = 8*4* block_size**2
-            @spawn(gemm1[j, k], [solve[j, k], gemm1[j, 0:k]], placement=loc, memory=mem)
+            @spawn(gemm1[j, k], [solve[j, k], gemm1[j, 0:k]], input=[a[j][k]], inout=[a[j][j]], placement=loc, memory=mem)
             def t1():
-                #print("GEMM1", (j, j), (j, k), flush=True)
-                out = clone_here(a[j][j])
-                rhs = clone_here(a[j][k])
-
-                #stream = cp.cuda.get_current_stream()
-                #stream.synchronize()
-
+                #print(f"+SYRK: ({j}, {k}) - Requires rw({j},{j})  r({j}, {k})", flush=True)
+                out = a[j][j].array
+                rhs = a[j][k].array
                 out = update(rhs, rhs, out)
+                #if (out is None):
+                #    print("gemm1 problem on exit", flush=True)
 
                 #stream = cp.cuda.get_current_stream()
                 #stream.synchronize()
-                log_memory()
-                a[j][j] = out
+                a[j][j].update(out)
                 #stream.synchronize()
+                #print("SYRK A[j, j]", a[j][j].array, flush=True)
+                #print(f"-SYRK: ({j}, {k}) - Requires rw({j},{j})  r({j}, {k})", flush=True)
 
         # Cholesky on block
         mem = 8*2* block_size**2
-        @spawn(subcholesky[j], [gemm1[j, 0:j]], placement=loc, memory=mem)
+        @spawn(subcholesky[j], [gemm1[j, 0:j]], inout=[a[j][j]], placement=loc, memory=mem)
         def t2():
-            dblock = clone_here(a[j][j])
-            #stream = cp.cuda.get_current_stream()
-            #stream.synchronize()
-            #print(j, dblock, flush=True)
-            dblock = cholesky(dblock)
-            #stream = cp.cuda.get_current_stream()
-            #stream.synchronize()
-            log_memory()
-            a[j][j] = dblock
-            #stream.synchronize()
+            #print(f"+POTRF: ({j}) - Requires rw({j},{j})", flush=True)
+            dblock = a[j][j].array
 
+            #if True or (dblock is None):
+            #    print("potrf", j, dblock, flush=True)
+            log_memory()
+            dblock = cholesky(dblock)
+
+            #if dblock is None:
+            #    print("POTRF problem on exit", flush=True)
+
+            #stream = cp.cuda.get_current_stream()
+            #stream.synchronize()
+            a[j][j].update(dblock)
+            #stream.synchronize()
+            #print("POTRF A[j, j]", a[j][j].array, flush=True)
+            #print(f"-POTRF: ({j}) - Requires rw({j},{j})", flush=True)
         for i in range(j+1, len(a)):
             for k in range(j):
                 # Inter-block GEMM
                 mem = 8*5*block_size**2
-                @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k], gemm2[i, j, 0:k]], placement=loc, memory=mem)
+                @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k], gemm2[i, j, 0:k]], inout=[a[i][j]], input=[a[i][k], a[j][k]], placement=loc, memory=mem)
                 def t3():
+                    #print(f"+GEMM: ({i}, {j}, {k}) - Requires rw({i},{j}), r({i}, {k}), r({j}, {k})", flush=True)
+                    out = a[i][j].array
+                    rhs1 = a[i][k].array
+                    rhs2 = a[j][k].array
 
-                    #print("GEMM2", (i, j), (i, k), (j, k) , flush=True)
-                    out = clone_here(a[i][j])
-                    rhs1 = clone_here(a[i][k])
-                    rhs2 = clone_here(a[j][k])
                     #stream = cp.cuda.get_current_stream()
                     #stream.synchronize()
 
-                    out = update(rhs1, rhs2, out)
-                    #stream = cp.cuda.get_current_stream()
-                    #stream.synchronize()
                     log_memory()
-                    a[i][j] = out
+                    out = update(rhs1, rhs2, out)
+                    #if out is None:
+                    #    print("gemm2 problem on exit", flush=True)
+                    #stream = cp.cuda.get_current_stream()
                     #stream.synchronize()
-
+                    a[i][j].update(out)
+                    #stream.synchronize()
+                    #print("GEMM A[i, j]", a[i][j].array, flush=True)
+                    #print(f"-GEMM: ({i}, {j}, {k}) - Requires rw({i},{j}), r({i}, {k}), r({j}, {k})", flush=True)
 
             # Triangular solve
-
             mem = 8*3*block_size**2
-            @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], placement=loc, memory=mem)
+            @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], inout=[a[i][j]], input=[a[j][j]], placement=loc, memory=mem)
             def t4():
+                #print(f"+TRSM: ({i}, {j}) - Requires rw({i},{j}), r({j}, {j})", flush=True)
+                factor = a[j][j].array
+                panel = a[i][j].array
 
-                factor = clone_here(a[j][j])
-                panel = clone_here(a[i][j])
-
-                #stream = cp.cuda.get_current_stream()
-                #stream.synchronize()
-                out = ltriang_solve(factor, panel)
-                #stream = cp.cuda.get_current_stream()
-                #stream.synchronize()
                 log_memory()
-                a[i][j] = out
+                #if True or (factor is None) or (panel is None):
+                #    print("trsm", i, j, factor, panel, flush=True)
+                out = ltriang_solve(factor, panel)
+                #if out is None:
+                #    print("trsm problem on exit", flush=True)
+                #stream = cp.cuda.get_current_stream()
                 #stream.synchronize()
+                a[i][j].update(out)
+                #stream.synchronize()
+                #print("TRSM A[i, j]", a[i][j].array, flush=True)
+                #print(f"-TRSM: ({i}, {j}) - Requires rw({i},{j}), r({j}, {j})", flush=True)
+
 
     return subcholesky[len(a)-1]
 
@@ -241,44 +258,43 @@ def main():
         a = a @ a.T
 
         # Copy and layout input
-
         a1 = a.copy()
-        a_temp = a1.reshape(n//block_size, block_size, n//block_size, block_size).swapaxes(1, 2)
 
-        n_gpus = cp.cuda.runtime.getDeviceCount()
+        temp = a1.reshape(n//block_size, block_size, n//block_size, block_size).swapaxes(1, 2)
 
         for k in range(num_tests):
-            ap = a_temp.copy()
 
-
-            ap_list = list()
+            ap = temp.copy()
+            ap_parray_list = list()
             for i in range(n//block_size):
-                ap_list.append(list())
+                ap_parray_list.append(list())
                 for j in range(n//block_size):
-                    with cp.cuda.Device(i%n_gpus):
-                        ap_list[i].append(cp.asarray(ap[i][j]))
+                    ap_parray_list[i].append(ap[i][j])
+
+            ap_parray = asarray_batch(ap_parray_list)
 
             start = time.perf_counter()
+
             # Call Parla Cholesky result and wait for completion
-            await cholesky_blocked_inplace(ap_list)
+            await cholesky_blocked_inplace(ap_parray)
+
+            #print(ap)
             end = time.perf_counter()
+
+            ts = TaskSpace("CopyBack")
+            @spawn(taskid=ts[0], placement=cpu, input=flatten(ap_parray))
+            def copy_back():
+                for i in range(n//block_size):
+                    for j in range(n//block_size):
+                        a1[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_parray[i][j].array
+
+            await ts
+
 
             print(f"Trial {k}:", end - start, "seconds")
             summarize_memory()
             clean_memory()
             print("--------")
-
-
-            ts = TaskSpace("CopyBack")
-            @spawn(taskid=ts[0], placement=cpu)
-            def copy_back():
-                for i in range(n//block_size):
-                    for j in range(n//block_size):
-                        a1[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_list[i][j].get()
-
-            await ts
-
-
 
             # Check result
             computed_L = np.tril(a1)

@@ -67,7 +67,7 @@ def main():
                 for j in range(blocks):
                     a_block = a_part[i]
                     b_block = b_part[j]
-                    c_block = c_part[i][:, j * block_size : (j + 1) * block_size]
+                    c_block = c_part[i]  # if slicing at here, new copy will be created for each iteration, which is bad
                     memsize = c_block.nbytes
                     if i != j:
                         memsize += b_block.nbytes
@@ -76,7 +76,7 @@ def main():
                     # 3. NEW: input/output
                     @spawn(matmul[k, j], dependencies=[matmul[0:k, j], matmul[k, 0:j]], placement = gpu, memory=memsize, input=[a_block, b_block], output=[c_block])
                     def matmul_task():
-                        c_block[:] = (a_block @ b_block.T).array
+                        c_block[:, j * block_size : (j + 1) * block_size] = (a_block @ b_block.T).array
                         # TODO(lhc): For now, do not copy back to cpu memory.
                         #            This is because I don't know how to move back to
                         #            PArray to CPU on nested task case.

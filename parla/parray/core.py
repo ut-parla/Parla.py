@@ -207,6 +207,15 @@ class PArray:
         else:
             self._array.set_by_global_slices(self._current_device_index, slices, value)
 
+    def evict_all(self) -> None:
+        """
+        Evict all copies from buffer, and clean all related fields
+
+        Note: this object should not be accessed anymore after called this method
+        """
+        self._array = None
+        self._coherence = None
+
     # Coherence update operations:
 
     def _coherence_read(self, device_id: int = None, slices: SlicesType = None) -> None:
