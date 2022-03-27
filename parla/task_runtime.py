@@ -18,7 +18,7 @@ from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 
 # Logger configuration (uncomment and adjust level if needed)
-#logging.basicConfig(level = logging.INFO)
+#logging.basicConfig(level = logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements", "get_current_devices"]
@@ -460,8 +460,7 @@ class Task:
         """Add the successor if self is not completed, otherwise return False."""
         if self._state.is_terminal:
             return False
-        logger.debug("Task %s added a successor, %s",
-                        self.name, successor)
+        logger.debug("Task %s added a successor %s", self.name, successor.name)
         self._successors.append(successor)
         return True
 
@@ -979,7 +978,7 @@ class ParrayTracker():
     which is stored in PArrays. This is tracked separately from the PArray's
     tracking information because the Scheduler knows where a given PArray will
     be in the future. This class holds tracking information.
-    
+
     Currently it's a dumb class, basically just a C-struct, whose members are
     managed by the ResourcePool.
     """
