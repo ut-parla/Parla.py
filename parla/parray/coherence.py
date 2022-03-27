@@ -154,6 +154,7 @@ class Coherence:
                         operations = [MemoryOperation.load(dst=device_id, src=prev_owner)]
                     else:
                         operations = [MemoryOperation.noop()]
+                        self._data_ready[device_id] = True
 
                     # evict data from other devices
                     for device, state in self._local_states.items():
@@ -176,6 +177,7 @@ class Coherence:
                         operations = [MemoryOperation.load(dst=device_id, src=prev_owner)]
                     else:
                         operations = [MemoryOperation.noop()]
+                        self._data_ready[device_id] = True
 
                     # evict data from previous owner
                     self._local_states[prev_owner] = self.INVALID
