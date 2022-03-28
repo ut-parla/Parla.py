@@ -451,16 +451,15 @@ class Task:
         return True
 
     def _complete_dependency(self, events):
-        with self._mutex:
-            self._remaining_dependencies -= 1
-            # Add events from one dependent task.
-            # (We are aiming to multiple device tasks, and it would
-            #  be possible to have multiple events)
-            if (events is not None):
-                self.dependent_events.append(events)
-            self._check_remaining_dependencies()
-            logger.info(f"[Task %s] Task dependency completed. \
-                (remaining: %d)", self.name, self._remaining_dependencies)
+        self._remaining_dependencies -= 1
+        # Add events from one dependent task.
+        # (We are aiming to multiple device tasks, and it would
+        #  be possible to have multiple events)
+        if (events is not None):
+            self.dependent_events.append(events)
+        self._check_remaining_dependencies()
+        logger.info(f"[Task %s] Task dependency completed. \
+            (remaining: %d)", self.name, self._remaining_dependencies)
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
@@ -1459,22 +1458,24 @@ class Scheduler(ControllableThread, SchedulerContext):
         """Enqueue a task on the resource allocation queue.
            Note that this enqueue has no data race.
         """
-        self._ready_queue.appendleft(task)
+        with self._monitor:
+            self._ready_queue.appendleft(task)
 
     def _dequeue_task(self, timeout=None) -> Optional[Task]:
         """Dequeue a task from the resource allocation queue.
         """
-        while True:
-            try:
-                if self._should_run:
-                    task = self._ready_queue.pop()
-                    logger.debug(f"[Scheduler] Popped %r from ready queue.", task)
-                    return task
-                else:
+        with self._monitor:
+            while True:
+                try:
+                    if self._should_run:
+                        task = self._ready_queue.pop()
+                        logger.debug(f"[Scheduler] Popped %r from ready queue.", task)
+                        return task
+                    else:
+                        return None
+                except IndexError:
+                    # Keep proceeding the next step.
                     return None
-            except IndexError:
-                # Keep proceeding the next step.
-                return None
 
     def _assignment_policy(self, task: Task):
         """
@@ -1539,7 +1540,6 @@ class Scheduler(ControllableThread, SchedulerContext):
             dev_load += self.get_mapped_datamove_task_count(device)
             norm_dev_load = dev_load
 
-            #print(dev_load, self._active_compute_task_count)
             # Normalize this too so we have numbers between 0 and 1
             if total_mapped > 0:
                 norm_dev_load /= total_mapped
@@ -1559,7 +1559,6 @@ class Scheduler(ControllableThread, SchedulerContext):
                         - load_weight \
                         + dependency_weight * this_device_owns_dependency
 
-            #print(device, "Local Data: ", local_data_weight*(local_data - nonlocal_data), "Load: ", load_weight, "Suit ", suitability)
             """
             def myformat(num):
                 return "{:.3f}".format(num)
