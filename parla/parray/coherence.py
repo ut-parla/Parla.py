@@ -297,7 +297,13 @@ class Coherence:
                 self._local_states[device_id] = self.SHARED
 
                 # change owner
-                self.owner = max(self.owner, device_id)
+                if self._owner_is_latest():
+                    if self.owner == CPU_INDEX:
+                        self.owner = device_id
+                    elif device_id % 2 == 0 and self.owner % 2 != 0:  # prefer device 0/2 over 1/3
+                        self.owner = device_id
+                else:
+                    self.owner = device_id
 
                 # skip the rest code
                 return operations
@@ -324,7 +330,10 @@ class Coherence:
 
                         # change owner
                         if self._owner_is_latest():
-                            self.owner = max(self.owner, device_id)
+                            if self.owner == CPU_INDEX:
+                                self.owner = device_id
+                            elif device_id % 2 == 0 and self.owner % 2 != 0:  # prefer device 0/2 over 1/3
+                                self.owner = device_id
                         else:
                             self.owner = device_id
                     else:  # since we assume all array are disjoint, so could load directly
@@ -426,10 +435,7 @@ class Coherence:
                         self._versions[device_id] = self._latest_version
 
                         # change owner
-                        if self._owner_is_latest():
-                            self.owner = max(self.owner, device_id)
-                        else:
-                            self.owner = device_id
+                        self.owner = device_id
                     else:  # since we assume all array are disjoint, so could load directly
                         operations.append(MemoryOperation.load(dst=device_id, src=self.owner, is_subarray=True))
 
@@ -444,10 +450,7 @@ class Coherence:
                         self._versions[device_id] = self._latest_version
 
                         # change owner
-                        if self._owner_is_latest():
-                            self.owner = max(self.owner, device_id)
-                        else:
-                            self.owner = device_id
+                        self.owner = device_id
                     else:
                         self._versions[device_id][slices_hash] += 1
                         self._latest_version = max(self._latest_version, self._versions[device_id][slices_hash])
