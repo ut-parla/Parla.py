@@ -126,6 +126,29 @@ class PArray:
         self._array = None
         self._coherence = None
 
+    def evict(self, device_id: int = None, keep_one_copy: bool = True) -> None:
+        """
+        Evict a device's copy and update coherence states.
+
+        Args:
+            device_id: if is this not None, data will be moved to this device,
+                    else move to current device
+            keep_one_copy: if it is True and this is the last copy, 
+                    write it back to CPU before evict.
+
+        Note: if this device has the last copy and `keep_one_copy` is false, 
+            the whole protocol state will be INVALID then.
+            And the system will lose the copy. Be careful when evict the last copy.
+        """
+        if device_id is None:
+            device_id = self._current_device_index
+
+        with self._coherence_lock:
+            operations = self._coherence.evict(device_id, keep_one_copy)
+            for op in operations:
+                self._process_operation(op)
+
+
     # Coherence update operations:
 
     def _coherence_read(self, device_id: int = None) -> None:
@@ -139,7 +162,7 @@ class PArray:
 
         Note: should be called within the current task context
         """
-        if not device_id:
+        if device_id is None:
             device_id = self._current_device_index
 
         # update protocol and get operation
@@ -173,7 +196,7 @@ class PArray:
 
         Note: should be called within the current task context
         """
-        if not device_id:
+        if device_id is None:
             device_id = self._current_device_index
 
         # update protocol and get list of operations

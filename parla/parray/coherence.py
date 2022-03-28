@@ -186,39 +186,69 @@ class Coherence:
         else: # this device is the owner in MODIFIED state
             return [MemoryOperation.noop()] # do nothing
 
-    def evict(self, device_id: int) -> MemoryOperation:
+    def evict(self, device_id: int, keep_one_copy: bool = True) -> List[MemoryOperation]:
         """ Tell the protocol that this device want to clear the copy.
 
         Args:
             device_id: id of this device
+            keep_one_copy: if true, writeback the last copy to CPU
 
         Return:
-            MemoryOperation, so the caller could move data following the operation
+            List[MemoryOperation], could return several MemoryOperations.
+                And the order operations matter.
 
-        Note: if this device has the last copy, the whole protocol state will be INVALID then.
-            And the system will lose the copy. So careful when evict the last copy.
+        Note: if this device has the last copy and `keep_one_copy` is false, 
+            the whole protocol state will be INVALID then.
+            And the system will lose the copy. Be careful when evict the last copy.
         """
         device_local_state = self._local_states[device_id]
+        operations = []
 
         if device_local_state == self.INVALID: # already evicted, do nothing
-            return MemoryOperation.noop()
+            operations.append(MemoryOperation.noop())
         elif device_local_state == self.SHARED:
-            # find a new owner
-            if device_id == self._owner:
+            if device_id == self._owner:  # has a chance this is the last copy
+                # find new owner
                 new_owner = None
                 for device, state in self._local_states.items():
                     if state == self.SHARED and device != device_id:  # should not include this device itself
                         new_owner = device
                         break
-                if new_owner is None:  # this device owns the last copy
-                    self._global_state = self.INVALID  # the system lose the last copy
+
+                # this device owns the last copy
+                if new_owner is None:  
+                    if keep_one_copy:  
+                        if device_id == CPU_INDEX:
+                            # the last copy is already at CPU, 
+                            # do nothing and skip the rest of the code
+                            return [MemoryOperation.noop()]
+                        else:
+                            # write back the last copy to CPU
+                            operations.append(MemoryOperation.load(CPU_INDEX, device_id))
+
+                            # now CPU has exclusive access to the data
+                            self._global_state = self.MODIFIED
+                            self._local_states[CPU_INDEX] = self.MODIFIED
+
+                            new_owner = CPU_INDEX
+                    else:
+                        self._global_state = self.INVALID  # the system lose the last copy
                 self._owner = new_owner
 
             # update states
             self._local_states[device_id] = self.INVALID
-            return MemoryOperation.evict(device_id)
-        else:  # Modified
-            self._global_state = self.INVALID  # the system lose the last copy
+            operations.append(MemoryOperation.evict(device_id))
+        else:  # Modified, this device owns the last copy
+            if keep_one_copy:  # write back to CPU
+                self._owner = CPU_INDEX
+                self._local_states[CPU_INDEX] = self.MODIFIED
+
+                operations.append(MemoryOperation.load(CPU_INDEX, device_id))
+            else:
+                self._global_state = self.INVALID  # the system lose the last copy
+                self._owner = None
+
             self._local_states[device_id] = self.INVALID
-            self._owner = None
-            return MemoryOperation.evict(device_id)
+            operations.append(MemoryOperation.evict(device_id))
+
+        return operations
