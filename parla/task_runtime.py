@@ -614,7 +614,7 @@ class ComputeTask(Task):
                     for resource, amount in self.req.resources.items():
                         logger.debug("Task %r deallocating %d %s from device %r", self, amount, resource, d)
                     ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
-                    ctx.scheduler.update_mapped_compute_task_count(d, -1)
+                    ctx.scheduler.update_mapped_task_count(self, d, -1)
                     ctx.scheduler.update_launched_task_count_mutex(self, d, -1)
 
                 # Update OUT parrays which may have changed size from 0 to something
@@ -738,6 +738,7 @@ class DataMovementTask(Task):
 
                 # Decrease the number of running tasks on the device d.
                 for d in self.req.devices:
+                    ctx.scheduler.update_mapped_task_count(self, d, -1)
                     ctx.scheduler.update_launched_task_count_mutex(self, d, -1)
 
                 # Protect the case that it notifies dependees and
@@ -1305,6 +1306,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     _free_worker_threads: Deque[WorkerThread]
     _available_resources: ResourcePool
     _device_mapped_compute_task_counts: Dict[Device, int]
+    _device_mapped_datamove_task_counts: Dict[Device, int]
     _device_launched_compute_task_counts: Dict[Device, int]
     _device_launched_datamove_task_counts: Dict[Device, int]
     _num_colocatable_tasks: int
@@ -1367,6 +1369,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         # The number of in-flight compute tasks on each device
         self._device_mapped_compute_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
+        self._device_mapped_datamove_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
         self._device_launched_compute_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
         self._device_launched_datamove_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
 
@@ -1496,7 +1499,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         best_device_local_data = 0
         total_mapped = 0
         for device in possible_devices:
-            total_mapped += self._device_mapped_compute_task_counts[device]
+            total_mapped += self.get_mapped_compute_task_count(device)
+            total_mapped += self.get_mapped_datamove_task_count(device)
 
         for device in possible_devices:
             # Ensure that the device has enough resources for the task
@@ -1531,7 +1535,8 @@ class Scheduler(ControllableThread, SchedulerContext):
 
             # Next we calculate the load-balancing factor
             # For now this is just a count of tasks on the device queue (TODO (ses): better heuristics later...)
-            dev_load = self._device_mapped_compute_task_counts[device]
+            dev_load = self.get_mapped_compute_task_count(device)
+            dev_load += self.get_mapped_datamove_task_count(device)
             norm_dev_load = dev_load
 
             #print(dev_load, self._active_compute_task_count)
@@ -1692,9 +1697,20 @@ class Scheduler(ControllableThread, SchedulerContext):
         else:
             self._device_launched_datamove_task_counts[dev] += counts
 
-    def update_mapped_compute_task_count(self, dev, counts):
+    def update_mapped_task_count(self, task, dev, counts):
         with self._monitor:
-           self._device_mapped_compute_task_counts[dev] += counts
+           if isinstance(task, ComputeTask):
+               self._device_mapped_compute_task_counts[dev] += counts
+           else:
+               self._device_mapped_datamove_task_counts[dev] += counts
+
+    def get_mapped_compute_task_count(self, dev):
+        with self._monitor:
+            return self._device_mapped_compute_task_counts[dev]
+
+    def get_mapped_datamove_task_count(self, dev):
+        with self._monitor:
+            return self._device_mapped_datamove_task_counts[dev]
 
     def _construct_datamove_task(self, target_data, compute_task: ComputeTask, operand_type: OperandType):
         """
@@ -1714,6 +1730,8 @@ class Scheduler(ControllableThread, SchedulerContext):
                                          compute_task.req, target_data, operand_type,
                                          str(compute_task.taskid) + "." +
                                          str(hex(id(target_data))) + ".dmt")
+        for device in compute_task.req.environment.placement:
+            self.update_mapped_task_count(datamove_task, device, 1)
         self.incr_active_tasks()
         compute_task._add_dependency_mutex(datamove_task)
         target_data_id = id(target_data)
@@ -1770,7 +1788,10 @@ class Scheduler(ControllableThread, SchedulerContext):
                                 raise NotImplementedError("Multidevice not supported")
                             for device in task.req.environment.placement:
                                 self._available_resources.register_parray_move(parray, device)
-                                self.update_mapped_compute_task_count(device, 1)
+                        # TODO(lhc): the current Parla does not support multiple devices.
+                        #            leave it as a loop for the future.
+                        for device in task.req.environment.placement:
+                            self.update_mapped_task_count(task, device, 1)
 
                         # Allocate additional resources used by this task (blocking)
                         for device in task.req.devices:
@@ -1826,14 +1847,17 @@ class Scheduler(ControllableThread, SchedulerContext):
     # It's guaranteed for the task to have enough resources
 
     def _launch_task(self, queue, dev: Device):
-        task = queue.pop()
-        worker = self._free_worker_threads.pop() # grab a worker
-        logger.info(f"[Scheduler] Launching %s task, %r on %r",
-                    dev.architecture.id, task, worker)
-        worker.assign_task(task)
-        logger.debug(f"[Scheduler] Launched %r", task)
-        for dev in task.req.environment.placement:
-            self.update_launched_task_count(task, dev, 1)
+        try:
+            task = queue.pop()
+            worker = self._free_worker_threads.pop() # grab a worker
+            logger.info(f"[Scheduler] Launching %s task, %r on %r",
+                        dev.architecture.id, task, worker)
+            worker.assign_task(task)
+            logger.debug(f"[Scheduler] Launched %r", task)
+            for dev in task.req.environment.placement:
+                self.update_launched_task_count(task, dev, 1)
+        except IndexError:
+            pass
 
     def _launch_tasks(self):
         """ Iterate through free devices and launch tasks on them
@@ -1846,21 +1870,14 @@ class Scheduler(ControllableThread, SchedulerContext):
                 compute_queue = self._compute_task_dev_queues[dev]
                 datamove_queue = self._datamove_task_dev_queues[dev]
                 if len(compute_queue) > 0:
-                    try:
-#print("num of compute tasks on dev:", dev, " :", self._device_launched_compute_task_counts)
-                        if self._device_launched_compute_task_counts[dev] \
-                                < (self._num_colocatable_tasks + 1):
-                            self._launch_task(compute_queue, dev)
-                    finally:
-                        pass
+                    # getting counters is protected by monitor.
+                    if self._device_launched_compute_task_counts[dev] \
+                            < (self._num_colocatable_tasks + 1):
+                        self._launch_task(compute_queue, dev)
                 if len(datamove_queue) > 0:
-                    try:
-#print("num of data move tasks on dev:", dev, " :", self._device_launched_datamove_task_counts)
-                        if self._device_launched_datamove_task_counts[dev] \
-                                < (self._num_colocatable_tasks + 1):
-                            self._launch_task(datamove_queue, dev)
-                    finally:
-                        pass
+                    if self._device_launched_datamove_task_counts[dev] \
+                            < (self._num_colocatable_tasks + 1):
+                        self._launch_task(datamove_queue, dev)
 
     def run(self) -> None:
         # noinspection PyBroadException
