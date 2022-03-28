@@ -22,9 +22,7 @@ def main():
 
         ts = TaskSpace("CopyBack")
 
-        print(ts[0:1, 0:2])
-
-        for i in [0, 10, 20, 30, 40, 50]:
+        for i in [0]:
             if i != 0:
                 @spawn(ts[1+i, 1], [ts[4+(i-10), 1]], placement=gpu, inout=[b])
                 def task2():
@@ -50,10 +48,23 @@ def main():
             def task6():
                 print(f"6: {a[0, 0]}")
 
-            @spawn(ts[4+i, 1], [ts[3+i, 1]], placement=gpu, input=[b], inout=[a])
+            @spawn(ts[4+i, 1], [ts[3+i, 1]], placement=gpu[0], input=[b], inout=[a])
             def task5():
                 print(f"5: {b[0, 0]}")
 
+        @spawn(ts[0, 0], [ts[4, 1]], placement=gpu[1], input=[b], inout=[a])
+        def task6():
+            print(f"6.a.0: {a}")
+            print(f"6.b.0: {b}")
+
+            b.evict()
+            a.evict()
+
+            print(f"6.a: {a}")
+            print(f"6.b: {b}")
+
+            b.evict(0, keep_one_copy=False)
+            print(f"6.b.1: {b}")
         
 
 if __name__ == '__main__':
