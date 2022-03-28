@@ -369,7 +369,7 @@ class Task:
             # Ignore it.
             if isinstance(dep, TaskID):
                 continue
-            if not dep._add_dependee(self):
+            if not dep._add_dependee_mutex(self):
                 self._remaining_dependencies -= 1
 
     def _set_dependencies_mutex(self, dependencies):
@@ -451,15 +451,16 @@ class Task:
         return True
 
     def _complete_dependency(self, events):
-        self._remaining_dependencies -= 1
-        # Add events from one dependent task.
-        # (We are aiming to multiple device tasks, and it would
-        #  be possible to have multiple events)
-        if (events is not None):
-            self.dependent_events.append(events)
-        self._check_remaining_dependencies()
-        logger.info(f"[Task %s] Task dependency completed. \
-            (remaining: %d)", self.name, self._remaining_dependencies)
+        with self._mutex:
+            self._remaining_dependencies -= 1
+            # Add events from one dependent task.
+            # (We are aiming to multiple device tasks, and it would
+            #  be possible to have multiple events)
+            if (events is not None):
+                self.dependent_events.append(events)
+            self._check_remaining_dependencies()
+            logger.info(f"[Task %s] Task dependency completed. \
+                (remaining: %d)", self.name, self._remaining_dependencies)
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
@@ -1477,6 +1478,16 @@ class Scheduler(ControllableThread, SchedulerContext):
                     # Keep proceeding the next step.
                     return None
 
+    def enqueue_dev_queue(self, dev, task: Task):
+        """Enqueue a task on the device queue.
+           Note that this enqueue has no data race.
+        """
+        with self._monitor:
+            if isinstance(task, ComputeTask):
+                self._compute_task_dev_queues[dev].append(task)
+            else:
+                self._datamove_task_dev_queues[dev].append(task)
+
     def _assignment_policy(self, task: Task):
         """
         Attempt to assign resources to `task`.
@@ -1744,7 +1755,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 dep_task = dep_task_tuple[1]
                 # Only checks dependent tasks if they use the same data blocks.
                 if compute_task.is_dependent(dep_task):
-                    if not datamove_task._add_dependency(dep_task):
+                    if not datamove_task._add_dependency_mutex(dep_task):
                         completed_tasks.append(dep_task_id)
             dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
         self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
@@ -1752,7 +1763,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         # If a task has no dependency after it is assigned to devices,
         # immediately enqueue a corresponding data movement task to
         # the ready queue.
-        if not datamove_task.bool_check_remaining_dependencies():
+        if not datamove_task.bool_check_remaining_dependencies_mutex():
             self.enqueue_task(datamove_task)
 
     def _map_tasks(self):
@@ -1804,7 +1815,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # If a task has no dependency after it is assigned to devices,
                         # immediately enqueue a corresponding data movement task to
                         # the ready queue.
-                        if not task.bool_check_remaining_dependencies():
+                        if not task.bool_check_remaining_dependencies_mutex():
                             self.enqueue_task(task)
                             logger.debug(f"[Scheduler] Enqueued %r on ready queue", task)
                 else:
@@ -1830,10 +1841,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 break
             for d in task.req.devices:
                 logger.info(f"[Scheduler] Enqueuing %r to device %r", task, d)
-                if isinstance(task, ComputeTask):
-                    self._compute_task_dev_queues[d].append(task)
-                elif isinstance(task, DataMovementTask):
-                    self._datamove_task_dev_queues[d].append(task)
+                self.enqueue_dev_queue(d, task)
 
     # _launch_[DEVICE TYPES]_tasks launches a task by assigning it to available
     # worker threads. It manages different execution paths based on the target
@@ -1856,7 +1864,8 @@ class Scheduler(ControllableThread, SchedulerContext):
             for dev in task.req.environment.placement:
                 self.update_launched_task_count(task, dev, 1)
         except IndexError:
-            pass
+            # If failed to find available thread, reappend it.
+            queue.append(task)
 
     def _launch_tasks(self):
         """ Iterate through free devices and launch tasks on them
