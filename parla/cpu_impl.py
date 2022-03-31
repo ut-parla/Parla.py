@@ -19,7 +19,9 @@ _MEMORY_FRACTION = 15/16 # The fraction of total memory Parla should assume it c
 
 
 def get_n_cores():
-    return psutil.cpu_count(logical=False)
+
+    cores = os.environ.get("PARLA_CORES", psutil.cpu_count(logical=False))
+    return int(cores)
 
 
 def get_total_memory():
@@ -169,7 +171,7 @@ class UnboundCPUComponent(EnvironmentComponentDescriptor):
         return UnboundCPUComponentInstance(self, env)
 
 
-if os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() == "cores":
+if True or os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() == "cores":
     cpu = _CPUCoresArchitecture("CPU Cores", "cpu")
 else:
     if os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() not in ("whole", ""):

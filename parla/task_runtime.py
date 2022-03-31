@@ -1012,6 +1012,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
         try:
             with self:
                 for component in self.scheduler.components:
+                    #print("n_workers", len(self.scheduler.components), flush=True)
                     component.initialize_thread()
                 while self._should_run:
                     self._status = "Getting Task"
@@ -1357,7 +1358,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         self.period = period
 
         # The number of tasks allowed to be colocated (= 2)
-        self._num_colocatable_tasks = 2
+        self._num_colocatable_tasks = 0
 
         self._monitor = threading.Condition(threading.Lock())
 
@@ -1525,6 +1526,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Tasks have a set of requirements passed to them by @spawn. We need to
         # match those requirements and find the most suitable device.
         possible_devices = task.req.devices
+
+        #print("Devices requested: ", possible_devices, flush=True)
         ndevices = len(possible_devices)
         max_suitability = None
         best_device = None
@@ -1804,8 +1807,8 @@ class Scheduler(ControllableThread, SchedulerContext):
             task: Optional[Task] = self._dequeue_spawned_task()
             if task:
                 if not task.assigned:
-                    is_assigned = self._assignment_policy(task) # This is what actually maps the task
-                    #is_assigned = self._random_assignment_policy(task) # USE THIS INSTEAD TO TEST RANDOM
+                    #is_assigned = self._assignment_policy(task) # This is what actually maps the task
+                    is_assigned = self._random_assignment_policy(task) # USE THIS INSTEAD TO TEST RANDOM
                     assert isinstance(is_assigned, bool)
                     if not is_assigned:
                         self.enqueue_spawned_task(task)
