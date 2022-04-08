@@ -28,7 +28,7 @@ def main():
         # n is chosen so that all three can be
         # stored within the memory of a single GPU
         # so that strong scaling numbers make sense.
-        n = 24000
+        n = 32000
 
         blocks = ngpus
         block_size = n // ngpus

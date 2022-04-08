@@ -44,7 +44,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-b', type=int, default=2000)
-parser.add_argument('-nblocks', type=int, default=20)
+parser.add_argument('-nblocks', type=int, default=14)
 parser.add_argument('-trials', type=int, default=1)
 parser.add_argument('-matrix', default=None)
 parser.add_argument('-fixed', default=0, type=int)
