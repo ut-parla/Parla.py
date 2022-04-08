@@ -1,0 +1,6 @@
+[submodule "examples/nbody"]
+	path = examples/nbody
+	url = git@github.com:ut-parla/barnes-hut.git
+[submodule "examples/blr"]
+	path = examples/blr
+	url = git@github.com:ut-parla/BLR.git
