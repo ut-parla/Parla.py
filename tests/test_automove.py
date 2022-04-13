@@ -1,4 +1,3 @@
-import scipy as sp
 from parla import Parla, parray
 
 from parla.cuda import gpu

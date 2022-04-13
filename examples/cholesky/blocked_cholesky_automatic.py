@@ -3,23 +3,21 @@ A naive implementation of blocked Cholesky using Numba kernels on CPUs.
 """
 import random
 import numpy as np
-from numba import jit, void, float64
+from numba import jit, float64
 import math
 import time
 
-from parla import Parla, get_all_devices
+from parla import Parla
 
 from parla.cuda import gpu
 from parla.cpu import cpu
 
 from parla.function_decorators import specialized
 from parla.tasks import *
-from parla.ldevice import LDeviceGridBlocked
 
 import cupy as cp
 from cupy.cuda import cublas
 from cupy.cuda import device
-from cupy.linalg import _util
 
 from parla.parray import asarray_batch
 
