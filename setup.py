@@ -4,6 +4,7 @@ import os
 from setuptools import setup, Extension
 from Cython.Build import cythonize
 
+"""
 cython_modules = cythonize('parla/*.pyx')
 
 cache_filler_modules = []
@@ -13,11 +14,12 @@ for i in range(128):
                           define_macros = [('MODULE_NAME', module_name)],
                           sources = ['cache_filler.c'])
       cache_filler_modules.append(module)
+"""
 
 setup(name = "parla",
       version = "0.2",
       url = "https://github.com/ut-parla/Parla.py",
-      description = "The parla Python frontend.",
+      description = "Parla: A heterogenous Python Tasking system",
       packages = ['parla', 'parla.parray'],
       ext_modules = cache_filler_modules + cython_modules,
       )
