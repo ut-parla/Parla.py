@@ -21,5 +21,5 @@ setup(name = "parla",
       url = "https://github.com/ut-parla/Parla.py",
       description = "Parla: A heterogenous Python Tasking system",
       packages = ['parla', 'parla.parray'],
-      ext_modules = cache_filler_modules + cython_modules,
+      #ext_modules = cache_filler_modules + cython_modules,
       )
