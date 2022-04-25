@@ -8,7 +8,7 @@ from typing import Collection
 from parla import task_runtime
 from parla.device import get_all_devices
 from parla.environments import TaskEnvironment
-from parla import parray
+#from parla import parray
 
 __all__ = ["Parla", "multiload", "TaskEnvironment"]
 

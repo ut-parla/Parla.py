@@ -19,7 +19,9 @@ _MEMORY_FRACTION = 15/16 # The fraction of total memory Parla should assume it c
 
 
 def get_n_cores():
-    return psutil.cpu_count(logical=False)
+
+    cores = os.environ.get("PARLA_CORES", psutil.cpu_count(logical=False))
+    return int(cores)
 
 
 def get_total_memory():
@@ -132,6 +134,29 @@ class UnboundCPUComponentInstance(EnvironmentComponentInstance):
     def initialize_thread(self) -> None:
         pass
 
+    def get_event_object(self):
+        return None
+
+    def create_event(self):
+        pass
+
+    def record_event(self):
+        pass
+
+    def sync_event(self):
+        pass
+
+    def wait_event(self):
+        pass
+
+    def wait_event(self, event):
+        pass
+
+    def check_device_type(self, checking_type_str):
+        if (checking_type_str == "CPU"):
+            return True
+        return False
+
 
 class UnboundCPUComponent(EnvironmentComponentDescriptor):
     """A single CPU component that represents a "core" but isn't automatically bound to the given core.
@@ -146,7 +171,7 @@ class UnboundCPUComponent(EnvironmentComponentDescriptor):
         return UnboundCPUComponentInstance(self, env)
 
 
-if os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() == "cores":
+if True or os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() == "cores":
     cpu = _CPUCoresArchitecture("CPU Cores", "cpu")
 else:
     if os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() not in ("whole", ""):
