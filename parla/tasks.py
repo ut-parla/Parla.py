@@ -309,7 +309,8 @@ def _make_cell(val):
 
 def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
           memory: int = None,
-          vcus: float = None,
+          load: float = None,
+          cores: int = None,
           placement: Union[Collection[PlacementSource], Any, None] = None,
           ndevices: int = 1,
           tags: Collection[Any] = (),
@@ -368,8 +369,18 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         resources = {}
         if memory is not None:
             resources["memory"] = memory
-        if vcus is not None:
-            resources["vcus"] = vcus
+
+        #if cores is not None:
+        #    resources["cores"] = cores
+        #else:
+        #    resources["cores"] = 1
+
+        if load is not None:
+            resources["load"] = load
+        else:
+            #if "used fraction of a device is not specified" assume it uses the whole device
+            #TODO: Change this to 0 for no safety but higher performance? 
+            resources["load"] = 0
 
         req = DeviceSetRequirements(resources, ndevices, devices, tags)
 

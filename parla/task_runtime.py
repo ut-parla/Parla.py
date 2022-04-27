@@ -1132,13 +1132,18 @@ class ResourcePool:
             for name, amount in resources.items():
                 dres = self._devices[d]
 
-                # Workaround stupid vcus (I'm getting rid of these at some point)
-                if d.architecture.id == 'gpu' and name == 'vcus':
+                ## Workaround stupid vcus (I'm getting rid of these at some point)
+                # (Will:) We should really keep them, a fraction of a device is a useful concept. 
+                #if d.architecture.id == 'gpu' and name == 'vcus':
+                #    continue
+
+                #Workaround incompatible keyword. Needs to be redesigned with multidevice. 
+                if d.architecture.id == 'gpu' and name == 'cores':
                     continue
 
                 if amount > dres[name]:
                     is_available = False
-                logger.debug("Resource check for %d %s on device %r: %s", amount, name, d, "Passed" if is_available else "Failed")
+                logger.debug("Resource check for %d %s on device %r: %s. Found: %d", amount, name, d, "Passed" if is_available else "Failed", dres[name])
             logger.debug("[ResourcePool] Releasing monitor in check_resources_availability()")
             return is_available
 
@@ -1171,7 +1176,11 @@ class ResourcePool:
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
         # Workaround stupid vcus (I'm getting rid of these at some point)
-        if dev.architecture.id == 'gpu' and res == 'vcus':
+        #if dev.architecture.id == 'gpu' and res == 'vcus':
+        #    return True
+
+        #Workaround incompatible keywords. Needs complete redesign with multidevice multiconstraints
+        if dev.architecture.id == 'gpu' and res == 'cores':
             return True
         try:
             while True: # contains return
@@ -1181,6 +1190,7 @@ class ResourcePool:
                     dres[res] += amount
                     if amount > 0:
                         self._monitor.notify_all()
+                    #print("LOG: ", amount, res, dev, dev.resources[res], dres[res], flush=True)
                     assert dres[res] <= dev.resources[res], "{}.{} was over deallocated".format(dev, res)
                     assert dres[res] >= 0, "{}.{} was over allocated".format(dev, res)
                     return True
@@ -1338,9 +1348,9 @@ class Scheduler(ControllableThread, SchedulerContext):
         # SchedulerContext: No __init__
         super().__init__()
 
-        # TODO(lhc): for now, assume that n_threads is always None.
+        # TODO(lhc): for now, assume that input argument n_threads is always None.
         #            Each device needs a dedicated thread.
-        n_threads = sum(d.resources.get("vcus", 1) for e in environments for d in e.placement)
+        n_threads = sum(d.resources.get("cores", 1) for e in environments for d in e.placement)
 
         self._environments = TaskEnvironmentRegistry(*environments)
 
@@ -1389,6 +1399,8 @@ class Scheduler(ControllableThread, SchedulerContext):
 #self._datamove_task_from_dev_queues = {dev: deque() for dev in self._available_resources.get_resources()}
 
         # The number of in-flight compute tasks on each device
+        print("Devices: ", self._available_resources.get_resources(), flush=True)
+
         self._device_mapped_compute_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
         self._device_mapped_datamove_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
         self._device_launched_compute_task_counts = {dev: 0 for dev in self._available_resources.get_resources()}
@@ -1908,11 +1920,11 @@ class Scheduler(ControllableThread, SchedulerContext):
                 datamove_queue = self._datamove_task_dev_queues[dev]
                 if len(compute_queue) > 0:
                     # getting counters is protected by monitor.
-                    if self._device_launched_compute_task_counts[dev] \
+                    if dev.architecture.id == "cpu" or self._device_launched_compute_task_counts[dev] \
                             < (self._num_colocatable_tasks + 1):
                         self._launch_task(compute_queue, dev)
                 if len(datamove_queue) > 0:
-                    if self._device_launched_datamove_task_counts[dev] \
+                    if dev.architecture.id == "cpu" or self._device_launched_datamove_task_counts[dev] \
                             < (self._num_colocatable_tasks + 1):
                         self._launch_task(datamove_queue, dev)
 
