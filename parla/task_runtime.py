@@ -436,9 +436,10 @@ class Task:
             if not isinstance(dependency, TaskID) and not dependency._add_dependent_mutex(self):
                 self._num_blocking_dependencies -= 1
 
-    def _maybe_ready_to_schedule(self):
-        if not self._num_blocking_dependencies and self._assigned:
-            logger.info("[Task] %s: Scheduling", str(self.taskid))
+    def _is_schedulable(self):
+        return not self._num_blocking_dependencies and self._assigned
+
+    def _enqueue_to_scheduler(self):
             get_scheduler_context().enqueue_task(self)
 
     def is_blocked(self) -> bool:
@@ -500,9 +501,10 @@ class Task:
             #  be possible to have multiple events)
             if events is not None:
                 self._dependency_events.append(events)
-            self._maybe_ready_to_schedule()
             logger.info(f"[Task %s] Task dependency completed. \
                 (remaining: %d)", self.name, self._num_blocking_dependencies)
+            if self._is_schedulable():
+                self._enqueue_to_scheduler()
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
@@ -514,7 +516,8 @@ class Task:
             ctx.scheduler.report_exception(new_state.exc)
         elif isinstance(new_state, TaskRunning):
             self.dependencies = new_state.dependencies
-            self._maybe_ready_to_schedule()
+            if self._is_schedulable():
+                self._enqueue_to_scheduler()
             new_state.clear_dependencies()
         if new_state.is_terminal:
             ctx.decr_active_tasks()
