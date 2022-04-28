@@ -344,12 +344,12 @@ class Task:
             raise self._state.exc
 
     @abstractmethod
-    def _run(self) -> Optional[TaskState]:
+    def _execute_task(self) -> Optional[TaskState]:
         """Execution of the task."""
         raise NotImplementedError()
     
     @abstractmethod
-    def _post_run(self, ctx: 'SchedulerContext'):
+    def _finish(self, ctx: 'SchedulerContext'):
         """Cleanup works after executing the task."""
         raise NotImplementedError()
     
@@ -377,7 +377,7 @@ class Task:
                 with _scheduler_locals._environment_scope(env), env:
                     events = env.get_events_from_components()
                     self._wait_for_dependency_events(env)
-                    task_state = self._run()
+                    task_state = self._execute_task()
                     # Events could be multiple for multiple devices task.
                     env.record_events()
                     if len(events) > 0:
@@ -394,7 +394,7 @@ class Task:
                 logger.info("Finally for task %r", self)
 
                 ctx = get_scheduler_context()
-                self._post_run(ctx)
+                self._finish(ctx)
 
                 # Protect the case that it notifies dependents and
                 # any dependent task is spawned before setting state.
@@ -449,7 +449,10 @@ class Task:
             return bool(self._num_blocking_dependencies)
 
     def is_dependent_on(self, cand: "Task"):
-        with self._mutex: # TODO(bozhi): Why?
+        # Why the mutex?
+        # This is because the scheduler's _assignment_policy accesses dependency information through this property
+        # and this could be called by scheduler and predecessors at the same time.
+        with self._mutex:
             return cand in self.dependencies
 
     def _add_dependent_mutex(self, dependent: "Task") -> bool:
@@ -585,10 +588,10 @@ class ComputeTask(Task):
             if self.num_unspawned_dependencies == 0:
                 self._ready_to_map()
 
-    def _run(self):
+    def _execute_task(self):
         return self._state.func(self, *self._state.args)
 
-    def _post_run(self, ctx):
+    def _finish(self, ctx):
         # Deallocate resources
         for d in self.req.devices:
             for resource, amount in self.req.resources.items():
@@ -626,7 +629,7 @@ class DataMovementTask(Task):
             self._target_data = target_data
             self._operand_type = operand_type
 
-    def _run(self):
+    def _execute_task(self):
         write_flag = True
         if (self._operand_type == OperandType.IN):
             write_flag = False
@@ -638,7 +641,7 @@ class DataMovementTask(Task):
         self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
         return TaskCompleted(None)
 
-    def _post_run(self, ctx):
+    def _finish(self, ctx):
         # DON'T deallocate resources!
         # DataMovementTask has the same resources as the ComputeTask which created it
         # That ComputeTask will do the deallocation
