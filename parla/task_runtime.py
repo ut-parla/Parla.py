@@ -429,11 +429,11 @@ class Task:
     def dependencies(self, dependencies: Collection['Task']):
         self._dependencies: List[Task] = list(dependencies)
         self._num_blocking_dependencies: int = len(dependencies)
-        for dep in dependencies:
+        for dependency in dependencies:
             # If a dependency is TaskID, not Task object,
             # it implies that it is not yet spawned.
             # Ignore it.
-            if not isinstance(dep, TaskID) and not dep._add_dependent_mutex(self):
+            if not isinstance(dependency, TaskID) and not dependency._add_dependent_mutex(self):
                 self._num_blocking_dependencies -= 1
 
     def _maybe_ready_to_schedule(self):
@@ -520,7 +520,7 @@ class Task:
         return (yield TaskAwaitTasks([self], self))
 
     def __repr__(self):
-        return "<Task {} nrem_deps={} state={} assigned={assigned}>". \
+        return "<Task {} nrem_dependencies={} state={} assigned={assigned}>". \
                format(self.name or "", self._num_blocking_dependencies,
                       type(self._state).__name__, assigned=self._assigned)
 
@@ -533,7 +533,7 @@ class ComputeTask(Task):
     def __init__(self, func, args, dependencies: Collection["Task"], taskid: 'TaskID',
                  req: ResourceRequirements, dataflow: "Dataflow",
                  name: Optional[str] = None,
-                 num_unspawned_deps: int = 0):
+                 num_unspawned_dependencies: int = 0):
         super(ComputeTask, self).__init__(
             dependencies, taskid, req, name, init_state=TaskWaiting()
         )
@@ -549,7 +549,7 @@ class ComputeTask(Task):
             # but not after potentially getting scheduled.
             taskid.task = self
 
-            self.num_unspawned_dependencies = num_unspawned_deps
+            self.num_unspawned_dependencies = num_unspawned_dependencies
             # If this task is not waiting for any dependent tasks,
             # enqueue onto the spawned queue.
             if self.num_unspawned_dependencies == 0:
@@ -760,13 +760,13 @@ class SchedulerContext(metaclass=ABCMeta):
         self,
         function,
         args,
-        deps: List[Union[TaskID, Task]],
+        dependencies: List[Union[TaskID, Task]],
         taskid,
         req,
         dataflow,
         name: Optional[str] = None,
     ):
-        # _flat_tasks appends two types of objects to deps.
+        # _flat_tasks appends two types of objects to dependencies.
         # If a task corresponding to a task id listed on the dependencies
         # is already spawned (materialized), it appends the task object.
         # Otherwise, a task corresponding to the task id is not yet spawned
@@ -775,19 +775,19 @@ class SchedulerContext(metaclass=ABCMeta):
         # wait_dependees_collection dictionary wrapper.
         # The tasks on that dictionary is not spawned until all
         # dependent tasks are spawned.
-        spawned_deps = []
-        for dep in list(deps):
-            if isinstance(dep, TaskID):
-                # If the dep is not yet spawned, temporarily removes it from
+        spawned_dependencies = []
+        for dependency in list(dependencies):
+            if isinstance(dependency, TaskID):
+                # If the dependency is not yet spawned, temporarily removes it from
                 # a task's dependency list.
-                unspawned_dependencies.add(dep, taskid)
+                unspawned_dependencies.add(dependency, taskid)
             else:
-                spawned_deps.append(dep)
-        num_unspawned_deps = len(deps) - len(spawned_deps)
+                spawned_dependencies.append(dependency)
+        num_unspawned_dependencies = len(dependencies) - len(spawned_dependencies)
         
         return ComputeTask(
-            function, args, spawned_deps, taskid, req, dataflow, name,
-            num_unspawned_deps
+            function, args, spawned_dependencies, taskid, req, dataflow, name,
+            num_unspawned_dependencies
         )
 
     @abstractmethod
@@ -1552,7 +1552,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             print(f"local={myformat(local_data)}", end='   ')
             print(f"nonlocal={myformat(nonlocal_data)}", end='   ')
             print(f"load={myformat(dev_load)}", end='   ')
-            print(f"dep={myformat(this_device_owns_dependency)}", end='   ')
+            print(f"dependency_weight={myformat(this_device_owns_dependency)}", end='   ')
             print(f"suit={myformat(suitability)}")
             """
 
