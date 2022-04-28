@@ -32,11 +32,11 @@ TaskAwaitTasks = namedtuple("AwaitTasks", ("dependencies", "value_task"))
 
 
 class UnspawnedDependencies:
-    """ Collection of dependencies where the upstream tasks ("predecessors") are not spawned yet
-    and thus making downstream tasks ("successors") wait.
+    """ Collection of dependencies where the upstream tasks ("dependencies") are not spawned yet
+    and thus making downstream tasks ("dependents") wait.
     """
 
-    # A dictionary with predecessors as keys and (lists of) successors as values,
+    # A dictionary with dependencies as keys and (lists of) dependents as values,
     # i.e. value tasks are waiting for key tasks.
     #
     # Example:
@@ -50,15 +50,15 @@ class UnspawnedDependencies:
         self._mutex = threading.Lock()
         self._dependencies = defaultdict(list)
 
-    def add(self, predecessor: 'TaskID', successor: 'TaskID'):
-        if successor.task is None:
+    def add(self, dependency: 'TaskID', dependent: 'TaskID'):
+        if dependent.task is None:
             raise ValueError(
-                "successor task %s should have been spawned", repr(successor)
+                "dependent task %s should have been spawned", repr(dependent)
             )
         with self._mutex:
-            self._dependencies[predecessor].append(successor)
+            self._dependencies[dependency].append(dependent)
 
-    def get_successors(self, tid: 'TaskID') -> List['TaskID']:
+    def get_dependents(self, tid: 'TaskID') -> List['TaskID']:
         with self._mutex:
             return self._dependencies[tid]
 
@@ -272,8 +272,8 @@ class OptionsRequirements(ResourceRequirements):
 
 class Task:
     __slots__ = [
-        '_mutex', '_name', '_taskid', '_state', '_successors', '_predecessors',
-        '_req', '_assigned', '_dependent_events', '_num_blocking_predecessors',
+        '_mutex', '_name', '_taskid', '_state', '_dependents', '_dependencies',
+        '_req', '_assigned', '_dependent_events', '_num_blocking_dependencies',
         '__dict__'
     ]
 
@@ -285,19 +285,19 @@ class Task:
         with self._mutex:
             # This is the name of the task, which is distinct from the TaskID. It inherits its name from the func.
             self._name = name
-            self._successors: List[Task] = []
+            self._dependents: List[Task] = []
             self._taskid = taskid
             self._state = init_state
             # Maintain dependencies as a list object.
             # Therefore, bi-directional edges exist among dependent tasks.
             # Some of these dependencies are moved to a data movement task.
-            self.predecessors = dependencies
+            self.dependencies = dependencies
             self._req = req
             # This flag specifies if a task is assigned device.
             # If it is, it sets to True. Otherwise, it sets to False.
             self._assigned = init_assigned
             # Predecessor tasks' event objects for runahead scheduling.
-            self._predecessor_events = []
+            self._dependency_events = []
 
     @property
     def taskid(self) -> 'TaskID':
@@ -315,15 +315,15 @@ class Task:
     def req(self, new_req):
         self._req = new_req
 
-    def _wait_for_predecessor_events(self, env: TaskEnvironment):
-        if len(self._predecessor_events) > 0:
+    def _wait_for_dependency_events(self, env: TaskEnvironment):
+        if len(self._dependency_events) > 0:
             # Only wait events if any remaining dependent tasks exist.
             # TODO(lhc): This does not support nested CPU tasks from GPU tasks.
-            #            When we notify successors, we don't know places on
-            #            which the successors will run since those would decide
+            #            When we notify dependents, we don't know places on
+            #            which the dependents will run since those would decide
             #            at the next step, mapping step.
             #            Therefore, the current runtime does not consider
-            #            successors' placements, but just creates events
+            #            dependents' placements, but just creates events
             #            on the devices where the current task is running.
             #            For example, when CPU tasks get GPU events,
             #            they will just skip and will not wait for them.
@@ -331,16 +331,10 @@ class Task:
             #            and adding more features.
             #            But our target applications do not have this pattern
             #            and will do it later.
-            env.wait_dependent_events(self._predecessor_events)
+            env.wait_dependent_events(self._dependency_events)
             # Already waited all dependent events.
             # Initialize the dependent event list.
-        self._predecessor_events = []
-
-    # Deprecated: use predecessors
-    @property
-    def dependencies(self) -> Tuple["Task"]:
-        with self._mutex: # TODO(bozhi) Why?
-            return tuple(self._predecessors)
+        self._dependency_events = []
 
     @property
     def result(self):
@@ -377,20 +371,20 @@ class Task:
 
                 # First, create device/stream/event instances.
                 # Second, gets the created event instance.
-                # Third, it scatters the event to successors who wait for
+                # Third, it scatters the event to dependents who wait for
                 # the current task.
                 env = self.req.environment
                 with _scheduler_locals._environment_scope(env), env:
                     events = env.get_events_from_components()
-                    self._wait_for_predecessor_events(env)
+                    self._wait_for_dependency_events(env)
                     task_state = self._run()
                     # Events could be multiple for multiple devices task.
                     env.record_events()
                     if len(events) > 0:
                         # If any event created by the current task exist,
-                        # notify successors and make them wait for that event,
+                        # notify dependents and make them wait for that event,
                         # not Parla task completion.
-                        self._notify_successors_mutex(events)
+                        self._notify_dependents_mutex(events)
                     env.sync_events()
                 task_state = task_state or TaskCompleted(None)
             except Exception as e:
@@ -402,16 +396,16 @@ class Task:
                 ctx = get_scheduler_context()
                 self._post_run(ctx)
 
-                # Protect the case that it notifies successors and
-                # any successor task is spawned before setting state.
+                # Protect the case that it notifies dependents and
+                # any dependent task is spawned before setting state.
                 with self._mutex:
                     # Regardless of the previous notification,
                     # (So, before leaving the current run(), the above)
-                    # it should notify successors since
-                    # new successors could be added after the above
+                    # it should notify dependents since
+                    # new dependents could be added after the above
                     # notifications, while other devices are running
                     # their kernels asynchronously.
-                    self._notify_successors()
+                    self._notify_dependents()
                     self._set_state(task_state)
 
         except Exception as e:
@@ -428,84 +422,84 @@ class Task:
             return self._assigned
 
     @property
-    def predecessors(self) -> Tuple["Task"]:
-        return tuple(self._predecessors)
+    def dependencies(self) -> Tuple["Task"]:
+        return tuple(self._dependencies)
 
-    @predecessors.setter
-    def predecessors(self, predecessors: Collection['Task']):
-        self._predecessors: List[Task] = list(predecessors)
-        self._num_blocking_predecessors: int = len(predecessors)
-        for dep in predecessors:
+    @dependencies.setter
+    def dependencies(self, dependencies: Collection['Task']):
+        self._dependencies: List[Task] = list(dependencies)
+        self._num_blocking_dependencies: int = len(dependencies)
+        for dep in dependencies:
             # If a dependency is TaskID, not Task object,
             # it implies that it is not yet spawned.
             # Ignore it.
-            if not isinstance(dep, TaskID) and not dep._add_successor_mutex(self):
-                self._num_blocking_predecessors -= 1
+            if not isinstance(dep, TaskID) and not dep._add_dependent_mutex(self):
+                self._num_blocking_dependencies -= 1
 
     def _maybe_ready_to_schedule(self):
-        if not self._num_blocking_predecessors and self._assigned:
+        if not self._num_blocking_dependencies and self._assigned:
             logger.info("[Task] %s: Scheduling", str(self.taskid))
             get_scheduler_context().enqueue_task(self)
 
     def is_blocked(self) -> bool:
-        return bool(self._num_blocking_predecessors)
+        return bool(self._num_blocking_dependencies)
 
     def is_blocked_mutex(self) -> bool:
         with self._mutex:
-            return bool(self._num_blocking_predecessors)
+            return bool(self._num_blocking_dependencies)
 
     def is_dependent_on(self, cand: "Task"):
         with self._mutex: # TODO(bozhi): Why?
-            return cand in self.predecessors
+            return cand in self.dependencies
 
-    def _add_successor_mutex(self, successor: "Task") -> bool:
-        """Add the successor if self is not completed, otherwise return False."""
+    def _add_dependent_mutex(self, dependent: "Task") -> bool:
+        """Add the dependent if self is not completed, otherwise return False."""
         with self._mutex:
-            return self._add_successor(successor)
+            return self._add_dependent(dependent)
 
-    def _add_successor(self, successor: "Task") -> bool:
-        """Add the successor if self is not completed, otherwise return False."""
+    def _add_dependent(self, dependent: "Task") -> bool:
+        """Add the dependent if self is not completed, otherwise return False."""
         if self._state.is_terminal:
             return False
-        logger.debug("Task %s added a successor %s", self.name, successor.name)
-        self._successors.append(successor)
+        logger.debug("Task %s added a dependent %s", self.name, dependent.name)
+        self._dependents.append(dependent)
         return True
 
-    def _notify_successors_mutex(self, events=None):
+    def _notify_dependents_mutex(self, events=None):
         with self._mutex:
-            self._notify_successors(events)
+            self._notify_dependents(events)
 
-    def _notify_successors(self, events=None):
-        for successor in self._successors:
-            successor._handle_predecessor_event_mutex(events)
-        self._successors = []
+    def _notify_dependents(self, events=None):
+        for dependent in self._dependents:
+            dependent._handle_dependency_event_mutex(events)
+        self._dependents = []
 
-    def _add_predecessor_mutex(self, dependency) -> bool:
+    def _add_dependency_mutex(self, dependency) -> bool:
         with self._mutex:
-            return self._add_predecessor(dependency)
+            return self._add_dependency(dependency)
 
-    def _add_predecessor(self, predecessor: 'Task', symmetric=True) -> bool:
+    def _add_dependency(self, dependency: 'Task', symmetric=True) -> bool:
         """
-        :param symmetric: If true, add self as succesor to predecessor as well
+        :param symmetric: If true, add self as succesor to dependency as well
         """
-        self._num_blocking_predecessors += 1
-        self._predecessors.append(predecessor)
-        if symmetric and not predecessor._add_successor_mutex(self):
-            self._num_blocking_predecessors -= 1
+        self._num_blocking_dependencies += 1
+        self._dependencies.append(dependency)
+        if symmetric and not dependency._add_dependent_mutex(self):
+            self._num_blocking_dependencies -= 1
             return False
         return True
 
-    def _handle_predecessor_event_mutex(self, events):
+    def _handle_dependency_event_mutex(self, events):
         with self._mutex:
-            self._num_blocking_predecessors -= 1
+            self._num_blocking_dependencies -= 1
             # Add events from one dependent task.
             # (We are aiming to multiple device tasks, and it would
             #  be possible to have multiple events)
             if events is not None:
-                self._predecessor_events.append(events)
+                self._dependency_events.append(events)
             self._maybe_ready_to_schedule()
             logger.info(f"[Task %s] Task dependency completed. \
-                (remaining: %d)", self.name, self._num_blocking_predecessors)
+                (remaining: %d)", self.name, self._num_blocking_dependencies)
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
@@ -516,7 +510,7 @@ class Task:
         if isinstance(new_state, TaskException):
             ctx.scheduler.report_exception(new_state.exc)
         elif isinstance(new_state, TaskRunning):
-            self.predecessors = new_state.dependencies
+            self.dependencies = new_state.dependencies
             self._maybe_ready_to_schedule()
             new_state.clear_dependencies()
         if new_state.is_terminal:
@@ -527,13 +521,13 @@ class Task:
 
     def __repr__(self):
         return "<Task {} nrem_deps={} state={} assigned={assigned}>". \
-               format(self.name or "", self._num_blocking_predecessors,
+               format(self.name or "", self._num_blocking_dependencies,
                       type(self._state).__name__, assigned=self._assigned)
 
 
 class ComputeTask(Task):
     __slots__ = [
-        '_func', '_args', 'events', 'dataflow', 'num_unspawned_predecessors'
+        '_func', '_args', 'events', 'dataflow', 'num_unspawned_dependencies'
     ]
 
     def __init__(self, func, args, dependencies: Collection["Task"], taskid: 'TaskID',
@@ -555,40 +549,40 @@ class ComputeTask(Task):
             # but not after potentially getting scheduled.
             taskid.task = self
 
-            self.num_unspawned_predecessors = num_unspawned_deps
+            self.num_unspawned_dependencies = num_unspawned_deps
             # If this task is not waiting for any dependent tasks,
             # enqueue onto the spawned queue.
-            if self.num_unspawned_predecessors == 0:
+            if self.num_unspawned_dependencies == 0:
                 self._ready_to_map()
                 get_scheduler_context().scheduler.incr_active_compute_tasks()
             logger.debug("Task %r: Creating", self)
 
-    def __notify_spawned_successors(self):
-        """ Notify all successors who wait for this task.
+    def __notify_spawned_dependents(self):
+        """ Notify all dependents who wait for this task.
         PRIVATE USE ONLY. Not thread-safe and should be called WITH ITS MUTEX.
         """
-        # Get the list of all waiting successors from the global collection.
-        successors = unspawned_dependencies.get_successors(self.taskid)
-        for d_tid in successors:
+        # Get the list of all waiting dependents from the global collection.
+        dependents = unspawned_dependencies.get_dependents(self.taskid)
+        for d_tid in dependents:
             dt = d_tid.task
             assert isinstance(dt, ComputeTask), type(dt)
-            dt._handle_predecessor_spawn(self)
-            self._add_successor(dt)
+            dt._handle_dependency_spawn(self)
+            self._add_dependent(dt)
 
     def _ready_to_map(self):
-        assert self.num_unspawned_predecessors == 0
-        self.__notify_spawned_successors()
+        assert self.num_unspawned_dependencies == 0
+        self.__notify_spawned_dependents()
         self._state = TaskRunning(self._func, self._args, None)
         get_scheduler_context().incr_active_tasks() # TODO(bozhi): integrate with enqueue
         # Enqueue this task right after spawning on the spawend queue.
         # The task could have dependencies.
         get_scheduler_context().enqueue_spawned_task(self)
 
-    def _handle_predecessor_spawn(self, predecessor: "Task"):
+    def _handle_dependency_spawn(self, dependency: "Task"):
         with self._mutex:
-            self.num_unspawned_predecessors -= 1
-            self._add_predecessor(predecessor, symmetric=False)
-            if self.num_unspawned_predecessors == 0:
+            self.num_unspawned_dependencies -= 1
+            self._add_dependency(dependency, symmetric=False)
+            if self.num_unspawned_dependencies == 0:
                 self._ready_to_map()
 
     def _run(self):
@@ -1723,7 +1717,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         for device in compute_task.req.environment.placement:
             self.update_mapped_task_count(datamove_task, device, 1)
         self.incr_active_tasks()
-        compute_task._add_predecessor_mutex(datamove_task)
+        compute_task._add_dependency_mutex(datamove_task)
         target_data_id = target_data.ID
         is_overlapped = False
         if target_data_id in self._datablock_dict:
@@ -1735,7 +1729,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 dep_task = dep_task_tuple[1]
                 # Only checks dependent tasks if they use the same data blocks.
                 if compute_task.is_dependent_on(dep_task):
-                    if not datamove_task._add_predecessor_mutex(dep_task):
+                    if not datamove_task._add_dependency_mutex(dep_task):
                         completed_tasks.append(dep_task_id)
             dep_task_list = [tuple(dt for dt in dep_task_list if dt[0] != ft) for ft in completed_tasks]
         self._datablock_dict[target_data_id].append((str(compute_task.taskid), compute_task))
