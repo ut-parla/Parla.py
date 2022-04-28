@@ -346,12 +346,12 @@ class Task:
             raise self._state.exc
 
     @abstractmethod
-    def _run(self) -> Optional[TaskState]:
+    def _execute_task(self) -> Optional[TaskState]:
         """Execution of the task."""
         raise NotImplementedError()
 
     @abstractmethod
-    def _post_run(self, ctx: 'SchedulerContext'):
+    def _finish(self, ctx: 'SchedulerContext'):
         """Cleanup works after executing the task."""
         raise NotImplementedError()
 
@@ -379,7 +379,7 @@ class Task:
                 with _scheduler_locals._environment_scope(env), env:
                     events = env.get_events_from_components()
                     self._wait_for_dependency_events(env)
-                    task_state = self._run()
+                    task_state = self._execute_task()
                     # Events could be multiple for multiple devices task.
                     env.record_events()
                     if len(events) > 0:
@@ -396,7 +396,7 @@ class Task:
                 logger.info("Finally for task %r", self)
 
                 ctx = get_scheduler_context()
-                self._post_run(ctx)
+                self._finish(ctx)
 
                 # Protect the case that it notifies dependents and
                 # any dependent task is spawned before setting state.
@@ -437,20 +437,24 @@ class Task:
             if not isinstance(dependency, TaskID) and not dependency._add_dependent_mutex(self):
                 self._num_blocking_dependencies -= 1
 
-    def _maybe_ready_to_schedule(self):
-        if not self._num_blocking_dependencies and self._assigned:
-            logger.info("[Task] %s: Scheduling", str(self.taskid))
-            get_scheduler_context().enqueue_task(self)
-
-    def is_blocked(self) -> bool:
+    def is_blocked_by_dependencies(self) -> bool:
         return bool(self._num_blocking_dependencies)
 
-    def is_blocked_mutex(self) -> bool:
+    def is_blocked_by_dependencies_mutex(self) -> bool:
         with self._mutex:
-            return bool(self._num_blocking_dependencies)
+            return self.is_blocked_by_dependencies()
+
+    def _is_schedulable(self):
+        return not self.is_blocked_by_dependencies() and self._assigned
+
+    def _enqueue_to_scheduler(self):
+            get_scheduler_context().enqueue_task(self)
 
     def is_dependent_on(self, cand: "Task"):
-        with self._mutex:  # TODO(bozhi): Why?
+        # Why the mutex?
+        # This is because the scheduler's _assignment_policy accesses dependency information through this property
+        # and this could be called by scheduler and this tasks dependencies at the same time.
+        with self._mutex:
             return cand in self.dependencies
 
     def _add_dependent_mutex(self, dependent: "Task") -> bool:
@@ -499,9 +503,10 @@ class Task:
             #  be possible to have multiple events)
             if events is not None:
                 self._dependency_events.append(events)
-            self._maybe_ready_to_schedule()
             logger.info(f"[Task %s] Task dependency completed. \
                 (remaining: %d)", self.name, self._num_blocking_dependencies)
+            if self._is_schedulable():
+                self._enqueue_to_scheduler()
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
@@ -514,7 +519,8 @@ class Task:
             ctx.scheduler.report_exception(new_state.exc)
         elif isinstance(new_state, TaskRunning):
             self.dependencies = new_state.dependencies
-            self._maybe_ready_to_schedule()
+            if self._is_schedulable():
+                self._enqueue_to_scheduler()
             new_state.clear_dependencies()
         if new_state.is_terminal:
             ctx.decr_active_tasks()
@@ -589,10 +595,10 @@ class ComputeTask(Task):
             if self.num_unspawned_dependencies == 0:
                 self._ready_to_map()
 
-    def _run(self):
+    def _execute_task(self):
         return self._state.func(self, *self._state.args)
 
-    def _post_run(self, ctx):
+    def _finish(self, ctx):
         # Deallocate resources
         for d in self.req.devices:
             for resource, amount in self.req.resources.items():
@@ -635,7 +641,7 @@ class DataMovementTask(Task):
             self._target_data = target_data
             self._operand_type = operand_type
 
-    def _run(self):
+    def _execute_task(self):
         write_flag = True
         if (self._operand_type == OperandType.IN):
             write_flag = False
@@ -647,7 +653,7 @@ class DataMovementTask(Task):
         self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
         return TaskCompleted(None)
 
-    def _post_run(self, ctx):
+    def _finish(self, ctx):
         # DON'T deallocate resources!
         # DataMovementTask has the same resources as the ComputeTask which created it
         # That ComputeTask will do the deallocation
@@ -776,13 +782,13 @@ class SchedulerContext(metaclass=ABCMeta):
         dataflow,
         name: Optional[str] = None,
     ):
-        # _flat_tasks appends two types of objects to dependencies.
+        # _flat_tasks (tasks.py) appends two types of objects to dependencies.
         # If a task corresponding to a task id listed on the dependencies
         # is already spawned (materialized), it appends the task object.
         # Otherwise, a task corresponding to the task id is not yet spawned
         # and, in this case, appends its id which is not spawned yet as a key,
         # and the dependee task id which waits for the dependent task to the
-        # wait_dependees_collection dictionary wrapper.
+        # unspawned_dependencies dictionary wrapper.
         # The tasks on that dictionary is not spawned until all
         # dependent tasks are spawned.
         spawned_dependencies = []
@@ -1811,7 +1817,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         # If a task has no dependency after it is assigned to devices,
         # immediately enqueue a corresponding data movement task to
         # the ready queue.
-        if not datamove_task.is_blocked_mutex():
+        if not datamove_task.is_blocked_by_dependencies_mutex():
             self.enqueue_task(datamove_task)
 
     def _map_tasks(self):
@@ -1874,7 +1880,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # If a task has no dependency after it is assigned to devices,
                         # immediately enqueue a corresponding data movement task to
                         # the ready queue.
-                        if not task.is_blocked_mutex():
+                        if not task.is_blocked_by_dependencies_mutex():
                             self.enqueue_task(task)
                             logger.debug(
                                 f"[Scheduler] Enqueued %r on ready queue", task)
