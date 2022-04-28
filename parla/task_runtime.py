@@ -772,13 +772,13 @@ class SchedulerContext(metaclass=ABCMeta):
         dataflow,
         name: Optional[str] = None,
     ):
-        # _flat_tasks appends two types of objects to dependencies.
+        # _flat_tasks (tasks.py) appends two types of objects to dependencies.
         # If a task corresponding to a task id listed on the dependencies
         # is already spawned (materialized), it appends the task object.
         # Otherwise, a task corresponding to the task id is not yet spawned
         # and, in this case, appends its id which is not spawned yet as a key,
         # and the dependee task id which waits for the dependent task to the
-        # wait_dependees_collection dictionary wrapper.
+        # unspawned_dependencies dictionary wrapper.
         # The tasks on that dictionary is not spawned until all
         # dependent tasks are spawned.
         spawned_dependencies = []
