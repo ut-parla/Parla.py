@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import List, Dict, TYPE_CHECKING, Union, Any
 
 from parla.cpu_impl import cpu
-from parla.task_runtime import get_current_devices, get_scheduler_context, has_environment
+from parla import task_runtime
 from parla.device import Device
 
 from .coherence import MemoryOperation, Coherence, CPU_INDEX
@@ -93,7 +93,7 @@ class PArray:
             self.subarray_nbytes = self.nbytes  # no subarray
 
             # Register the parray with the scheduler
-            get_scheduler_context().scheduler._available_resources.track_parray(self)
+            task_runtime.get_scheduler_context().scheduler._available_resources.track_parray(self)
 
     # Properties:
 
@@ -381,10 +381,9 @@ class PArray:
 
         Return None if it is not called within the current task context
         """
-        if has_environment():
-            return get_current_devices()[0]
-        else:  # if not
-            return None
+        if task_runtime.has_environment():
+            return task_runtime.get_current_devices()[0]
+        return None
 
     def _auto_move(self, device_id: int = None, do_write: bool = False) -> None:
         """ Automatically move data to current device.
