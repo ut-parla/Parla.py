@@ -436,18 +436,18 @@ class Task:
             if not isinstance(dependency, TaskID) and not dependency._add_dependent_mutex(self):
                 self._num_blocking_dependencies -= 1
 
+    def is_blocked_by_dependencies(self) -> bool:
+        return bool(self._num_blocking_dependencies)
+
+    def is_blocked_by_dependencies_mutex(self) -> bool:
+        with self._mutex:
+            return self.is_blocked_by_dependencies()
+
     def _is_schedulable(self):
-        return not self._num_blocking_dependencies and self._assigned
+        return not self.is_blocked_by_dependencies() and self._assigned
 
     def _enqueue_to_scheduler(self):
             get_scheduler_context().enqueue_task(self)
-
-    def is_blocked(self) -> bool:
-        return bool(self._num_blocking_dependencies)
-
-    def is_blocked_mutex(self) -> bool:
-        with self._mutex:
-            return bool(self._num_blocking_dependencies)
 
     def is_dependent_on(self, cand: "Task"):
         # Why the mutex?
@@ -1746,7 +1746,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         # If a task has no dependency after it is assigned to devices,
         # immediately enqueue a corresponding data movement task to
         # the ready queue.
-        if not datamove_task.is_blocked_mutex():
+        if not datamove_task.is_blocked_by_dependencies_mutex():
             self.enqueue_task(datamove_task)
 
     def _map_tasks(self):
@@ -1800,7 +1800,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # If a task has no dependency after it is assigned to devices,
                         # immediately enqueue a corresponding data movement task to
                         # the ready queue.
-                        if not task.is_blocked_mutex():
+                        if not task.is_blocked_by_dependencies_mutex():
                             self.enqueue_task(task)
                             logger.debug(f"[Scheduler] Enqueued %r on ready queue", task)
                 else:
