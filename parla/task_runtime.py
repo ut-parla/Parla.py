@@ -1723,7 +1723,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         for device in compute_task.req.environment.placement:
             self.update_mapped_task_count(datamove_task, device, 1)
         self.incr_active_tasks()
-        compute_task._add_dependency_mutex(datamove_task)
+        compute_task._add_predecessor_mutex(datamove_task)
         target_data_id = target_data.ID
         is_overlapped = False
         if target_data_id in self._datablock_dict:
