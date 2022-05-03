@@ -45,7 +45,7 @@ class _CPUDevice(Device):
 
     @property
     def resources(self) -> Dict[str, float]:
-        return dict(threads=self.n_cores, memory=self.available_memory, vcus=self.n_cores)
+        return dict(cores=self.n_cores, memory=self.available_memory, vcus=1)
 
     @property
     def default_components(self) -> Collection["EnvironmentComponentDescriptor"]:

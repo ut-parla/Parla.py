@@ -13,3 +13,6 @@ docs/build
 
 # Vim temp files
 *.swp
+
+*.so
+*.c
