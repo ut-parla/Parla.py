@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager, contextmanager, ExitStack
 from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, FrozenSet, Dict
 
 from parla.device import Device, Architecture, get_all_devices
-from parla.task_runtime import ComputeTask, TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context, task_locals, unspawned_dependencies
+from parla.task_runtime import ComputeTask, TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context, task_locals
 from parla.utils import parse_index
 from parla.dataflow import Dataflow
 
@@ -46,7 +46,7 @@ class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
     @property
     def _flat_tasks(self) -> List[Union[TaskID, Task]]:
         # Compute the flat dependency set (including unwrapping TaskID objects)
-        deps = []
+        dependencies = []
         for ds in self._tasks:
             if not isinstance(ds, Iterable):
                 ds = (ds,)
@@ -56,8 +56,8 @@ class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
                         d = d.task
                 #if not isinstance(d, task_runtime.Task):
                 #    raise TypeError("Dependencies must be TaskIDs or Tasks: " + str(d))
-                deps.append(d)
-        return deps
+                dependencies.append(d)
+        return dependencies
 
     def __await__(self):
         return (yield TaskAwaitTasks(self._flat_tasks, None))
@@ -226,7 +226,7 @@ def _task_callback(task, body) -> TaskState:
                 # outer_task = TaskSpace("outer")
                 # inner_task = TaskSpace("inner")
                 # for rep in range(reps):
-                #     dep = [inner_task[rep - 1]] if rep > 0 else []
+                #     dependency = [inner_task[rep - 1]] if rep > 0 else []
                 #     @spawn(out_task[rep], dependencies=[dep])
                 #     def t:
                 #         @spawn(inner_task[rep]):
@@ -376,9 +376,6 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         if inspect.isgeneratorfunction(body):
             raise TypeError("Spawned tasks must be normal functions or coroutines; not generators.")
 
-        # Compute the flat dependency set (including unwrapping TaskID objects)
-        deps = tasks(*dependencies)._flat_tasks
-
         if inspect.iscoroutine(body):
             # An already running coroutine does not need changes since we assume
             # it was changed correctly when the original function was spawned.
@@ -396,7 +393,8 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
             separated_body.__kwdefaults__ = body.__kwdefaults__
             separated_body.__module__ = body.__module__
 
-        taskid.dependencies = dependencies
+        # Compute the flat dependency set (including unwrapping TaskID objects)
+        taskid.dependencies = tasks(*dependencies)._flat_tasks
 
         # gather input/output/inout, which is hint for data from or to the this task
         # TODO (ses): I gathered these into lists so I could perform concatentation later. This may be inefficient.
@@ -406,7 +404,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         task = task_runtime.get_scheduler_context().spawn_task(
             function=_task_callback,
             args=(separated_body,),
-            deps=deps,
+            dependencies=dependencies,
             taskid=taskid,
             req=req,
             dataflow=dataflow,
