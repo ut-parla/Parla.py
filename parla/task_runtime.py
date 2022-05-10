@@ -434,6 +434,7 @@ class Task:
             # If a dependency is TaskID, not Task object,
             # it implies that it is not yet spawned.
             # Ignore it.
+            #print(dependency, flush=True)
             if not isinstance(dependency, TaskID) and not dependency._add_dependent_mutex(self):
                 self._num_blocking_dependencies -= 1
 
@@ -448,7 +449,7 @@ class Task:
         return not self.is_blocked_by_dependencies() and self._assigned
 
     def _enqueue_to_scheduler(self):
-            get_scheduler_context().enqueue_task(self)
+        get_scheduler_context().enqueue_task(self)
 
     def is_dependent_on(self, cand: "Task"):
         # Why the mutex?

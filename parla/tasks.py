@@ -33,6 +33,7 @@ __all__ = [
     "TaskID", "TaskSpace", "spawn", "tasks", "finish", "CompletedTaskSpace", "Task", "reserve_persistent_memory"
 ]
 
+
 class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
     """
     A collection of tasks.
@@ -54,7 +55,7 @@ class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
                 if hasattr(d, "task"):
                     if d.task is not None:
                         d = d.task
-                #if not isinstance(d, task_runtime.Task):
+                # if not isinstance(d, task_runtime.Task):
                 #    raise TypeError("Dependencies must be TaskIDs or Tasks: " + str(d))
                 dependencies.append(d)
         return dependencies
@@ -133,7 +134,7 @@ class TaskSpace(TaskSet):
             index = (index,)
         ret = []
         parse_index((), index, lambda x, i: x + (i,),
-                lambda x: ret.append(self._data.setdefault(x, TaskID(self._name, x))))
+                    lambda x: ret.append(self._data.setdefault(x, TaskID(self._name, x))))
         if len(ret) == 1:
             return ret[0]
         return ret
@@ -161,6 +162,8 @@ class CompletedTaskSpace(TaskSet):
 PlacementSource = Union[Architecture, Device, Task, TaskID, Any]
 
 # TODO (bozhi): We may need a `placement` module to hold these `get_placement_for_xxx` interfaces, which makes more sense than the `tasks` module here. Check imports when doing so.
+
+
 def get_placement_for_value(p: PlacementSource) -> List[Device]:
     if hasattr(p, "__parla_placement__"):
         # this handles Architecture, ResourceRequirements, and other types with __parla_placement__
@@ -189,7 +192,8 @@ def get_placement_for_set(placement: Collection[PlacementSource]) -> FrozenSet[D
 def get_placement_for_any(placement: Union[Collection[PlacementSource], Any, None]) \
         -> FrozenSet[Device]:
     if placement is not None:
-        ps = placement if isinstance(placement, Iterable) and not array.is_array(placement) else [placement]
+        ps = placement if isinstance(placement, Iterable) and not array.is_array(
+            placement) else [placement]
         return get_placement_for_set(ps)
     else:
         return frozenset(get_all_devices())
@@ -272,7 +276,8 @@ def _task_callback(task, body) -> TaskState:
                 new_task_info = body.send(in_value)
                 task.value_task = None
                 if not isinstance(new_task_info, TaskAwaitTasks):
-                    raise TypeError("Parla coroutine tasks must yield a TaskAwaitTasks")
+                    raise TypeError(
+                        "Parla coroutine tasks must yield a TaskAwaitTasks")
                 dependencies = new_task_info.dependencies
                 value_task = new_task_info.value_task
                 if value_task:
@@ -307,7 +312,8 @@ def _make_cell(val):
     return closure.__closure__[0]
 
 
-def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
+def spawn(taskid: Optional[TaskID] = None,
+          dependencies=(), *,
           memory: int = None,
           vcus: float = None,
           placement: Union[Collection[PlacementSource], Any, None] = None,
@@ -352,14 +358,16 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
     # TODO: Document tags argument
 
     if not taskid:
-        taskid = TaskID("global_" + str(len(task_locals.global_tasks)), (len(task_locals.global_tasks),))
+        taskid = TaskID("global_" + str(len(task_locals.global_tasks)),
+                        (len(task_locals.global_tasks),))
         task_locals.global_tasks += [taskid]
 
     def decorator(body) -> ComputeTask:
         nonlocal placement, memory
         if data is not None:
             if placement is not None or memory is not None:
-                raise ValueError("The data parameter cannot be combined with placement or memory paramters.")
+                raise ValueError(
+                    "The data parameter cannot be combined with placement or memory paramters.")
             placement = data
             memory = array.storage_size(*data)
 
@@ -374,7 +382,8 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         req = DeviceSetRequirements(resources, ndevices, devices, tags)
 
         if inspect.isgeneratorfunction(body):
-            raise TypeError("Spawned tasks must be normal functions or coroutines; not generators.")
+            raise TypeError(
+                "Spawned tasks must be normal functions or coroutines; not generators.")
 
         if inspect.iscoroutine(body):
             # An already running coroutine does not need changes since we assume
@@ -394,7 +403,9 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
             separated_body.__module__ = body.__module__
 
         # Compute the flat dependency set (including unwrapping TaskID objects)
-        taskid.dependencies = tasks(*dependencies)._flat_tasks
+        taskid.dependencies = dependencies
+
+        processed_dependencies = tasks(*dependencies)._flat_tasks
 
         # gather input/output/inout, which is hint for data from or to the this task
         # TODO (ses): I gathered these into lists so I could perform concatentation later. This may be inefficient.
@@ -404,7 +415,7 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         task = task_runtime.get_scheduler_context().spawn_task(
             function=_task_callback,
             args=(separated_body,),
-            dependencies=dependencies,
+            dependencies=processed_dependencies,
             taskid=taskid,
             req=req,
             dataflow=dataflow,
@@ -420,16 +431,20 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
 
     return decorator
 
+
 @contextmanager
 def _reserve_persistent_memory(memsize, device):
     resource_pool = get_scheduler_context().scheduler._available_resources
-    resource_pool.allocate_resources(device, {'memory' : memsize}, blocking = True)
+    resource_pool.allocate_resources(
+        device, {'memory': memsize}, blocking=True)
     try:
         yield
     finally:
-        resource_pool.deallocate_resources(device, {'memory' : memsize})
+        resource_pool.deallocate_resources(device, {'memory': memsize})
 
 # TODO: Move this to parla.device and import it from there. It's generally useful.
+
+
 def _get_parla_device(device):
     if isinstance(device, Device):
         return device
@@ -442,11 +457,12 @@ def _get_parla_device(device):
             from .cuda import gpu
             index = device.id
             return gpu(index)
-    raise ValueError("Don't know how to convert object of type {} to a parla device object.".format(type(device)))
+    raise ValueError(
+        "Don't know how to convert object of type {} to a parla device object.".format(type(device)))
 
 
 @contextmanager
-def reserve_persistent_memory(amount, device = None):
+def reserve_persistent_memory(amount, device=None):
     """
     :param amount: The number of bytes reserved in the scheduler from tasks for persitent data. \
       This exists, not as any kind of enforced limit on allocation, but rather to let the scheduler \
@@ -475,7 +491,8 @@ def reserve_persistent_memory(amount, device = None):
     elif hasattr(amount, '__cuda_array_interface__'):
         import cupy
         if not isinstance(amount, cupy.ndarray):
-            raise NotImplementedError("Currently only CuPy arrays are supported for making space reservations on the GPU.")
+            raise NotImplementedError(
+                "Currently only CuPy arrays are supported for making space reservations on the GPU.")
         memsize = amount.nbytes
         if device is None:
             device = amount.device
@@ -500,7 +517,8 @@ def reserve_persistent_memory(amount, device = None):
             try:
                 iter(amount)
             except TypeError as exc:
-                raise ValueError("Persistent memory spec is not an integer, array, or iterable object") from exc
+                raise ValueError(
+                    "Persistent memory spec is not an integer, array, or iterable object") from exc
             if device is None:
                 with ExitStack() as stack:
                     for arr in amount:
@@ -516,9 +534,11 @@ def reserve_persistent_memory(amount, device = None):
                                 iter(arr)
                             except TypeError as exc:
                                 # TODO: Just use parla.array.get_memory(a).device instead of this manual mess.
-                                raise ValueError("Implicit location specification only supported for GPU arrays.") from exc
+                                raise ValueError(
+                                    "Implicit location specification only supported for GPU arrays.") from exc
                             else:
-                                stack.enter_context(reserve_persistent_memory(arr))
+                                stack.enter_context(
+                                    reserve_persistent_memory(arr))
                     yield
                     return
             device_must_be_iterable = False
@@ -530,13 +550,15 @@ def reserve_persistent_memory(amount, device = None):
                 with ExitStack() as stack:
                     # TODO: do we actually want to support this implicit zip?
                     for arr, dev in zip(amount, device):
-                        stack.enter_context(reserve_persistent_memory(arr, dev))
+                        stack.enter_context(
+                            reserve_persistent_memory(arr, dev))
                     yield
                     return
             else:
                 with ExitStack() as stack:
                     for arr in amount:
-                        stack.enter_context(reserve_persistent_memory(arr, device))
+                        stack.enter_context(
+                            reserve_persistent_memory(arr, device))
                     yield
                     return
             assert False
@@ -544,7 +566,8 @@ def reserve_persistent_memory(amount, device = None):
         raise ValueError("Device cannot be inferred.")
     device = _get_parla_device(device)
     if isinstance(device, cpu._CPUDevice):
-        raise ValueError("Reserving space for persistent data in main memory is not yet supported.")
+        raise ValueError(
+            "Reserving space for persistent data in main memory is not yet supported.")
     with _reserve_persistent_memory(memsize, device):
         yield
 
