@@ -18,7 +18,7 @@ from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 
 # Logger configuration (uncomment and adjust level if needed)
-#logging.basicConfig(level = logging.DEBUG)
+# logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements",
@@ -992,8 +992,16 @@ class WorkerThread(ControllableThread, SchedulerContext):
                             f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
                         self._status = "Running Task {}".format(self.task)
                         self.task.run()
+
+                        # Free self back to worker pool
                         self._remove_task()
                         self.scheduler.append_free_thread(self)
+
+                        # Activate scheduler
+                        self.scheduler.map_tasks_callback()
+                        self.scheduler.schedule_tasks_callback()
+                        self.scheduler.launch_tasks_callback()
+
                     # Thread wakes up without a task (should only happen at end of program)
                     elif not self.task and self._should_run:
                         raise WorkerThreadException(
@@ -1030,6 +1038,7 @@ class ParrayTracker():
 # Two major TODO (ses) items:
 # 1) Fix the mutexes here. There are places where if the GIL switched, stuff could break
 # 2) Provide a way for the mapper to evict if the resourcepool shows a task can't be mapped anywhere and we need to clear space
+# TODO: Add per-device resource locks (from lhc PR). Assume the # of keys and which keys exist does not change from initialization..?
 class ResourcePool:
     # Importing this at the top of the file breaks due to circular dependencies
     from parla.parray.core import CPU_INDEX, PArray
@@ -1101,8 +1110,8 @@ class ResourcePool:
                 dres = self._devices[d]
 
                 # Workaround stupid vcus (I'm getting rid of these at some point)
-                if d.architecture.id == 'gpu' and name == 'vcus':
-                    continue
+                # if d.architecture.id == 'gpu' and name == 'vcus':
+                #    continue
 
                 if amount > dres[name]:
                     is_available = False
@@ -1112,6 +1121,7 @@ class ResourcePool:
                 "[ResourcePool] Releasing monitor in check_resources_availability()")
             return is_available
 
+    # TODO (wlr): Make this sane. Check before instead of trying and unwinding...
     def _atomically_update_resources(self, d: Device, resources: ResourceDict, multiplier, block: bool):
         logger.debug(
             "[ResourcePool] Acquiring monitor in atomically_update_resources()")
@@ -1145,8 +1155,8 @@ class ResourcePool:
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
         # Workaround stupid vcus (I'm getting rid of these at some point)
-        if dev.architecture.id == 'gpu' and res == 'vcus':
-            return True
+        # if dev.architecture.id == 'gpu' and res == 'vcus':
+        #    return True
         try:
             while True:  # contains return
                 logger.debug("Trying to allocate %d %s on %r",
@@ -1156,10 +1166,11 @@ class ResourcePool:
                     dres[res] += amount
                     if amount > 0:
                         self._monitor.notify_all()
-                    assert dres[res] <= dev.resources[res], "{}.{} was over deallocated".format(
-                        dev, res)
-                    assert dres[res] >= 0, "{}.{} was over allocated".format(
-                        dev, res)
+                    # TODO: Temporarily remove assertions due to floating point problems (need to fix VCU implementation)
+                    # assert dres[res] <= dev.resources[res], "{}.{} was over deallocated".format(
+                    #    dev, res)
+                    # assert dres[res] >= 0, "{}.{} was over allocated".format(
+                    #    dev, res)
                     return True
                 else:
                     logger.info(
@@ -1239,7 +1250,7 @@ class ResourcePool:
         logger.debug(
             f"[ResourcePool] Adding parray with ID %d to device %r", parray.parent_ID, device)
         if self._managed_parrays[parray.parent_ID].locations[device] == True:
-            #raise ValueError("Tried to register a parray on a device where it already existed")
+            # raise ValueError("Tried to register a parray on a device where it already existed")
             logger.debug(f"[ResourcePool]   (It was already there...)")
             return
         logger.debug(
@@ -1256,7 +1267,7 @@ class ResourcePool:
         logger.debug(
             f"[ResourcePool] Removing parray with ID %d from device %r", parray.parent_ID, device)
         if self._managed_parrays[parray.parent_ID].locations[device] == False:
-            #raise ValueError("Tried to remove a parray from a device where it didn't exist")
+            # raise ValueError("Tried to remove a parray from a device where it didn't exist")
             logger.debug(f"[ResourcePool]   (It wasn't there...)")
             return
         logger.debug(
@@ -1344,8 +1355,8 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         # TODO(lhc): for now, assume that n_threads is always None.
         #            Each device needs a dedicated thread.
-        n_threads = int(sum(d.resources.get("vcus", 1)
-                        for e in environments for d in e.placement))
+        n_threads = int(sum(d.resources.get("cores", 1)
+                            for e in environments for d in e.placement))
 
         self._environments = TaskEnvironmentRegistry(*environments)
 
@@ -1392,6 +1403,11 @@ class Scheduler(ControllableThread, SchedulerContext):
             threading.Lock())
         self._active_count_monitor = threading.Condition(threading.Lock())
 
+        # Phase protection
+        self._mapping_phase_monitor = threading.Condition(threading.Lock())
+        self._scheduling_phase_monitor = threading.Condition(threading.Lock())
+        self._launching_phase_monitor = threading.Condition(threading.Lock())
+
         # Spawned task queues
         # Tasks that have been spawned but not mapped are stored here.
         # Tasks are removed once they are mapped.
@@ -1415,8 +1431,8 @@ class Scheduler(ControllableThread, SchedulerContext):
             dev: deque() for dev in self._available_resources.get_resources()}
         self._datamove_task_dev_queues = {
             dev: deque() for dev in self._available_resources.get_resources()}
-#self._datamove_task_to_dev_queues = {dev: deque() for dev in self._available_resources.get_resources()}
-#self._datamove_task_from_dev_queues = {dev: deque() for dev in self._available_resources.get_resources()}
+# self._datamove_task_to_dev_queues = {dev: deque() for dev in self._available_resources.get_resources()}
+# self._datamove_task_from_dev_queues = {dev: deque() for dev in self._available_resources.get_resources()}
 
         # The number of in-flight compute tasks on each device
         self._device_mapped_compute_task_counts = {
@@ -1439,12 +1455,12 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Start the scheduler thread (likely to change later)
         self.start()
 
-    @property
-    @lru_cache(maxsize=1)
+    @ property
+    @ lru_cache(maxsize=1)
     def components(self) -> List[EnvironmentComponentInstance]:
         return [i for e in self._environments for i in e.components.values()]
 
-    @property
+    @ property
     def scheduler(self):
         return self
 
@@ -1644,7 +1660,8 @@ class Scheduler(ControllableThread, SchedulerContext):
             print(f"local={myformat(local_data)}", end='   ')
             print(f"nonlocal={myformat(nonlocal_data)}", end='   ')
             print(f"load={myformat(dev_load)}", end='   ')
-            print(f"dependency_weight={myformat(this_device_owns_dependency)}", end='   ')
+            print(
+                f"dependency_weight={myformat(this_device_owns_dependency)}", end='   ')
             print(f"suit={myformat(suitability)}")
             """
 
@@ -1679,11 +1696,14 @@ class Scheduler(ControllableThread, SchedulerContext):
                 for e in self._environments.find_all(placement=opt.devices, tags=opt.tags, exact=False):
                     intersection = e.placement & opt.devices
                     match_quality = len(intersection) / len(e.placement)
-                    env_match_quality[e] = max(env_match_quality[e], match_quality)
+                    env_match_quality[e] = max(
+                        env_match_quality[e], match_quality)
             elif isinstance(opt, EnvironmentRequirements):
-                env_match_quality[opt.environment] = max(env_match_quality[opt.environment], 1)
+                env_match_quality[opt.environment] = max(
+                    env_match_quality[opt.environment], 1)
         environments_to_try = list(env_match_quality.keys())
-        environments_to_try.sort(key=env_match_quality.__getitem__, reverse=True)
+        environments_to_try.sort(
+            key=env_match_quality.__getitem__, reverse=True)
 
         # Try the environments in order
         # Environment is registered device environments.
@@ -1700,7 +1720,8 @@ class Scheduler(ControllableThread, SchedulerContext):
                 if not is_res_constraint_satisifed:
                     break
             if is_res_constraint_satisifed:
-                task.req = EnvironmentRequirements(task.req.resources, env, task.req.tags)
+                task.req = EnvironmentRequirements(
+                    task.req.resources, env, task.req.tags)
                 logger.debug(f"[Scheduler] Mapped %r.", task)
                 return True
         logger.debug(f"[Scheduler] Failed to map %r.", task)
@@ -1860,7 +1881,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     def _map_tasks(self):
         # The first loop iterates a spawned task queue
         # and constructs a mapped task subgrpah.
-        #logger.debug("[Scheduler] Map Phase")
+        # logger.debug("[Scheduler] Map Phase")
         self.fill_curr_spawned_task_queue()
         while True:
             task: Optional[Task] = self._dequeue_spawned_task()
@@ -1935,7 +1956,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         """ Currently this doesn't do any intelligent scheduling (ordering).
             Dequeue all ready tasks and send them to device queues in order.
         """
-        #logger.debug("[Scheduler] Schedule Phase")
+        # logger.debug("[Scheduler] Schedule Phase")
         while True:
             task: Optional[Task] = self._dequeue_task()
             if not task:
@@ -1977,7 +1998,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     def _launch_tasks(self):
         """ Iterate through free devices and launch tasks on them
         """
-        #logger.debug("[Scheduler] Launch Phase")
+        # logger.debug("[Scheduler] Launch Phase")
         for dev in self._available_resources.get_resources():
             with self._dev_queue_monitor[dev]:
                 with self._thread_queue_monitor:
@@ -1986,21 +2007,118 @@ class Scheduler(ControllableThread, SchedulerContext):
                     compute_queue = self._compute_task_dev_queues[dev]
                     datamove_queue = self._datamove_task_dev_queues[dev]
                     if len(compute_queue) > 0:
-                        if self.get_launched_compute_task_count(dev) < (self._num_colocatable_tasks + 1):
+                        if dev.architecture.id == "cpu" or self.get_launched_compute_task_count(dev) < (self._num_colocatable_tasks + 1):
                             self._launch_task(compute_queue, dev)
                     if len(datamove_queue) > 0:
-                        if self.get_launched_datamove_task_count(dev) < (self._num_colocatable_tasks + 1):
+                        if dev.architecture.id == "cpu" or self.get_launched_datamove_task_count(dev) < (self._num_colocatable_tasks + 1):
                             self._launch_task(datamove_queue, dev)
+
+    def map_tasks_callback(self):
+        """ This is a callback function for the mapper. Called by WorkerThread and Spawn Decorator to trigger scheduler execution"""
+
+        # Check runtime condition
+        # Are there tasks that have not yet been mapped?
+        # Is the ready queue under a certain threshold?
+        ready_queue_threshold = 50
+        condition = len(self._spawned_task_queue) > 0 or \
+            len(self._new_spawned_task_queue) > 0
+        # condition = True
+        # condition = condition and len(
+        #    self._ready_queue) < ready_queue_threshold
+
+        # Acquire lock for phase (Note this is possible optional if we make map tasks GIL-less and thread safe in the future)
+        logger.info("[Mapping Callback] Start. Met condition: %s",
+                    "True" if condition else "False")
+        if condition and self._mapping_phase_monitor.acquire(blocking=False):
+            # Map tasks
+            self._map_tasks()
+            self._mapping_phase_monitor.release()
+            logger.info("[Mapping Callback] Complete.")
+        else:  # If the scheduler is already in mapping phase, do nothing
+            logger.info(
+                "[Mapping Callback] Failed to acquire lock. Met condition: %s", "True" if condition else "False")
+            pass
+
+    def schedule_tasks_callback(self):
+        """ This is a callback function for the scheduler. Called by WorkerThread and Spawn Decorator to trigger scheduler execution"""
+
+        # Check runtime condition
+        # Are there ready tasks to queue up?
+        # Are any of the device queues under a certain threshold?
+        device_queue_threshold = 5
+        condition = len(self._ready_queue) > 0
+
+        """
+        dev_condition = False
+        if condition:
+            for dev in self._available_resources.get_resources():
+                dev_condition = (
+                    len(self._compute_task_dev_queues[dev]) + len(
+                        self._datamove_task_dev_queues[dev]) < device_queue_threshold
+                )
+                if dev_condition:
+                    break
+
+        condition = condition and dev_condition
+        """
+
+        # Acquire lock for phase (Note this is possible optional if we make schedule tasks GIL-less and thread safe in the future)
+        logger.info("[Scheduling Callback] Start. Met condition: %s",
+                    "True" if condition else "False")
+        if condition and self._scheduling_phase_monitor.acquire(blocking=False):
+            # Schedule tasks
+            self._schedule_tasks()
+            self._scheduling_phase_monitor.release()
+            logger.info("[Scheduling Callback] Complete.")
+        else:  # If the scheduler is already in scheduling phase, do nothing
+            logger.info(
+                "[Scheduling Callback] Failed to acquire lock. Met condition: %s", "True" if condition else "False")
+            pass
+
+    def launch_tasks_callback(self):
+        """ This is a callback function for the launcher. Called by WorkerThread and Spawn Decorator to trigger scheduler execution"""
+
+        # Check runtime conditions
+        # Are there any tasks to launch?
+        # Are there any free worker threads?
+        condition = len(self._free_worker_threads) > 0
+        """
+        dev_condition = False
+        if condition:
+            for dev in self._available_resources.get_resources():
+                dev_condition = (
+                    len(self._compute_task_dev_queues[dev]) > 0 or
+                    len(self._datamove_task_dev_queues[dev]) > 0
+                )
+                if dev_condition:
+                    break
+
+        condition = condition and dev_condition
+        """
+
+        # Acquire lock for phase (Note this is possible optional if we make schedule tasks GIL-less and thread safe in the future)
+        logger.info("[Launching Callback] Start. Met condition: %s",
+                    "True" if condition else "False")
+        if condition and self._launching_phase_monitor.acquire(blocking=False):
+            # Launch tasks
+            self._launch_tasks()
+            self._launching_phase_monitor.release()
+            logger.info("[Launching Callback] Complete.")
+        else:  # If the scheduler is already in launching phase, do nothing
+            logger.info(
+                "[Launching Callback] Failed to acquire lock. Met condition: %s", "True" if condition else "False")
+            pass
 
     def run(self) -> None:
         # noinspection PyBroadException
         try:  # Catch all exception to report them usefully
             while self._should_run:
-                self._map_tasks()
-                self._schedule_tasks()
-                self._launch_tasks()
+                # self._map_tasks()
+                # self._schedule_tasks()
+                # self._launch_tasks()
                 # logger.debug("[Scheduler] Sleeping!")
-                time.sleep(self.period)
+                # time.sleep(self.period)
+                time.sleep(0.001)
                 # logger.debug("[Scheduler] Awake!")
 
         except Exception:

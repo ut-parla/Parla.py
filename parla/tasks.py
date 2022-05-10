@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager, contextmanager, ExitStack
 from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, FrozenSet, Dict
 
 from parla.device import Device, Architecture, get_all_devices
-from parla.task_runtime import ComputeTask, TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context, task_locals
+from parla.task_runtime import ComputeTask, TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context, task_locals, WorkerThread
 from parla.utils import parse_index
 from parla.dataflow import Dataflow
 
@@ -411,8 +411,15 @@ def spawn(taskid: Optional[TaskID] = None,
         # TODO (ses): I gathered these into lists so I could perform concatentation later. This may be inefficient.
         dataflow = Dataflow(list(input), list(output), list(inout))
 
+        # Get handle to current scheduler
+        scheduler = task_runtime.get_scheduler_context()
+
+        if isinstance(scheduler, WorkerThread):
+            # If we are in a worker thread, get the real scheduler object instead.
+            scheduler = scheduler.scheduler
+
         # Spawn the task via the Parla runtime API
-        task = task_runtime.get_scheduler_context().spawn_task(
+        task = scheduler.spawn_task(
             function=_task_callback,
             args=(separated_body,),
             dependencies=processed_dependencies,
@@ -426,7 +433,12 @@ def spawn(taskid: Optional[TaskID] = None,
         for scope in task_locals.task_scopes:
             scope.append(task)
 
-        # Return the task object
+        # Activate scheduler
+        scheduler.map_tasks_callback()
+        scheduler.schedule_tasks_callback()
+        scheduler.launch_tasks_callback()
+
+        # Return the task object to user code
         return task
 
     return decorator
