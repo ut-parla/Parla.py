@@ -1445,6 +1445,12 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Dictionary mapping data block to task lists.
         self._datablock_dict = defaultdict(list)
 
+        self._ready_tasks_dict = defaultdict(list)
+        self._ready_datamove_tasks_dict = defaultdict(list)
+
+        self._ready_tasks_dict_lock = threading.Condition(
+            threading.Lock())
+
         self._worker_threads = [WorkerThread(
             self, i) for i in range(n_threads)]
         for t in self._worker_threads:
@@ -1967,7 +1973,12 @@ class Scheduler(ControllableThread, SchedulerContext):
                 break
             for d in task.req.devices:
                 logger.info(f"[Scheduler] Enqueuing %r to device %r", task, d)
-                self.enqueue_dev_queue(d, task)
+                #self.enqueue_dev_queue(d, task)
+                with self._dev_queue_monitor[d]:
+                    if isinstance(task, ComputeTask):
+                        self._ready_tasks_dict[d].append(task)
+                    else:
+                        self._ready_datamove_tasks_dict[d].append(task)
 
     # _launch_[DEVICE TYPES]_tasks launches a task by assigning it to available
     # worker threads. It manages different execution paths based on the target
@@ -1979,10 +1990,8 @@ class Scheduler(ControllableThread, SchedulerContext):
     # The mapper only maps tasks which have enough resources to run.
     # It's guaranteed for the task to have enough resources
 
-    def _launch_task(self, queue, dev: Device):
+    def _launch_task(self, task, dev: Device):
         try:
-            task = queue.pop()
-
             worker = self._free_worker_threads.pop()  # grab a worker
 
             logger.info(f"[Scheduler] Launching %s task, %r on %r",
@@ -1994,25 +2003,48 @@ class Scheduler(ControllableThread, SchedulerContext):
                 self.update_launched_task_count_mutex(task, dev, 1)
         except IndexError:
             # If failed to find available thread, reappend it.
-            self.enqueue_dev_queue(dev, task)
+            #self.enqueue_dev_queue(dev, task)
+            with self._dev_queue_monitor[dev]:
+                if isinstance(task, ComputeTask):
+                    self._ready_tasks_dict[dev].append(task)
+                else:
+                    self._ready_datamove_tasks_dict[dev].append(task)
 
     def _launch_tasks(self):
-        """ Iterate through free devices and launch tasks on them
-        """
-        # logger.debug("[Scheduler] Launch Phase")
-        for dev in self._available_resources.get_resources():
-            with self._dev_queue_monitor[dev]:
-                with self._thread_queue_monitor:
-                    if len(self._free_worker_threads) == 0:
-                        break
-                    compute_queue = self._compute_task_dev_queues[dev]
-                    datamove_queue = self._datamove_task_dev_queues[dev]
-                    if len(compute_queue) > 0:
-                        if dev.architecture.id == "cpu" or self.get_launched_compute_task_count(dev) < (self._num_colocatable_tasks + 1):
-                            self._launch_task(compute_queue, dev)
-                    if len(datamove_queue) > 0:
-                        if dev.architecture.id == "cpu" or self.get_launched_datamove_task_count(dev) < (self._num_colocatable_tasks + 1):
-                            self._launch_task(datamove_queue, dev)
+        _ready_tasks_curr_dict = defaultdict(list)
+        if (len(self._ready_tasks_dict) > 0):
+            for dev in self._ready_tasks_dict.keys():
+                with self._dev_queue_monitor[dev]:
+                    _ready_tasks_curr_dict[dev].extend([task for task in self._ready_tasks_dict[dev]])
+                    self._ready_tasks_dict[dev] = []
+            for dev in self._ready_datamove_tasks_dict.keys():
+                with self._dev_queue_monitor[dev]:
+                    _ready_tasks_curr_dict[dev].extend([task for task in self._ready_datamove_tasks_dict[dev]])
+                    self._ready_datamove_tasks_dict[dev] = []
+        for dev, tasks in _ready_tasks_curr_dict.items():
+            for ti in range(len(tasks)):
+                task = tasks[ti]
+                if not isinstance(task, Task):
+                    print("Error!:", type(task))
+                with self._dev_queue_monitor[dev]:
+                    with self._thread_queue_monitor:
+                        if len(self._free_worker_threads) == 0:
+                            for task in tasks[ti:]:
+                                if isinstance(task, ComputeTask):
+                                    self._ready_tasks_dict[dev].append(task)
+                                else:
+                                    self._ready_datamove_tasks_dict[dev].append(task)
+                            break
+                        if isinstance(task, ComputeTask):
+                            if dev.architecture.id == "cpu" or self.get_launched_compute_task_count(dev) < (self._num_colocatable_tasks + 1):
+                                self._launch_task(task, dev)
+                            else:
+                                self._ready_tasks_dict[dev].append(task)
+                        if isinstance(task, DataMovementTask):
+                            if dev.architecture.id == "cpu" or self.get_launched_datamove_task_count(dev) < (self._num_colocatable_tasks + 1):
+                                self._launch_task(task, dev)
+                            else:
+                                self._ready_datamove_tasks_dict[dev].append(task)
 
     def map_tasks_callback(self):
         """ This is a callback function for the mapper. Called by WorkerThread and Spawn Decorator to trigger scheduler execution"""
