@@ -18,7 +18,7 @@ from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 
 # Logger configuration (uncomment and adjust level if needed)
-# logging.basicConfig(level=logging.INFO)
+#logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements",
@@ -992,11 +992,9 @@ class WorkerThread(ControllableThread, SchedulerContext):
                             f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
                         self._status = "Running Task {}".format(self.task)
                         self.task.run()
-
                         # Free self back to worker pool
                         self._remove_task()
                         self.scheduler.append_free_thread(self)
-
                         # Activate scheduler
                         self.scheduler.map_tasks_callback()
                         self.scheduler.schedule_tasks_callback()
@@ -1772,6 +1770,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                 # first since Applications generally spawn
                 # tasks in priority orders.
                 self._spawned_task_queue.extend(new_tasks)
+                return True
+            else:
+                return False
 
     def fill_curr_mapped_task_queue(self):
         """ It moves tasks on the new mapped task queue to
@@ -1803,7 +1804,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             return self._device_launched_compute_task_counts[dev]
 
     def get_launched_datamove_task_count(self, dev):
-        with self._launced_count_monitor[dev]:
+        with self._launched_count_monitor[dev]:
             return self._device_launched_datamove_task_counts[dev]
 
     def update_mapped_task_count_mutex(self, task, dev, counts):
@@ -1882,75 +1883,75 @@ class Scheduler(ControllableThread, SchedulerContext):
         # The first loop iterates a spawned task queue
         # and constructs a mapped task subgrpah.
         # logger.debug("[Scheduler] Map Phase")
-        self.fill_curr_spawned_task_queue()
-        while True:
-            task: Optional[Task] = self._dequeue_spawned_task()
-            if task:
-                if not task._assigned:
-                    # This is what actually maps the task
-                    is_assigned = self._assignment_policy(task)
-                    # is_assigned = self._random_assignment_policy(task)  # USE THIS INSTEAD TO TEST RANDOM
-                    assert isinstance(is_assigned, bool)
-                    if not is_assigned:
-                        self.enqueue_spawned_task(task)
-                    else:
-                        assert isinstance(task, ComputeTask)
-                        # Create data movement tasks for each data
-                        # operands of this task.
-                        # TODO(lhc): this is not good.
-                        #            will use logical values to make it easy to understand.
-                        for data in task.dataflow.input:
-                            self._construct_datamove_task(
-                                data, task, OperandType.IN)
-                        for data in task.dataflow.output:
-                            self._construct_datamove_task(
-                                data, task, OperandType.OUT)
-                        for data in task.dataflow.inout:
-                            self._construct_datamove_task(
-                                data, task, OperandType.INOUT)
+        while self.fill_curr_spawned_task_queue():
+            while True:
+                task: Optional[Task] = self._dequeue_spawned_task()
+                if task:
+                    if not task._assigned:
+                        # This is what actually maps the task
+                        is_assigned = self._assignment_policy(task)
+                        # is_assigned = self._random_assignment_policy(task)  # USE THIS INSTEAD TO TEST RANDOM
+                        assert isinstance(is_assigned, bool)
+                        if not is_assigned:
+                            self.enqueue_spawned_task(task)
+                        else:
+                            assert isinstance(task, ComputeTask)
+                            # Create data movement tasks for each data
+                            # operands of this task.
+                            # TODO(lhc): this is not good.
+                            #            will use logical values to make it easy to understand.
+                            for data in task.dataflow.input:
+                                self._construct_datamove_task(
+                                    data, task, OperandType.IN)
+                            for data in task.dataflow.output:
+                                self._construct_datamove_task(
+                                    data, task, OperandType.OUT)
+                            for data in task.dataflow.inout:
+                                self._construct_datamove_task(
+                                    data, task, OperandType.INOUT)
 
-                        # Update parray tracking and task count on the device
-                        for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
-                            assert isinstance(
-                                task.req, EnvironmentRequirements)
-                            if len(task.req.environment.placement) > 1:
-                                raise NotImplementedError(
-                                    "Multidevice not supported")
+                            # Update parray tracking and task count on the device
+                            for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
+                                assert isinstance(
+                                    task.req, EnvironmentRequirements)
+                                if len(task.req.environment.placement) > 1:
+                                    raise NotImplementedError(
+                                        "Multidevice not supported")
+                                for device in task.req.environment.placement:
+                                    self._available_resources.register_parray_move(
+                                        parray, device)
+                            # TODO(lhc): the current Parla does not support multiple devices.
+                            #            leave it as a loop for the future.
                             for device in task.req.environment.placement:
-                                self._available_resources.register_parray_move(
-                                    parray, device)
-                        # TODO(lhc): the current Parla does not support multiple devices.
-                        #            leave it as a loop for the future.
-                        for device in task.req.environment.placement:
-                            self.update_mapped_task_count_mutex(
-                                task, device, 1)
+                                self.update_mapped_task_count_mutex(
+                                    task, device, 1)
 
-                        # Allocate additional resources used by this task (blocking)
-                        for device in task.req.devices:
-                            for resource, amount in task.req.resources.items():
+                            # Allocate additional resources used by this task (blocking)
+                            for device in task.req.devices:
+                                for resource, amount in task.req.resources.items():
+                                    logger.debug(
+                                        "Task %r allocating %d %s on device %r", task, amount, resource, device)
+                                self._available_resources.allocate_resources(
+                                    device, task.req.resources, blocking=True)
+
+                            # Only computation needs to set a assigned flag.
+                            # Data movement task is set as assigned when it is created.
+                            task.set_assigned()
+                            # If a task has no dependency after it is assigned to devices,
+                            # immediately enqueue a corresponding data movement task to
+                            # the ready queue.
+                            if not task.is_blocked_by_dependencies_mutex():
+                                self.enqueue_task(task)
                                 logger.debug(
-                                    "Task %r allocating %d %s on device %r", task, amount, resource, device)
-                            self._available_resources.allocate_resources(
-                                device, task.req.resources, blocking=True)
-
-                        # Only computation needs to set a assigned flag.
-                        # Data movement task is set as assigned when it is created.
-                        task.set_assigned()
-                        # If a task has no dependency after it is assigned to devices,
-                        # immediately enqueue a corresponding data movement task to
-                        # the ready queue.
-                        if not task.is_blocked_by_dependencies_mutex():
-                            self.enqueue_task(task)
-                            logger.debug(
-                                f"[Scheduler] Enqueued %r on ready queue", task)
+                                    f"[Scheduler] Enqueued %r on ready queue", task)
+                    else:
+                        logger.exception("[Scheduler] Tasks on the spawned queue ",
+                                         "should be not assigned any device.")
+                        self.stop()
                 else:
-                    logger.exception("[Scheduler] Tasks on the spawned queue ",
-                                     "should be not assigned any device.")
-                    self.stop()
-            else:
-                # If there is no spawned task at this moment,
-                # move to the mapped task scheduling.
-                break
+                    # If there is no spawned task at this moment,
+                    # move to the mapped task scheduling.
+                    break
 
     def _schedule_tasks(self):
         """ Currently this doesn't do any intelligent scheduling (ordering).
