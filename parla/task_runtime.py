@@ -1877,7 +1877,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         if not condition:
             return
 
-        mapping_limit = 3
+        mapping_limit = 60
         failed_limit = 1
 
         attempted_mappings = 0
