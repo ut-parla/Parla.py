@@ -2041,7 +2041,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Check runtime condition
         # Are there tasks that have not yet been mapped?
         # Is the ready queue under a certain threshold?
-        ready_queue_threshold = 20
+        mapping_limit = 60
         condition = len(self._spawned_task_queue) > 0 or \
             len(self._new_spawned_task_queue) > 0
         # condition = True
@@ -2052,7 +2052,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 dev) + self.get_mapped_datamove_task_count(dev)
 
         # print(count, len(self._ready_queue), flush=True)
-        condition = condition and count < ready_queue_threshold
+        condition = condition and count < mapping_limit
 
         # Acquire lock for phase (Note this is possible optional if we make map tasks GIL-less and thread safe in the future)
         logger.info("[Mapping Callback] Start. Met condition: %s",
