@@ -1058,6 +1058,9 @@ class ResourcePool:
         # Each entry stores a dict with cores, memory, etc. info based on the architecture
         self._devices = self._initial_resources()
 
+        self._device_resource_monitor = {dev: threading.Condition(
+            threading.Lock()) for dev in self._devices.keys()}
+
         # Parla tracks managed PArrays' locations
         # Index into dict with id(array), then with device. True means the array is present there
         # We use the unique id of the array as the key because PArray is an unhashable class
@@ -1103,15 +1106,11 @@ class ResourcePool:
         """
         logger.debug(
             "[ResourcePool] Acquiring monitor in check_resources_availability()")
-        with self._monitor:
+        with self.device_resource_monitor[d]:
 
             is_available = True
             for name, amount in resources.items():
                 dres = self._devices[d]
-
-                # Workaround stupid vcus (I'm getting rid of these at some point)
-                # if d.architecture.id == 'gpu' and name == 'vcus':
-                #    continue
 
                 if amount > dres[name]:
                     is_available = False
@@ -1125,7 +1124,8 @@ class ResourcePool:
     def _atomically_update_resources(self, d: Device, resources: ResourceDict, multiplier, block: bool):
         logger.debug(
             "[ResourcePool] Acquiring monitor in atomically_update_resources()")
-        with self._monitor:
+
+        with self.device_resource_monitor[d]:
             to_release = []
             success = True
             for name, v in resources.items():
@@ -1139,6 +1139,7 @@ class ResourcePool:
 
             logger.info("[ResourcePool] Attempted to allocate %s * %r (blocking %s) => %s",
                         multiplier, (d, resources), block, "success" if success else "fail")
+
             if to_release:
                 logger.info(
                     "[ResourcePool] Releasing resources due to failure: %r", to_release)
