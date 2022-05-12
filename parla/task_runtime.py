@@ -1803,7 +1803,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             return self._device_launched_compute_task_counts[dev]
 
     def get_launched_datamove_task_count(self, dev):
-        with self._launced_count_monitor[dev]:
+        with self._launched_count_monitor[dev]:
             return self._device_launched_datamove_task_counts[dev]
 
     def update_mapped_task_count_mutex(self, task, dev, counts):
