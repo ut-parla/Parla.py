@@ -18,7 +18,7 @@ from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 
 # Logger configuration (uncomment and adjust level if needed)
-# logging.basicConfig(level=logging.INFO)
+# logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements",
@@ -1106,53 +1106,59 @@ class ResourcePool:
         """
         logger.debug(
             "[ResourcePool] Acquiring monitor in check_resources_availability()")
-        with self.device_resource_monitor[d]:
 
-            is_available = True
-            for name, amount in resources.items():
-                dres = self._devices[d]
+        status = self._device_resource_monitor[d].acquire()
 
-                if amount > dres[name]:
-                    is_available = False
-                logger.debug("Resource check for %d %s on device %r: %s",
-                             amount, name, d, "Passed" if is_available else "Failed")
-            logger.debug(
-                "[ResourcePool] Releasing monitor in check_resources_availability()")
-            return is_available
+        is_available = True
+        for name, amount in resources.items():
+            dres = self._devices[d]
+
+            if amount > dres[name]:
+                is_available = False
+            logger.debug("Resource check for %d %s on device %r: %s",
+                         amount, name, d, "Passed" if is_available else "Failed")
+        logger.debug(
+            "[ResourcePool] Releasing monitor in check_resources_availability()")
+
+        self._device_resource_monitor[d].release()
+        return is_available
 
     # TODO (wlr): Make this sane. Check before instead of trying and unwinding...
     def _atomically_update_resources(self, d: Device, resources: ResourceDict, multiplier, block: bool):
         logger.debug(
             "[ResourcePool] Acquiring monitor in atomically_update_resources()")
 
-        with self.device_resource_monitor[d]:
-            to_release = []
-            success = True
-            for name, v in resources.items():
-                if not self._update_resource(d, name, v * multiplier, block):
-                    success = False
-                    break
-                else:
-                    to_release.append((name, v))
+        status = self._device_resource_monitor[d].acquire()
+        to_release = []
+        success = True
+        for name, v in resources.items():
+            if not self._update_resource(d, name, v * multiplier, block):
+                success = False
+                break
             else:
-                to_release.clear()
+                to_release.append((name, v))
+        else:
+            to_release.clear()
 
-            logger.info("[ResourcePool] Attempted to allocate %s * %r (blocking %s) => %s",
-                        multiplier, (d, resources), block, "success" if success else "fail")
+        logger.info("[ResourcePool] Attempted to allocate %s * %r (blocking %s) => %s",
+                    multiplier, (d, resources), block, "success" if success else "fail")
 
-            if to_release:
-                logger.info(
-                    "[ResourcePool] Releasing resources due to failure: %r", to_release)
+        if to_release:
+            logger.info(
+                "[ResourcePool] Releasing resources due to failure: %r", to_release)
 
-            for name, v in to_release:
-                ret = self._update_resource(d, name, -v * multiplier, block)
-                assert ret
+        for name, v in to_release:
+            ret = self._update_resource(d, name, -v * multiplier, block)
+            assert ret
 
-            # success implies to_release empty
-            assert not success or len(to_release) == 0
-            logger.debug(
-                "[ResourcePool] Releasing monitor in atomically_update_resources()")
-            return success
+        # success implies to_release empty
+        assert not success or len(to_release) == 0
+        logger.debug(
+            "[ResourcePool] Releasing monitor in atomically_update_resources()")
+
+        self._device_resource_monitor[d].release()
+
+        return success
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
         # Workaround stupid vcus (I'm getting rid of these at some point)
@@ -1166,7 +1172,7 @@ class ResourcePool:
                 if -amount <= dres[res]:
                     dres[res] += amount
                     if amount > 0:
-                        self._monitor.notify_all()
+                        self._device_resource_monitor[dev].notify_all()
                     # TODO: Temporarily remove assertions due to floating point problems (need to fix VCU implementation)
                     # assert dres[res] <= dev.resources[res], "{}.{} was over deallocated".format(
                     #    dev, res)
@@ -1179,7 +1185,7 @@ class ResourcePool:
                     logger.info(
                         "The current mapper should never try to allocate resources that aren't actually available")
                     if block:
-                        self._monitor.wait()
+                        self._device_resource_monitor[dev].wait()
                     else:
                         return False
         except KeyError:
@@ -1881,19 +1887,30 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def _map_tasks(self):
         # The first loop iterates a spawned task queue
-        # and constructs a mapped task subgrpah.
+        # and constructs a mapped task subgraph.
         # logger.debug("[Scheduler] Map Phase")
-        self.fill_curr_spawned_task_queue()
-        while True:
+
+        mapping_limit = 3
+        failed_limit = 1
+
+        attempted_mappings = 0
+        failed_mappings = 0
+
+        if len(self._spawned_task_queue) < mapping_limit:
+            self.fill_curr_spawned_task_queue()
+
+        while failed_mappings < failed_limit and attempted_mappings < mapping_limit:
             task: Optional[Task] = self._dequeue_spawned_task()
             if task:
                 if not task._assigned:
                     # This is what actually maps the task
+                    attempted_mappings += 1
                     is_assigned = self._assignment_policy(task)
                     # is_assigned = self._random_assignment_policy(task)  # USE THIS INSTEAD TO TEST RANDOM
                     assert isinstance(is_assigned, bool)
                     if not is_assigned:
                         self.enqueue_spawned_task(task)
+                        failed_mappings += 1
                     else:
                         assert isinstance(task, ComputeTask)
                         # Create data movement tasks for each data
@@ -1958,8 +1975,12 @@ class Scheduler(ControllableThread, SchedulerContext):
             Dequeue all ready tasks and send them to device queues in order.
         """
         # logger.debug("[Scheduler] Schedule Phase")
-        while True:
+        schedule_limit = 4
+        schedule_count = 0
+
+        while schedule_count < schedule_limit:
             task: Optional[Task] = self._dequeue_task()
+            schedule_count += 1
             if not task:
                 break
             if not task._assigned:
@@ -2020,12 +2041,18 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Check runtime condition
         # Are there tasks that have not yet been mapped?
         # Is the ready queue under a certain threshold?
-        ready_queue_threshold = 50
+        ready_queue_threshold = 20
         condition = len(self._spawned_task_queue) > 0 or \
             len(self._new_spawned_task_queue) > 0
         # condition = True
-        # condition = condition and len(
-        #    self._ready_queue) < ready_queue_threshold
+
+        count = 0
+        for dev in self._available_resources.get_resources():
+            count += self.get_mapped_compute_task_count(
+                dev) + self.get_mapped_datamove_task_count(dev)
+
+        # print(count, len(self._ready_queue), flush=True)
+        condition = condition and count < ready_queue_threshold
 
         # Acquire lock for phase (Note this is possible optional if we make map tasks GIL-less and thread safe in the future)
         logger.info("[Mapping Callback] Start. Met condition: %s",
@@ -2053,16 +2080,15 @@ class Scheduler(ControllableThread, SchedulerContext):
         dev_condition = False
         if condition:
             for dev in self._available_resources.get_resources():
-                dev_condition = (
-                    len(self._compute_task_dev_queues[dev]) + len(
-                        self._datamove_task_dev_queues[dev]) < device_queue_threshold
-                )
+                device_queue_count = len(
+                    self._compute_task_dev_queues[dev]) + len(self._datamove_task_dev_queues[dev])
+                print(device_queue_count, flush=True)
+                dev_condition = device_queue_count < device_queue_threshold
                 if dev_condition:
                     break
-
+    
         condition = condition and dev_condition
         """
-
         # Acquire lock for phase (Note this is possible optional if we make schedule tasks GIL-less and thread safe in the future)
         logger.info("[Scheduling Callback] Start. Met condition: %s",
                     "True" if condition else "False")
