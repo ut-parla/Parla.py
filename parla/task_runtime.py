@@ -1051,6 +1051,9 @@ class ResourcePool:
         # Each entry stores a dict with cores, memory, etc. info based on the architecture
         self._devices = self._initial_resources()
 
+        self._device_resource_monitor = {dev: threading.Condition(
+            threading.Lock()) for dev in self._devices.keys()}
+
         # Parla tracks managed PArrays' locations
         # Index into dict with id(array), then with device. True means the array is present there
         # We use the unique id of the array as the key because PArray is an unhashable class
@@ -1096,50 +1099,53 @@ class ResourcePool:
         """
         logger.debug(
             "[ResourcePool] Acquiring monitor in check_resources_availability()")
-        with self._monitor:
+        status = self._device_resource_monitor[d].acquire()
 
-            is_available = True
-            for name, amount in resources.items():
-                dres = self._devices[d]
+        is_available = True
+        for name, amount in resources.items():
+            dres = self._devices[d]
 
-                if amount > dres[name]:
-                    is_available = False
-                logger.debug("Resource check for %d %s on device %r: %s",
-                             amount, name, d, "Passed" if is_available else "Failed")
-            logger.debug(
-                "[ResourcePool] Releasing monitor in check_resources_availability()")
-            return is_available
+            if amount > dres[name]:
+                is_available = False
+            logger.debug("Resource check for %d %s on device %r: %s",
+                         amount, name, d, "Passed" if is_available else "Failed")
+        logger.debug(
+            "[ResourcePool] Releasing monitor in check_resources_availability()")
+
+        self._device_resource_monitor[d].release()
+        return is_available
 
     def _atomically_update_resources(self, d: Device, resources: ResourceDict, multiplier, block: bool):
         logger.debug(
             "[ResourcePool] Acquiring monitor in atomically_update_resources()")
-        with self._monitor:
-            to_release = []
-            success = True
-            for name, v in resources.items():
-                if not self._update_resource(d, name, v * multiplier, block):
-                    success = False
-                    break
-                else:
-                    to_release.append((name, v))
+        status = self._device_resource_monitor[d].acquire()
+        to_release = []
+        success = True
+        for name, v in resources.items():
+            if not self._update_resource(d, name, v * multiplier, block):
+                success = False
+                break
             else:
-                to_release.clear()
+                to_release.append((name, v))
+        else:
+            to_release.clear()
 
-            logger.info("[ResourcePool] Attempted to allocate %s * %r (blocking %s) => %s",
-                        multiplier, (d, resources), block, "success" if success else "fail")
-            if to_release:
-                logger.info(
-                    "[ResourcePool] Releasing resources due to failure: %r", to_release)
+        logger.info("[ResourcePool] Attempted to allocate %s * %r (blocking %s) => %s",
+                    multiplier, (d, resources), block, "success" if success else "fail")
+        if to_release:
+            logger.info(
+                "[ResourcePool] Releasing resources due to failure: %r", to_release)
 
-            for name, v in to_release:
-                ret = self._update_resource(d, name, -v * multiplier, block)
-                assert ret
+        for name, v in to_release:
+            ret = self._update_resource(d, name, -v * multiplier, block)
+            assert ret
 
-            # success implies to_release empty
-            assert not success or len(to_release) == 0
-            logger.debug(
-                "[ResourcePool] Releasing monitor in atomically_update_resources()")
-            return success
+        # success implies to_release empty
+        assert not success or len(to_release) == 0
+        logger.debug(
+            "[ResourcePool] Releasing monitor in atomically_update_resources()")
+        self._device_resource_monitor[d].release()
+        return success
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
         try:
@@ -1150,7 +1156,7 @@ class ResourcePool:
                 if -amount <= dres[res]:
                     dres[res] += amount
                     if amount > 0:
-                        self._monitor.notify_all()
+                        self._device_resource_monitor[dev].notify_all()
                     assert dres[res] <= dev.resources[res], "{}.{} was over deallocated".format(
                         dev, res)
                     assert dres[res] >= 0, "{}.{} was over allocated".format(
@@ -1162,7 +1168,7 @@ class ResourcePool:
                     logger.info(
                         "The current mapper should never try to allocate resources that aren't actually available")
                     if block:
-                        self._monitor.wait()
+                        self._device_resource_monitor[dev].wait()
                     else:
                         return False
         except KeyError:
@@ -2030,7 +2036,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 self._launch_tasks()
                 # logger.debug("[Scheduler] Sleeping!")
                 # time.sleep(self.period)
-                bsleep(100)
+                bsleep(10)
                 # logger.debug("[Scheduler] Awake!")
 
         except Exception:
