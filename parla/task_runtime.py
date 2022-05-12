@@ -16,7 +16,8 @@ from .environments import TaskEnvironmentRegistry, TaskEnvironment
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements", "ResourceRequirements"]
+__all__ = ["Task", "SchedulerContext", "DeviceSetRequirements",
+           "OptionsRequirements", "ResourceRequirements"]
 
 # TODO: This module is pretty massively over-engineered the actual use case could use a much simpler scheduler.
 
@@ -218,7 +219,7 @@ class Task:
             # Expose the self reference to other threads as late as possible, but not after potentially getting
             # scheduled.
             taskid.task = self
-            
+
             logger.debug("Task %r: Creating", self)
 
             self._check_remaining_dependencies()
@@ -274,7 +275,8 @@ class Task:
         try:
             # Allocate the resources used by this task (blocking)
             for d in self.req.devices:
-                ctx.scheduler._available_resources.allocate_resources(d, self.req.resources, blocking=True)
+                ctx.scheduler._available_resources.allocate_resources(
+                    d, self.req.resources, blocking=True)
             # Run the task and assign the new task state
             try:
                 assert isinstance(self._state, TaskRunning)
@@ -291,8 +293,10 @@ class Task:
                 # Deallocate all the resources, both from the allocation above and from the "assignment" done by
                 # the scheduler.
                 for d in self.req.devices:
-                    ctx.scheduler._available_resources.deallocate_resources(d, self.req.resources)
-                    ctx.scheduler._unassigned_resources.deallocate_resources(d, self.req.resources)
+                    ctx.scheduler._available_resources.deallocate_resources(
+                        d, self.req.resources)
+                    ctx.scheduler._unassigned_resources.deallocate_resources(
+                        d, self.req.resources)
                 self._set_state(task_state)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
@@ -374,7 +378,8 @@ class _SchedulerLocals(threading.local):
         if self._environment:
             return self._environment
         else:
-            raise InvalidSchedulerAccessException("TaskEnvironment not set in this context")
+            raise InvalidSchedulerAccessException(
+                "TaskEnvironment not set in this context")
 
     @contextmanager
     def _environment_scope(self, env: TaskEnvironment):
@@ -389,7 +394,8 @@ class _SchedulerLocals(threading.local):
         if self._scheduler_context_stack:
             return self._scheduler_context_stack[-1]
         else:
-            raise InvalidSchedulerAccessException("No scheduler is available in this context")
+            raise InvalidSchedulerAccessException(
+                "No scheduler is available in this context")
 
 
 _scheduler_locals = _SchedulerLocals()
@@ -465,7 +471,8 @@ class WorkerThread(ControllableThread, SchedulerContext):
                     else:
                         return None
                 except IndexError:
-                    logger.debug("Blocking for a task: %r (%s)", self, self._monitor)
+                    logger.debug("Blocking for a task: %r (%s)",
+                                 self, self._monitor)
                     self._monitor.wait()
 
     def steal_task_nonblocking(self):
@@ -581,29 +588,32 @@ class ResourcePool:
             else:
                 to_release.clear()
 
-            logger.info("Attempted to allocate %s * %r (blocking %s) => %s\n%r", multiplier, (d, resources), block, success, self)
+            logger.info("Attempted to allocate %s * %r (blocking %s) => %s\n%r",
+                        multiplier, (d, resources), block, success, self)
             if to_release:
-                logger.info("Releasing resources due to failure: %r", to_release)
+                logger.info(
+                    "Releasing resources due to failure: %r", to_release)
 
             for name, v in to_release:
                 ret = self._update_resource(d, name, -v * multiplier, block)
                 assert ret
 
-            assert not success or len(to_release) == 0 # success implies to_release empty
+            # success implies to_release empty
+            assert not success or len(to_release) == 0
             return success
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
         try:
-            while True: # contains return
+            while True:  # contains return
                 dres = self._devices[dev]
                 if -amount <= dres[res]:
                     dres[res] += amount
                     if amount > 0:
                         self._monitor.notify_all()
-                    assert dres[res] <= dev.resources[res] * self._multiplier, \
-                        "{}.{} was over deallocated".format(dev, res)
-                    assert dres[res] >= 0, \
-                        "{}.{} was over allocated".format(dev, res)
+                    # assert dres[res] <= dev.resources[res] * self._multiplier, \
+                    #    "{}.{} was over deallocated".format(dev, res)
+                    # assert dres[res] >= 0, \
+                    #    "{}.{} was over allocated".format(dev, res)
                     return True
                 else:
                     if block:
@@ -620,12 +630,16 @@ class ResourcePool:
 class AssignmentFailed(Exception):
     pass
 
+
 _T = TypeVar('_T')
+
+
 def shuffled(lst: Iterable[_T]) -> List[_T]:
     """Shuffle a list non-destructively."""
     lst = list(lst)
     random.shuffle(lst)
     return lst
+
 
 class Scheduler(ControllableThread, SchedulerContext):
     _environments: TaskEnvironmentRegistry
@@ -638,17 +652,21 @@ class Scheduler(ControllableThread, SchedulerContext):
     def __init__(self, environments: Collection[TaskEnvironment], n_threads: int = None, period: float = 0.01,
                  max_worker_queue_depth: int = 2):
         super().__init__()
-        n_threads = n_threads or sum(d.resources.get("vcus", 1) for e in environments for d in e.placement)
+        n_threads = n_threads or sum(d.resources.get(
+            "cores", 1) for e in environments for d in e.placement)
         self._environments = TaskEnvironmentRegistry(*environments)
         self._exceptions = []
-        self._active_task_count = 1 # Start with one count that is removed when the scheduler is "exited"
+        # Start with one count that is removed when the scheduler is "exited"
+        self._active_task_count = 1
         self.max_worker_queue_depth = max_worker_queue_depth
         self.period = period
         self._monitor = threading.Condition(threading.Lock())
         self._allocation_queue = deque()
         self._available_resources = ResourcePool(multiplier=1.0)
-        self._unassigned_resources = ResourcePool(multiplier=max_worker_queue_depth*1.0)
-        self._worker_threads = [WorkerThread(self, i) for i in range(n_threads)]
+        self._unassigned_resources = ResourcePool(
+            multiplier=max_worker_queue_depth*1.0)
+        self._worker_threads = [WorkerThread(
+            self, i) for i in range(n_threads)]
         for t in self._worker_threads:
             t.start()
         self.start()
@@ -663,7 +681,8 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def __enter__(self):
         if self._active_task_count != 1:
-            raise InvalidSchedulerAccessException("Schedulers can only have a single scope.")
+            raise InvalidSchedulerAccessException(
+                "Schedulers can only have a single scope.")
         return super().__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -732,7 +751,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         except AssignmentFailed:
             # Free any resources we already assigned
             for d in allocated_devices:
-                self._unassigned_resources.deallocate_resources(d, req.resources)
+                self._unassigned_resources.deallocate_resources(
+                    d, req.resources)
             return False
 
     def _assignment_policy(self, task: Task):
@@ -751,17 +771,21 @@ class Scheduler(ControllableThread, SchedulerContext):
                 for e in self._environments.find_all(placement=opt.devices, tags=opt.tags, exact=False):
                     intersection = e.placement & opt.devices
                     match_quality = len(intersection) / len(e.placement)
-                    env_match_quality[e] = max(env_match_quality[e], match_quality)
+                    env_match_quality[e] = max(
+                        env_match_quality[e], match_quality)
             elif isinstance(opt, EnvironmentRequirements):
-                env_match_quality[opt.environment] = max(env_match_quality[opt.environment], 1)
+                env_match_quality[opt.environment] = max(
+                    env_match_quality[opt.environment], 1)
         environments_to_try = list(env_match_quality.keys())
-        environments_to_try.sort(key=env_match_quality.__getitem__, reverse=True)
+        environments_to_try.sort(
+            key=env_match_quality.__getitem__, reverse=True)
         # print(task, ":", env_match_quality, "  ", environments_to_try)
 
         # Try the environments in order
         specific_requirements = None
         for env in environments_to_try:
-            specific_requirements = EnvironmentRequirements(task.req.resources, env, task.req.tags)
+            specific_requirements = EnvironmentRequirements(
+                task.req.resources, env, task.req.tags)
             if self._try_assignment(specific_requirements):
                 task.req = specific_requirements
                 return True
@@ -770,7 +794,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def run(self) -> None:
         # noinspection PyBroadException
-        try: # Catch all exception to report them usefully
+        try:  # Catch all exception to report them usefully
             while self._should_run:
                 task: Optional[Task] = self._dequeue_task()
                 if not task:
@@ -783,10 +807,12 @@ class Scheduler(ControllableThread, SchedulerContext):
                     task.assigned = is_assigned
 
                 # assert task.req.exact == task.assigned
-                assert not task.assigned or isinstance(task.req, EnvironmentRequirements)
+                assert not task.assigned or isinstance(
+                    task.req, EnvironmentRequirements)
 
                 if not task.assigned:
-                    task._assignment_tries = getattr(task, "_assignment_tries", 0) + 1
+                    task._assignment_tries = getattr(
+                        task, "_assignment_tries", 0) + 1
                     # if task._assignment_tries > _ASSIGNMENT_FAILURE_WARNING_LIMIT:
                     #     logger.warning("Task %r: Failed to assign devices. The required resources may not be "
                     #                    "available on this machine at all.\n"
@@ -803,9 +829,11 @@ class Scheduler(ControllableThread, SchedulerContext):
                 else:
                     # Place task in shortest worker queue if it's not too long
                     while True:  # contains break
-                        worker = min(self._worker_threads, key=lambda w: w.estimated_queue_depth())
+                        worker = min(self._worker_threads,
+                                     key=lambda w: w.estimated_queue_depth())
                         if worker.estimated_queue_depth() < self.max_worker_queue_depth:
-                            logger.debug("Task %r: Enqueued on worker %r", task, worker)
+                            logger.debug(
+                                "Task %r: Enqueued on worker %r", task, worker)
                             worker._enqueue_task_local(task)
                             break
                         else:

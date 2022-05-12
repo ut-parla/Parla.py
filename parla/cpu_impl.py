@@ -15,7 +15,8 @@ __all__ = ["cpu"]
 logger = logging.getLogger(__name__)
 
 
-_MEMORY_FRACTION = 15/16 # The fraction of total memory Parla should assume it can use.
+# The fraction of total memory Parla should assume it can use.
+_MEMORY_FRACTION = 15/16
 
 
 def get_n_cores():
@@ -35,7 +36,8 @@ class _CPUMemory(Memory):
 
     def __call__(self, target):
         if getattr(target, "device", None) is not None:
-            logger.debug("Moving data: %r => CPU", getattr(target, "device", None))
+            logger.debug("Moving data: %r => CPU",
+                         getattr(target, "device", None))
         return array.asnumpy(target)
 
 
@@ -43,11 +45,12 @@ class _CPUDevice(Device):
     def __init__(self, architecture: "Architecture", index, *args, n_cores, **kws):
         super().__init__(architecture, index, *args, **kws)
         self.n_cores = n_cores or get_n_cores()
-        self.available_memory = get_total_memory()*_MEMORY_FRACTION / get_n_cores() * self.n_cores
+        self.available_memory = get_total_memory()*_MEMORY_FRACTION / \
+            get_n_cores() * self.n_cores
 
     @property
     def resources(self) -> Dict[str, float]:
-        return dict(threads=self.n_cores, memory=self.available_memory, vcus=self.n_cores)
+        return dict(cores=self.n_cores, memory=self.available_memory, vcus=1)
 
     @property
     def default_components(self) -> Collection["EnvironmentComponentDescriptor"]:
@@ -78,6 +81,7 @@ class _CPUCoresArchitecture(_GenericCPUArchitecture):
     """
     The number of cores for which this process has affinity and are exposed as devices.
     """
+
     def __init__(self, name, id):
         super().__init__(name, id)
         self._devices = [self(i) for i in range(self.n_cores)]
@@ -105,6 +109,7 @@ class _CPUWholeArchitecture(_GenericCPUArchitecture):
     """
     The number of cores for which this process has affinity and are exposed as VCUs.
     """
+
     def __init__(self, name, id):
         super().__init__(name, id)
         self._device = self(0)
@@ -181,4 +186,3 @@ cpu.__doc__ = """The `~parla.device.Architecture` for CPUs.
 
 >>> cpu()
 """
-
