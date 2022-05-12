@@ -17,6 +17,8 @@ from parla.environments import EnvironmentComponentInstance, TaskEnvironmentRegi
 from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 
+from sleep.core import bsleep
+
 # Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level = logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -1854,16 +1856,41 @@ class Scheduler(ControllableThread, SchedulerContext):
         # The first loop iterates a spawned task queue
         # and constructs a mapped task subgrpah.
         #logger.debug("[Scheduler] Map Phase")
-        self.fill_curr_spawned_task_queue()
-        while True:
+
+        mapped_threshold = 20
+        condition = len(self._spawned_task_queue) > 0 or len(
+            self._new_spawned_task_queue) > 0
+
+        count = 0
+        for dev in self._available_resources.get_resources():
+            count += self.get_mapped_compute_task_count(
+                dev) + self.get_mapped_datamove_task_count(dev)
+
+        condition = condition and count < mapped_threshold
+
+        if not condition:
+            return
+
+        mapping_limit = 3
+        failed_limit = 1
+
+        attempted_mappings = 0
+        failed_mappings = 0
+
+        if len(self._spawned_task_queue) < mapping_limit:
+            self.fill_curr_spawned_task_queue()
+
+        while failed_mappings < failed_limit and attempted_mappings < mapping_limit:
             task: Optional[Task] = self._dequeue_spawned_task()
             if task:
                 if not task._assigned:
                     # This is what actually maps the task
+                    attempted_mappings += 1
                     is_assigned = self._assignment_policy(task)
                     # is_assigned = self._random_assignment_policy(task)  # USE THIS INSTEAD TO TEST RANDOM
                     assert isinstance(is_assigned, bool)
                     if not is_assigned:
+                        failed_mappings += 1
                         self.enqueue_spawned_task(task)
                     else:
                         assert isinstance(task, ComputeTask)
@@ -1928,9 +1955,18 @@ class Scheduler(ControllableThread, SchedulerContext):
         """ Currently this doesn't do any intelligent scheduling (ordering).
             Dequeue all ready tasks and send them to device queues in order.
         """
+
+        condition = len(self._ready_queue) > 0
+        if not condition:
+            return
+
+        schedule_limit = 4
+        schedule_count = 0
+
         #logger.debug("[Scheduler] Schedule Phase")
-        while True:
+        while schedule_count < schedule_limit:
             task: Optional[Task] = self._dequeue_task()
+            schedule_count += 1
             if not task:
                 break
             if not task._assigned:
@@ -1993,7 +2029,8 @@ class Scheduler(ControllableThread, SchedulerContext):
                 self._schedule_tasks()
                 self._launch_tasks()
                 # logger.debug("[Scheduler] Sleeping!")
-                time.sleep(self.period)
+                # time.sleep(self.period)
+                bsleep(100)
                 # logger.debug("[Scheduler] Awake!")
 
         except Exception:
