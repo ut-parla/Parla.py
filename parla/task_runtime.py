@@ -1100,10 +1100,6 @@ class ResourcePool:
             for name, amount in resources.items():
                 dres = self._devices[d]
 
-                # Workaround stupid vcus (I'm getting rid of these at some point)
-                if d.architecture.id == 'gpu' and name == 'vcus':
-                    continue
-
                 if amount > dres[name]:
                     is_available = False
                 logger.debug("Resource check for %d %s on device %r: %s",
@@ -1144,9 +1140,6 @@ class ResourcePool:
             return success
 
     def _update_resource(self, dev: Device, res: str, amount: float, block: bool):
-        # Workaround stupid vcus (I'm getting rid of these at some point)
-        if dev.architecture.id == 'gpu' and res == 'vcus':
-            return True
         try:
             while True:  # contains return
                 logger.debug("Trying to allocate %d %s on %r",
@@ -1344,7 +1337,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         # TODO(lhc): for now, assume that n_threads is always None.
         #            Each device needs a dedicated thread.
-        n_threads = int(sum(d.resources.get("vcus", 1)
+        n_threads = int(sum(d.resources.get("cores", 1)
                         for e in environments for d in e.placement))
 
         self._environments = TaskEnvironmentRegistry(*environments)
@@ -1986,10 +1979,10 @@ class Scheduler(ControllableThread, SchedulerContext):
                     compute_queue = self._compute_task_dev_queues[dev]
                     datamove_queue = self._datamove_task_dev_queues[dev]
                     if len(compute_queue) > 0:
-                        if self.get_launched_compute_task_count(dev) < (self._num_colocatable_tasks + 1):
+                        if dev.architecture.id == "cpu" or self.get_launched_compute_task_count(dev) < (self._num_colocatable_tasks + 1):
                             self._launch_task(compute_queue, dev)
                     if len(datamove_queue) > 0:
-                        if self.get_launched_datamove_task_count(dev) < (self._num_colocatable_tasks + 1):
+                        if dev.architecture.id == "cpu" or self.get_launched_datamove_task_count(dev) < (self._num_colocatable_tasks + 1):
                             self._launch_task(datamove_queue, dev)
 
     def run(self) -> None:
