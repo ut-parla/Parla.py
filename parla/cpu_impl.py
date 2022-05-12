@@ -176,7 +176,7 @@ class UnboundCPUComponent(EnvironmentComponentDescriptor):
         return UnboundCPUComponentInstance(self, env)
 
 
-if True or os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() == "cores":
+if os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() == "cores":
     cpu = _CPUCoresArchitecture("CPU Cores", "cpu")
 else:
     if os.environ.get("PARLA_CPU_ARCHITECTURE", "").lower() not in ("whole", ""):
