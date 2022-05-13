@@ -18,7 +18,7 @@ from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 
 # Logger configuration (uncomment and adjust level if needed)
-# logging.basicConfig(level=logging.DEBUG)
+#logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements",
@@ -364,7 +364,7 @@ class Task:
             task_state = TaskException(RuntimeError("Unknown fatal error"))
             # Run the task and assign the new task state
             try:
-                assert isinstance(self._state, TaskRunning)
+                assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(self._state, self.taskid)
                 # TODO(lhc): This assumes Parla only has two devices.
                 #            The reason why I am trying to do is importing
                 #            Parla's cuda.py is expensive.
@@ -396,7 +396,6 @@ class Task:
                 logger.info("Finally for task %r", self)
 
                 ctx = get_scheduler_context()
-                self._finish(ctx)
 
                 # Protect the case that it notifies dependents and
                 # any dependent task is spawned before setting state.
@@ -409,6 +408,7 @@ class Task:
                     # their kernels asynchronously.
                     self._notify_dependents()
                     self._set_state(task_state)
+                self._finish(ctx)
 
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
@@ -444,8 +444,14 @@ class Task:
         with self._mutex:
             return self.is_blocked_by_dependencies()
 
-    def _is_schedulable(self):
-        return not self.is_blocked_by_dependencies() and self._assigned
+    def is_terminal_mutex(self) -> bool:
+        with self._mutex:
+            return self._state.is_terminal
+
+    def _is_schedulable(self) -> bool:
+        return not self._state.is_terminal and \
+               not self.is_blocked_by_dependencies() and\
+               self._assigned
 
     def _enqueue_to_scheduler(self):
         get_scheduler_context().enqueue_task(self)
@@ -514,7 +520,6 @@ class Task:
                     self._state, new_state)
         self._state = new_state
         ctx = get_scheduler_context()
-
         if isinstance(new_state, TaskException):
             ctx.scheduler.report_exception(new_state.exc)
         elif isinstance(new_state, TaskRunning):
@@ -1564,11 +1569,18 @@ class Scheduler(ControllableThread, SchedulerContext):
         """Enqueue a task on the device queue.
            Note that this enqueue has no data race.
         """
+        if isinstance(task, ComputeTask):
+            self._compute_task_dev_queues[dev].append(task)
+        else:
+            self._datamove_task_dev_queues[dev].append(task)
+
+
+    def enqueue_dev_queue_mutex(self, dev, task: Task):
+        """Enqueue a task on the device queue.
+           Note that this enqueue has no data race.
+        """
         with self._dev_queue_monitor[dev]:
-            if isinstance(task, ComputeTask):
-                self._compute_task_dev_queues[dev].append(task)
-            else:
-                self._datamove_task_dev_queues[dev].append(task)
+            self.enqueue_dev_queue(dev, task)
 
     def _assignment_policy(self, task: Task):
         """
@@ -1772,7 +1784,18 @@ class Scheduler(ControllableThread, SchedulerContext):
         with self._spawned_queue_monitor:
             if (len(self._new_spawned_task_queue) > 0):
                 new_q = self._new_spawned_task_queue
-                new_tasks = [new_q.popleft() for _ in range(len(new_q))]
+                # Only map tasks having no remaining dependencies.
+                new_tasks = []
+                failed_tasks = []
+                for _ in range(len(new_q)):
+                    task = new_q.popleft()
+                    if task.is_blocked_by_dependencies_mutex() and \
+                                      not task.is_terminal_mutex():
+                        failed_tasks.append(task)
+                    else:
+                        new_tasks.append(task)
+                self._new_spawned_task_queue.extend(failed_tasks)
+
                 # Newly added tasks should be enqueued onto the
                 # right to guarantee FIFO manners.
                 # It is efficient to map higher priority tasks to devices
@@ -1927,6 +1950,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                             self._construct_datamove_task(
                                 data, task, OperandType.INOUT)
 
+
                         # Update parray tracking and task count on the device
                         for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
                             assert isinstance(
@@ -1980,15 +2004,15 @@ class Scheduler(ControllableThread, SchedulerContext):
 
         while schedule_count < schedule_limit:
             task: Optional[Task] = self._dequeue_task()
-            schedule_count += 1
             if not task:
                 break
             if not task._assigned:
                 logger.debug("[Scheduler] Task %r: Failed to assign", task)
                 break
+            schedule_count += 1
             for d in task.req.devices:
                 logger.info(f"[Scheduler] Enqueuing %r to device %r", task, d)
-                self.enqueue_dev_queue(d, task)
+                self.enqueue_dev_queue_mutex(d, task)
 
     # _launch_[DEVICE TYPES]_tasks launches a task by assigning it to available
     # worker threads. It manages different execution paths based on the target
@@ -2002,17 +2026,35 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def _launch_task(self, queue, dev: Device):
         try:
-            task = queue.pop()
+            # This loop avoids to enqueue a completed task to
+            # a ready queue. The completed task could be launched again
+            # in the below scenario:
+            # TODO(lhc): I don't know why this happen yet. But it happened.
+            #            I will look into further.
+            #
+            # t's dependencies are completed ->
+            # t is ready to schedule, and enqueued onto the ready queue ->
+            # at the same time, new dependency is added for t ->
+            # after the new dependency is done, t is re-enqueued onto the ready queue ->
+            # but the t is already running or completed. This cause an exception.
+            #
+            # The below loop iterates tasks and if a task is already completed,
+            # pops another task. It repeats until it finds a runnable task.
+            while len(queue):
+                task = queue.pop()
+                worker = self._free_worker_threads.pop()  # grab a worker
 
-            worker = self._free_worker_threads.pop()  # grab a worker
+                logger.info(f"[Scheduler] Launching %s task, %r on %r",
+                            dev.architecture.id, task, worker)
+                if isinstance(task._state, TaskCompleted):
+                    print(str(task.taskid), " is completed")
+                    continue
+                worker.assign_task(task)
+                logger.debug(f"[Scheduler] Launched %r", task)
 
-            logger.info(f"[Scheduler] Launching %s task, %r on %r",
-                        dev.architecture.id, task, worker)
-            worker.assign_task(task)
-            logger.debug(f"[Scheduler] Launched %r", task)
-
-            for dev in task.req.environment.placement:
-                self.update_launched_task_count_mutex(task, dev, 1)
+                for dev in task.req.environment.placement:
+                    self.update_launched_task_count_mutex(task, dev, 1)
+                break
         except IndexError:
             # If failed to find available thread, reappend it.
             self.enqueue_dev_queue(dev, task)
