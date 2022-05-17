@@ -35,7 +35,6 @@ from parla.array import clone_here
 import cupy as cp
 from cupy.cuda import cublas
 from cupy.cuda import device
-from cupy.linalg import _util
 
 from scipy import linalg
 import sys
