@@ -24,7 +24,6 @@ from dask.array.core import Array
 from dask.array.utils import array_safe, meta_from_array, solve_triangular_safe
 from dask.base import tokenize
 from dask.highlevelgraph import HighLevelGraph
-from dask.diagnostics import ProgressBar
 
 import dask.array
 import dask
@@ -45,9 +44,8 @@ def solve(a, b):
     return b.T
 
 def handle_trsm(a, b):
-    b = solve(a, b)
-    return b
-
+    b = solve_triangular_safe(a, b.T, lower=True)
+    return b.T
 
 def gemm(a, b):
     return a@b.T
@@ -107,8 +105,9 @@ def blocked_cholesky(a):
 
 if __name__ == '__main__':
     cluster = LocalCluster(n_workers=args.workers, processes=False)
+    print(cluster)
     client = Client(cluster)
-    n = 40000
+    n = 20000
     block_size = 2000
     np.random.seed(10)
     a = np.random.rand(n, n)
