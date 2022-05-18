@@ -134,7 +134,7 @@ if __name__ == '__main__':
                              interface="ib0",
                              enable_tcp_over_ucx=True,
                              enable_nvlink=True,
-                             rmm_pool_size="10GB"
+                             rmm_pool_size="3GB"
                             )
     client = Client(cluster)
     n = 20000
@@ -146,6 +146,13 @@ if __name__ == '__main__':
     da = da.map_blocks(cp.asarray)
     chol = blocked_cholesky(da)
     start = time.perf_counter()
-    print(chol.compute())
+    out_cp = chol.compute()
     stop = time.perf_counter()
-    print(stop - start)
+    print("Test: ", stop - start, "seconds")
+
+    ErrorCheck = True
+    if ErrorCheck == True:
+        out = np.asarray(out_cp.get())
+        error = np.max(np.absolute(a - out @out.T))
+        print("Error:", error)
+
