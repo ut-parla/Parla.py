@@ -6,6 +6,7 @@ import numpy as np
 from scipy import linalg
 import cupy as cp
 
+import os
 import time
 
 from parla import Parla, get_all_devices
@@ -16,9 +17,11 @@ from parla.cpu import cpu
 from parla.function_decorators import specialized
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
 
+from dask.array.utils import array_safe, meta_from_array, solve_triangular_safe
+
 from cupy.cuda import cublas
 from cupy.cuda import device
-from cupy.linalg import _util
+#from cupy.linalg import _util
 
 from numba import jit, void, float64
 import math
@@ -26,8 +29,12 @@ import math
 #This triangular solve only supports one side
 #import cupyx.scipy.linalg as cpx
 
-
 loc = cpu
+
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 
 #Contains no error checking
 def cupy_trsm_wrapper(a, b):
@@ -63,8 +70,9 @@ def cholesky_inplace_gpu(a):
 
 @specialized
 def ltriang_solve(a, b):
-    b = numpy_trsm_wrapper(a, b)
-    return b
+    b = solve_triangular_safe(a, b.T, lower=True)
+    #b = numpy_trsm_wrapper(a, b)
+    return b.T
 
 @ltriang_solve.variant(gpu)
 def ltriang_solve_gpu(a, b):
@@ -107,6 +115,7 @@ def cholesky_blocked_inplace(a):
     subcholesky = TaskSpace("subcholesky")  # Cholesky on block
     gemm = TaskSpace("gemm")        # Inter-block GEMM
     solve = TaskSpace("solve")        # Triangular solve
+    zerofy = TaskSpace("zerofy")
 
     for j in range(a.shape[0]):
         for k in range(j):
@@ -149,18 +158,28 @@ def cholesky_blocked_inplace(a):
                 panel = clone_here(a[i, j])
                 panel = ltriang_solve(factor, panel)
                 copy(a[i, j], panel)
-                
+
+    """
+    @spawn(zerofy, [subcholesky[a.shape[0]-1]], placement=loc)
+    def zero():
+        target = clone_here(a)
+        print(">> before:", target)
+        computed_L = np.tril(target)
+        print(">> computed:", computed_L)
+        copy(a, computed_L)
+    """
+        
     return subcholesky[a.shape[0]-1]
 
 def main():
     @spawn(placement=cpu)
     async def test_blocked_cholesky():
 
-        np.random.seed(100)
+        np.random.seed(10)
 
         # Configure environment
-        block_size = 500
-        n = 40000
+        block_size = 2000
+        n = 20000
         assert not n % block_size
 
         # Construct input data
@@ -174,15 +193,16 @@ def main():
 
         # Call Parla Cholesky result and wait for completion
         await cholesky_blocked_inplace(ap)
+        #print(ap)
 
         end = time.perf_counter()
         print(end - start, "seconds")
         #print("Truth", linalg.cholesky(a))
         # Check result
-        #computed_L = np.tril(a1)
+        computed_L = np.tril(a1)
         #print("Soln", computed_L)
-        #print(np.max(np.absolute(a - computed_L @ computed_L.T)))
-        #assert(np.max(np.absolute(a - computed_L @ computed_L.T)) < 1E-6)
+        print(np.max(np.absolute(a - computed_L @ computed_L.T)))
+        assert(np.max(np.absolute(a - computed_L @ computed_L.T)) < 1E-6)
 
 if __name__ == '__main__':
     with Parla():
