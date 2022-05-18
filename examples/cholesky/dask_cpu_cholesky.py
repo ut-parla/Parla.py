@@ -6,6 +6,7 @@ from functools import partial
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-workers', type=int, default=1)
+parser.add_argument('-perthread', type=int, default=1)
 parser.add_argument('-t', type=int, default=1)
 parser.add_argument('-process', type=int, default=0)
 args = parser.parse_args()
@@ -47,6 +48,7 @@ def handle_trsm(a, b):
     b = solve_triangular_safe(a, b.T, lower=True)
     return b.T
 
+
 def gemm(a, b):
     return a@b.T
 
@@ -64,25 +66,25 @@ def blocked_cholesky(a):
 
     dsk = {}
     for i in range(num_blocks):
-        a_ii = (a.name, i, i)
         if i > 0:
             prevs = []
             for k in range(i):
                 prev = name_lt_dot, i, k, i, k
-                dsk[prev] = (syrk, (name, i, k))
+                dsk[prev] = (operator.sub, (a.name, i, i), (syrk, (name, i, k)))
                 prevs.append(prev)
-            a_ii = (operator.sub, a_ii, (sum, prevs))
-        dsk[name, i, i] = (potrf, a_ii)
+            dsk[name, i, i] = (potrf, (sum, prevs))
+        else:
+            dsk[name, i, i] = (potrf, (a.name, i, i))
         for j in range(i+1, num_blocks):
-            a_ji = (a.name, j, i)
             if i > 0:
                 prevs = []
                 for k in range(i):
                     prev = name_lt_dot, j, k, i, k
-                    dsk[prev] = (gemm, (name, j, k), (name, i, k))
+                    dsk[prev] = (operator.sub, (a.name, j, i), (gemm, (name, j, k), (name, i, k)))
                     prevs.append(prev)
-                a_ji = (operator.sub, a_ji, (sum, prevs))
-            dsk[name, j, i] = (handle_trsm, (name, i, i), a_ji)
+                dsk[name, j, i] = (handle_trsm, (name, i, i), (sum, prevs))
+            else:
+                dsk[name, j, i] = (handle_trsm, (name, i, i), (a.name, j, i))
 
     # Zerofy the upper matrix.
     for i in range(num_blocks):
@@ -104,8 +106,7 @@ def blocked_cholesky(a):
     return lower
 
 if __name__ == '__main__':
-    cluster = LocalCluster(n_workers=args.workers, processes=False)
-    print(cluster)
+    cluster = LocalCluster(n_workers=args.workers, threads_per_worker=args.perthread, processes=False)
     client = Client(cluster)
     n = 20000
     block_size = 2000
@@ -113,8 +114,9 @@ if __name__ == '__main__':
     a = np.random.rand(n, n)
     a = a @ a.T
     da = dask.array.from_array(a, chunks=(block_size, block_size))
+    print("Cholesky starts")
     chol = blocked_cholesky(da)
     start = time.perf_counter()
     print(chol.compute())
     stop = time.perf_counter()
-    print(stop - start)
+    print("Time:", stop - start, flush=True)
