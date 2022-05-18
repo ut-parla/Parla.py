@@ -60,6 +60,8 @@ except (ImportError, AttributeError):
     def clean_memory():
         pass
 
+from dask.array.utils import array_safe, meta_from_array, solve_triangular_safe
+
 from numba import jit, void, float64
 import math
 
@@ -177,11 +179,8 @@ def main():
         a1 = a.copy()
         #a_temp = a1.reshape(n//block_size, block_size, n//block_size, block_size).swapaxes(1, 2)
 
-
         for k in range(num_tests):
             ap = a1.copy()
-
-
             ap_list = list()
             for i in range(n//block_size):
                 ap_list.append(list())
@@ -201,7 +200,6 @@ def main():
             clean_memory()
             print("--------")
 
-
             ts = TaskSpace("CopyBack")
             @spawn(taskid=ts[0], placement=cpu)
             def copy_back():
@@ -210,7 +208,6 @@ def main():
                         ap[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_list[i][j]
 
             await ts
-
 
             # Check result
             print("Is NAN: ", np.isnan(np.sum(ap)))
