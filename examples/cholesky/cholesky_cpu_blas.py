@@ -38,6 +38,7 @@ check_error = True
 import numpy as np
 from scipy import linalg
 
+import os
 import time
 
 from parla import Parla, get_all_devices
@@ -59,14 +60,16 @@ except (ImportError, AttributeError):
     def clean_memory():
         pass
 
+from dask.array.utils import array_safe, meta_from_array, solve_triangular_safe
+
 from numba import jit, void, float64
 import math
 
 #This triangular solve only supports one side
 #import cupyx.scipy.linalg as cpx
 
-
 loc = cpu
+
 
 def numpy_trsm_wrapper(a, b):
     a = np.array(a, order='F', dtype=np.float64)
@@ -79,8 +82,9 @@ def cholesky_inplace(a):
     return a
 
 def ltriang_solve(a, b):
-    b = numpy_trsm_wrapper(a, b)
-    return b
+    b = solve_triangular_safe(a, b.T, lower=True)
+    #b = numpy_trsm_wrapper(a, b)
+    return b.T
 
 def update_kernel(a, b, c):
     c -= a @ b.T
@@ -105,6 +109,7 @@ def cholesky_blocked_inplace(a):
     subcholesky = TaskSpace("subcholesky")  # Cholesky on block
     gemm = TaskSpace("gemm")        # Inter-block GEMM
     solve = TaskSpace("solve")        # Triangular solve
+    zerofy = TaskSpace("zerofy")
 
     for j in range(len(a)):
         for k in range(j):
@@ -175,10 +180,8 @@ def main():
         a1 = a.copy()
         #a_temp = a1.reshape(n//block_size, block_size, n//block_size, block_size).swapaxes(1, 2)
 
-
         for k in range(num_tests):
             ap = a1.copy()
-
 
             ap_list = list()
             for i in range(n//block_size):
@@ -199,7 +202,6 @@ def main():
             clean_memory()
             print("--------")
 
-
             ts = TaskSpace("CopyBack")
             @spawn(taskid=ts[0], placement=cpu)
             def copy_back():
@@ -208,7 +210,6 @@ def main():
                         ap[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_list[i][j]
 
             await ts
-
 
             # Check result
             print("Is NAN: ", np.isnan(np.sum(ap)))
