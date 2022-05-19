@@ -116,7 +116,7 @@ def cholesky_blocked_inplace(a):
             # Inter-block GEMM
             @spawn(syrk[j, k], [solve[j, k], syrk[j, 0:k]], placement=loc, vcus=load)
             #@spawn(syrk[j, k], [solve[j, k]])
-            def t1():
+            def t0():
                 out = clone_here(a[j][j])  # Move data to the current device
                 rhs = clone_here(a[j][k])
 
@@ -153,7 +153,15 @@ def cholesky_blocked_inplace(a):
                 panel = ltriang_solve(factor, panel)
                 copy(a[i][j], panel)
 
-    return subcholesky[len(a)-1]
+    @spawn(zerofy[0], [subcholesky[len(a) - 1]], placement=loc)
+    def t5():
+        for i in range(len(a)):
+            for j in range(len(a)):
+                if j < i:
+                    a[i][j] = 0
+
+    return zerofy[0]
+    #return subcholesky[len(a)-1]
 
 def main():
     @spawn(placement=cpu)
@@ -215,7 +223,7 @@ def main():
             print("Is NAN: ", np.isnan(np.sum(ap)))
 
             if check_error:
-                computed_L = np.tril(ap)
+                computed_L = ap
                 error = np.max(np.absolute(a - computed_L @ computed_L.T))
                 print("Error", error)
 
