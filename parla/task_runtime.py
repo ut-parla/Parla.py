@@ -2024,7 +2024,7 @@ class Scheduler(ControllableThread, SchedulerContext):
     # The mapper only maps tasks which have enough resources to run.
     # It's guaranteed for the task to have enough resources
 
-    def _launch_task(self, queue, dev: Device):
+    def _launch_task(self, queue, dev: Device, is_cpu: bool, num_launched_tasks):
         try:
             # This loop avoids to enqueue a completed task to
             # a ready queue. The completed task could be launched again
@@ -2043,6 +2043,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             while len(queue):
                 task = queue.pop()
                 worker = self._free_worker_threads.pop()  # grab a worker
+                print("Worker thread:", str(worker.index))
 
                 logger.info(f"[Scheduler] Launching %s task, %r on %r",
                             dev.architecture.id, task, worker)
@@ -2054,7 +2055,8 @@ class Scheduler(ControllableThread, SchedulerContext):
 
                 for dev in task.req.environment.placement:
                     self.update_launched_task_count_mutex(task, dev, 1)
-                break
+                if is_cpu is not True and num_launched_tasks < self._num_colocatable_tasks + 1:
+                    break
         except IndexError:
             # If failed to find available thread, reappend it.
             self.enqueue_dev_queue(dev, task)
@@ -2064,6 +2066,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         """
         # logger.debug("[Scheduler] Launch Phase")
         for dev in self._available_resources.get_resources():
+            is_cpu = (dev.architecture.id == "cpu")
             with self._dev_queue_monitor[dev]:
                 with self._thread_queue_monitor:
                     if len(self._free_worker_threads) == 0:
@@ -2071,11 +2074,13 @@ class Scheduler(ControllableThread, SchedulerContext):
                     compute_queue = self._compute_task_dev_queues[dev]
                     datamove_queue = self._datamove_task_dev_queues[dev]
                     if len(compute_queue) > 0:
-                        if dev.architecture.id == "cpu" or self.get_launched_compute_task_count(dev) < (self._num_colocatable_tasks + 1):
-                            self._launch_task(compute_queue, dev)
+                        num_launched_compute_task_count = self.get_launched_compute_task_count(dev)
+                        if is_cpu or num_launched_compute_task_count < (self._num_colocatable_tasks + 1):
+                            self._launch_task(compute_queue, dev, is_cpu, num_launched_compute_task_count)
                     if len(datamove_queue) > 0:
-                        if dev.architecture.id == "cpu" or self.get_launched_datamove_task_count(dev) < (self._num_colocatable_tasks + 1):
-                            self._launch_task(datamove_queue, dev)
+                        num_launched_datamove_task_count = self.get_launched_datamove_task_count(dev)
+                        if is_cpu or num_launched_datamove_task_count < (self._num_colocatable_tasks + 1):
+                            self._launch_task(datamove_queue, dev, is_cpu, num_launched_datamove_task_count)
 
     def map_tasks_callback(self):
         """ This is a callback function for the mapper. Called by WorkerThread and Spawn Decorator to trigger scheduler execution"""
