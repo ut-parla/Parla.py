@@ -89,25 +89,25 @@ def blocked_cholesky(a):
     dsk = {}
     print("num_blocks:", num_blocks)
     for i in range(num_blocks):
-        a_ii = (a.name, i, i)
         if i > 0:
             prevs = []
             for k in range(i):
                 prev = name_lt_dot, i, k, i, k
-                dsk[prev] = (syrk, (name, i, k))
+                dsk[prev] = (operator.sub, (a.name, i, i), (syrk, (name, i, k)))
                 prevs.append(prev)
-            a_ii = (operator.sub, a_ii, (sum, prevs))
-        dsk[name, i, i] = (potrf, a_ii)
+            dsk[name, i, i] = (potrf, (sum, prevs))
+        else:
+            dsk[name, i, i] = (potrf, (a.name, i, i))
         for j in range(i+1, num_blocks):
-            a_ji = (a.name, j, i)
             if i > 0:
                 prevs = []
                 for k in range(i):
                     prev = name_lt_dot, j, k, i, k
-                    dsk[prev] = (gemm, (name, j, k), (name, i, k))
+                    dsk[prev] = (operator.sub, (a.name, j, i), (gemm, (name, j, k), (name, i, k)))
                     prevs.append(prev)
-                a_ji = (operator.sub, a_ji, (sum, prevs))
-            dsk[name, j, i] = (handle_trsm, (name, i, i), a_ji)
+                dsk[name, j, i] = (handle_trsm, (name, i, i), (sum, prevs))
+            else:
+                dsk[name, j, i] = (handle_trsm, (name, i, i), (a.name, j, i))
 
     # Zerofy the upper matrix.
     for i in range(num_blocks):
@@ -130,10 +130,11 @@ def blocked_cholesky(a):
 
 if __name__ == '__main__':
     cluster=LocalCUDACluster(CUDA_VISIBLE_DEVICES="0,1,2,3",
+                             enable_nvlink=True,
+                             n_workers=4,
                              protocol="ucx",
                              interface="ib0",
                              enable_tcp_over_ucx=True,
-                             enable_nvlink=True,
                              rmm_pool_size="3GB"
                             )
     client = Client(cluster)
@@ -142,7 +143,7 @@ if __name__ == '__main__':
     np.random.seed(10)
     a = np.random.rand(n, n)
     a = a @ a.T
-    da = dask.array.from_array(a, chunks=(block_size, block_size))
+    da = dask.array.from_array(a, chunks='auto')#chunks=(block_size, block_size))
     da = da.map_blocks(cp.asarray)
     chol = blocked_cholesky(da)
     start = time.perf_counter()
