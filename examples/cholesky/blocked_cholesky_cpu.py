@@ -151,16 +151,7 @@ def cholesky_blocked_inplace(a):
                 panel = clone_here(a[i][j])
                 panel = ltriang_solve(factor, panel)
                 copy(a[i][j], panel)
-
-    @spawn(zerofy[0], [subcholesky[len(a) - 1]], placement=loc)
-    def t5():
-        for i in range(len(a)):
-            for j in range(len(a)):
-                if j < i:
-                    a[i][j] = 0
-
-    return zerofy[0]
-    #return subcholesky[len(a)-1]
+    return subcholesky[len(a)-1]
 
 def main():
     @spawn(placement=cpu)
@@ -203,7 +194,6 @@ def main():
             await cholesky_blocked_inplace(ap_list)
             end = time.perf_counter()
 
-            print(f"Trial {k}:", end - start, "seconds")
             summarize_memory()
             clean_memory()
             print("--------")
@@ -217,11 +207,16 @@ def main():
 
             await ts
 
+            zerofy_start = time.perf_counter()
+            computed_L = np.tril(ap)
+            zerofy_end = time.perf_counter()
+
+            print(f"Trial {k}:", (end - start) + (zerofy_end - zerofy_start), "seconds")
+
             # Check result
             print("Is NAN: ", np.isnan(np.sum(ap)))
 
             if check_error:
-                computed_L = ap
                 error = np.max(np.absolute(a - computed_L @ computed_L.T))
                 print("Error", error)
 
