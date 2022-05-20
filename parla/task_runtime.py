@@ -2043,7 +2043,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             while len(queue):
                 task = queue.pop()
                 worker = self._free_worker_threads.pop()  # grab a worker
-                print("Worker thread:", str(worker.index))
+                #print("Worker thread:", str(worker.index))
 
                 logger.info(f"[Scheduler] Launching %s task, %r on %r",
                             dev.architecture.id, task, worker)
@@ -2133,7 +2133,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 dev_condition = device_queue_count < device_queue_threshold
                 if dev_condition:
                     break
-    
+
         condition = condition and dev_condition
         """
         # Acquire lock for phase (Note this is possible optional if we make schedule tasks GIL-less and thread safe in the future)
