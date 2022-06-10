@@ -47,6 +47,7 @@ loc = gpu
 save_file = True
 check_nan = False
 check_error = False
+time_zeros = False   #Set to true if comparing with Dask.
 
 try:
     from parla.cuda import get_memory_log, summarize_memory, log_memory, clean_memory
@@ -336,9 +337,13 @@ def main():
                         ap[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_parray[i][j].array
             await ts
 
-            zerofy_start = time.perf_counter()
-            computed_L_cupy = cp.tril(cp.array(ap))
-            zerofy_end = time.perf_counter()
+            if time_zeros:
+                zerofy_start = time.perf_counter()
+                computed_L_cupy = cp.tril(cp.array(ap))
+                zerofy_end = time.perf_counter()
+            else:
+                zerofy_start = 0
+                zerofy_end = 0
 
             print(f"Trial {k}:", (end - start) + (zerofy_end - zerofy_start), "seconds")
             summarize_memory()
@@ -348,7 +353,10 @@ def main():
             print("Is NAN: ", np.isnan(np.sum(ap)))
 
             if check_error:
-                computed_L = cp.asnumpy(computed_L_cupy)
+                if time_zeros:
+                    computed_L = cp.asnumpy(computed_L_cupy)
+                else:
+                    computed_L = np.tril(ap)
                 print(computed_L)
                 error = np.max(np.absolute(a - computed_L @ computed_L.T))
                 print("Error", error)
