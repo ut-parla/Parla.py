@@ -16,13 +16,21 @@ from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace, reserve_persistent_memory
 from parla.parray import asarray_batch
+import argparse
+
+parser = argparse.ArgumentParser()
+#How many trials to run
+parser.add_argument('-trials', type=int, default=1)
+#Are the placement fixed by the user or determed by the scheduler?
+parser.add_argument('-fixed', default=0, type=int)
+args = parser.parse_args()
 
 def main():
 
     @spawn(placement=cpu)
     async def main_task():
         ngpus = cp.cuda.runtime.getDeviceCount()
-        repetitions = int(sys.argv[1])
+        repetitions = args.trials
 
         # set up two n x n arrays to multiply together.
         # n is chosen so that all three can be
@@ -57,7 +65,7 @@ def main():
 
         distribute=True
         reset=True
-        fixed_placement=False
+        fixed_placement=args.fixed
         verbose=False
         sync=False
 
