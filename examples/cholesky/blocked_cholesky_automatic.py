@@ -3,23 +3,21 @@ A naive implementation of blocked Cholesky using Numba kernels on CPUs.
 """
 import random
 import numpy as np
-from numba import jit, void, float64
+from numba import jit, float64
 import math
 import time
 
-from parla import Parla, get_all_devices
+from parla import Parla
 
 from parla.cuda import gpu
 from parla.cpu import cpu
 
 from parla.function_decorators import specialized
 from parla.tasks import *
-from parla.ldevice import LDeviceGridBlocked
 
 import cupy as cp
 from cupy.cuda import cublas
 from cupy.cuda import device
-from cupy.linalg import _util
 
 from parla.parray import asarray_batch
 
@@ -262,8 +260,7 @@ def cholesky_blocked_inplace(a, block_size):
                 stream.synchronize()
                 #print(f"-TRSM: ({i}, {j}) - Requires rw({i},{j}), r({j}, {j})", flush=True)
 
-
-    return subcholesky[len(a)-1]
+    return subcholesky[len(a) - 1]
 
 def main():
     @spawn(placement=cpu)
@@ -337,20 +334,22 @@ def main():
                 for i in range(n//block_size):
                     for j in range(n//block_size):
                         ap[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_parray[i][j].array
-
             await ts
 
+            zerofy_start = time.perf_counter()
+            computed_L_cupy = cp.tril(cp.array(ap))
+            zerofy_end = time.perf_counter()
 
-            print(f"Trial {k}:", end - start, "seconds")
+            print(f"Trial {k}:", (end - start) + (zerofy_end - zerofy_start), "seconds")
             summarize_memory()
             clean_memory()
             print("--------")
-            print(ap)
             # Check result
             print("Is NAN: ", np.isnan(np.sum(ap)))
 
             if check_error:
-                computed_L = np.tril(ap)
+                computed_L = cp.asnumpy(computed_L_cupy)
+                print(computed_L)
                 error = np.max(np.absolute(a - computed_L @ computed_L.T))
                 print("Error", error)
 
