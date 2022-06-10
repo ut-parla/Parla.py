@@ -368,11 +368,8 @@ def spawn(taskid: Optional[TaskID] = None, dependencies = (), *,
         resources = {}
         if memory is not None:
             resources["memory"] = memory
-
         if vcus is not None:
             resources["vcus"] = vcus
-        else:
-            resources["vcus"] = 0
 
         req = DeviceSetRequirements(resources, ndevices, devices, tags)
 
