@@ -69,25 +69,25 @@ def blocked_cholesky(a):
 
     dsk = {}
     for i in range(num_blocks):
+        a_ii = (a.name, i, i)
         if i > 0:
             prevs = []
             for k in range(i):
                 prev = name_lt_dot, i, k, i, k
-                dsk[prev] = (operator.sub, (a.name, i, i), (syrk, (name, i, k)))
+                dsk[prev] = (syrk, (name, i, k))
                 prevs.append(prev)
-            dsk[name, i, i] = (potrf, (sum, prevs))
-        else:
-            dsk[name, i, i] = (potrf, (a.name, i, i))
+            a_ii = (operator.sub, a_ii, (sum, prevs))
+        dsk[name, i, i] = (potrf, a_ii)
         for j in range(i+1, num_blocks):
+            a_ji = (a.name, j, i)
             if i > 0:
                 prevs = []
                 for k in range(i):
                     prev = name_lt_dot, j, k, i, k
-                    dsk[prev] = (operator.sub, (a.name, j, i), (gemm, (name, j, k), (name, i, k)))
+                    dsk[prev] = (gemm, (name, j, k), (name, i, k))
                     prevs.append(prev)
-                dsk[name, j, i] = (handle_trsm, (name, i, i), (sum, prevs))
-            else:
-                dsk[name, j, i] = (handle_trsm, (name, i, i), (a.name, j, i))
+                a_ji = (operator.sub, a_ji, (sum, prevs))
+            dsk[name, j, i] = (handle_trsm, (name, i, i), a_ji)
 
     # Zerofy the upper matrix.
     for i in range(num_blocks):
@@ -116,8 +116,8 @@ if __name__ == '__main__':
         #print(cluster)
         client = Client(cluster)
         if args.matrix is None:
-            n = 20000
-            block_size = 2000
+            n = 200
+            block_size = 20
             np.random.seed(10)
             a = np.random.rand(n, n)
             a = a @ a.T
@@ -135,7 +135,13 @@ if __name__ == '__main__':
         start = time.perf_counter()
         #chol.visualize(filename='cholesky.svg')
         #with performance_report(filename="dask-profile"+str(args.workers)+"-"+str(args.perthread)+".html") as ts:
-        chol.compute()
+        out = chol.compute()
         stop = time.perf_counter()
         print("Memory consumption: ", psutil.Process().memory_info().rss / (1024 * 1024 * 1024))
         print("Time:", stop - start, flush=True)
+
+    ErrorCheck = False
+    if ErrorCheck == True:
+        error = np.max(np.absolute(a - out @out.T))
+        print("Error:", error)
+
