@@ -70,7 +70,10 @@ import math
 
 loc = cpu
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> main
 def numpy_trsm_wrapper(a, b):
     a = np.array(a, order='F', dtype=np.float64)
     b = np.array(b, order='F', dtype=np.float64)
@@ -152,6 +155,7 @@ def cholesky_blocked_inplace(a):
                 panel = clone_here(a[i][j])
                 panel = ltriang_solve(factor, panel)
                 copy(a[i][j], panel)
+<<<<<<< HEAD
 
     @spawn(zerofy[0], [subcholesky[len(a) - 1]], placement=loc)
     def t5():
@@ -162,6 +166,9 @@ def cholesky_blocked_inplace(a):
 
     return zerofy[0]
     #return subcholesky[len(a)-1]
+=======
+    return subcholesky[len(a)-1]
+>>>>>>> main
 
 def main():
     @spawn(placement=cpu)
@@ -190,7 +197,10 @@ def main():
 
         for k in range(num_tests):
             ap = a1.copy()
+<<<<<<< HEAD
 
+=======
+>>>>>>> main
             ap_list = list()
             for i in range(n//block_size):
                 ap_list.append(list())
@@ -205,7 +215,10 @@ def main():
             await cholesky_blocked_inplace(ap_list)
             end = time.perf_counter()
 
+<<<<<<< HEAD
             print(f"Trial {k}:", end - start, "seconds")
+=======
+>>>>>>> main
             summarize_memory()
             clean_memory()
             print("--------")
@@ -219,11 +232,23 @@ def main():
 
             await ts
 
+<<<<<<< HEAD
+=======
+            zerofy_start = time.perf_counter()
+            computed_L = np.tril(ap)
+            zerofy_end = time.perf_counter()
+
+            print(f"Trial {k}:", (end - start) + (zerofy_end - zerofy_start), "seconds")
+
+>>>>>>> main
             # Check result
             print("Is NAN: ", np.isnan(np.sum(ap)))
 
             if check_error:
+<<<<<<< HEAD
                 computed_L = ap
+=======
+>>>>>>> main
                 error = np.max(np.absolute(a - computed_L @ computed_L.T))
                 print("Error", error)
 

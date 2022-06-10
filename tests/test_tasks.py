@@ -48,7 +48,7 @@ def test_scheduler_hook():
     class MyScheduler(Scheduler):
         def _assignment_policy(self, task: Task):
             sleep(0.05)
-            task_results.append((task.name, tuple(d.name for d in task.dependees)))
+            task_results.append((task.name, tuple(d.name for d in task.successors)))
             return super(MyScheduler, self)._assignment_policy(task)
 
     with Parla(scheduler_class=MyScheduler):
