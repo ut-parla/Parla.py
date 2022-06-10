@@ -280,7 +280,7 @@ def cholesky_blocked_inplace(a):
                 a[i][j] = out
                 stream.synchronize()
 
-    return subcholesky[len(a) - 1] 
+    return subcholesky[len(a)-1]
 
 def main():
     @spawn(placement=cpu)
@@ -328,6 +328,7 @@ def main():
             await cholesky_blocked_inplace(ap_list)
             end = time.perf_counter()
 
+            print(f"Trial {k}:", end - start, "seconds")
             summarize_memory()
             clean_memory()
             print("--------")
@@ -341,21 +342,13 @@ def main():
                         ap[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_list[i][j].get()
 
             await ts
- 
-            zerofy_start = time.perf_counter()
-            computed_L_cupy = cp.tril(cp.array(ap))
-            zerofy_end = time.perf_counter()
 
-            print(f"Trial {k}:", (end - start) + (zerofy_end - zerofy_start), "seconds")
 
             # Check result
             print("Is NAN: ", np.isnan(np.sum(ap)))
 
             if check_error:
-                #computed_L = np.tril(ap)
-                computed_L = cp.asnumpy(computed_L_cupy)
-                #computed_L = np.tril(ap)
-                print(computed_L)
+                computed_L = np.tril(ap)
                 error = np.max(np.absolute(a - computed_L @ computed_L.T))
                 print("Error", error)
 
