@@ -83,7 +83,6 @@ class TaskWaiting(TaskState):
     def is_terminal(self):
         return False
 
-
 # TODO(lhc): Why do we need dependency information at here?
 #           It is not exploited/managed correctly.
 class TaskRunning(TaskState):
@@ -125,7 +124,6 @@ class TaskRunning(TaskState):
             return "TaskRunning({})".format(self.func.__name__)
         else:
             return "Functionless task"
-
 
 class TaskCompleted(TaskState):
     __slots__ = ["ret"]
@@ -355,51 +353,50 @@ class Task:
         """Cleanup works after executing the task."""
         raise NotImplementedError()
 
+
     def run(self):
         assert self._assigned, "Task was not assigned before running."
         assert isinstance(self.req, EnvironmentRequirements), \
             "Task was not assigned a specific environment requirement before running."
         try:
-            # A default state to avoid exceptions during catch
-            task_state = TaskException(RuntimeError("Unknown fatal error"))
-            # Run the task and assign the new task state
-            try:
-                assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(self._state, self.taskid)
-                # TODO(lhc): This assumes Parla only has two devices.
-                #            The reason why I am trying to do is importing
-                #            Parla's cuda.py is expensive.
-                #            Whenever we import cuda.py, cupy compilation
-                #            is invoked. We should remove or avoid that.
+            with self._mutex:
+                # A default state to avoid exceptions during catch
+                task_state = TaskException(RuntimeError("Unknown fatal error"))
+                # Run the task and assign the new task state
+                try:
+                    assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(self._state, self.taskid)
+                    # TODO(lhc): This assumes Parla only has two devices.
+                    #            The reason why I am trying to do is importing
+                    #            Parla's cuda.py is expensive.
+                    #            Whenever we import cuda.py, cupy compilation
+                    #            is invoked. We should remove or avoid that.
 
-                # First, create device/stream/event instances.
-                # Second, gets the created event instance.
-                # Third, it scatters the event to dependents who wait for
-                # the current task.
-                env = self.req.environment
-                with _scheduler_locals._environment_scope(env), env:
-                    events = env.get_events_from_components()
-                    self._wait_for_dependency_events(env)
-                    task_state = self._execute_task()
-                    # Events could be multiple for multiple devices task.
-                    env.record_events()
-                    if len(events) > 0:
-                        # If any event created by the current task exist,
-                        # notify dependents and make them wait for that event,
-                        # not Parla task completion.
-                        self._notify_dependents_mutex(events)
-                    env.sync_events()
-                task_state = task_state or TaskCompleted(None)
-            except Exception as e:
-                task_state = TaskException(e)
-                logger.exception("Exception in task")
-            finally:
-                logger.info("Finally for task %r", self)
+                    # First, create device/stream/event instances.
+                    # Second, gets the created event instance.
+                    # Third, it scatters the event to dependents who wait for
+                    # the current task.
+                    env = self.req.environment
+                    with _scheduler_locals._environment_scope(env), env:
+                        events = env.get_events_from_components()
+                        self._wait_for_dependency_events(env)
+                        task_state = self._execute_task()
+                        # Events could be multiple for multiple devices task.
+                        env.record_events()
+                        if len(events) > 0:
+                            # If any event created by the current task exist,
+                            # notify dependents and make them wait for that event,
+                            # not Parla task completion.
+                            self._notify_dependents(events)
+                        env.sync_events()
+                    task_state = task_state or TaskCompleted(None)
+                except Exception as e:
+                    task_state = TaskException(e)
+                    logger.exception("Exception in task")
+                finally:
+                    logger.info("Finally for task %r", self)
 
-                ctx = get_scheduler_context()
+                    ctx = get_scheduler_context()
 
-                # Protect the case that it notifies dependents and
-                # any dependent task is spawned before setting state.
-                with self._mutex:
                     # Regardless of the previous notification,
                     # (So, before leaving the current run(), the above)
                     # it should notify dependents since
@@ -408,8 +405,7 @@ class Task:
                     # their kernels asynchronously.
                     self._notify_dependents()
                     self._set_state(task_state)
-                self._finish(ctx)
-
+                    self._finish(ctx)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
             raise e
@@ -449,7 +445,7 @@ class Task:
             return self._state.is_terminal
 
     def _is_schedulable(self) -> bool:
-        return not self._state.is_terminal and \
+        return isinstance(self._state, TaskRunning) and \
                not self.is_blocked_by_dependencies() and\
                self._assigned
 
@@ -494,11 +490,10 @@ class Task:
         :param symmetric: If true, add self to dependant list of the dependency. This serves as a backlink for updating status.
                           If false, only add it to this tasks dependency list. (The dependency will not be aware of this task depending on it)
         """
+        if symmetric and not dependency._add_dependent_mutex(self):
+            return False
         self._num_blocking_dependencies += 1
         self._dependencies.append(dependency)
-        if symmetric and not dependency._add_dependent_mutex(self):
-            self._num_blocking_dependencies -= 1
-            return False
         return True
 
     def _handle_dependency_event_mutex(self, events):
@@ -513,6 +508,7 @@ class Task:
                 (remaining: %d)", self.name, self._num_blocking_dependencies)
             if self._is_schedulable():
                 self._enqueue_to_scheduler()
+
 
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
@@ -564,6 +560,9 @@ class ComputeTask(Task):
             taskid.task = self
 
             self.num_unspawned_dependencies = num_unspawned_dependencies
+
+            self.__notify_spawned_dependents()
+
             # If this task is not waiting for any dependent tasks,
             # enqueue onto the spawned queue.
             if self.num_unspawned_dependencies == 0:
@@ -585,7 +584,6 @@ class ComputeTask(Task):
 
     def _ready_to_map(self):
         assert self.num_unspawned_dependencies == 0
-        self.__notify_spawned_dependents()
         self._state = TaskRunning(self._func, self._args, None)
         # TODO(bozhi): integrate with enqueue
         get_scheduler_context().incr_active_tasks()
@@ -636,8 +634,7 @@ class DataMovementTask(Task):
         super(DataMovementTask, self).__init__([], taskid, req, name,
                                                # TODO(lhc): temporary task running state.
                                                #            This would be a data movement kernel.
-                                               init_state=TaskRunning(
-                                                   None, None, None),
+                                               init_state=TaskRunning(None, None, None),
                                                init_assigned=True
                                                )
         with self._mutex:
@@ -2044,11 +2041,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                 task = queue.pop()
                 worker = self._free_worker_threads.pop()  # grab a worker
                 #print("Worker thread:", str(worker.index))
-
                 logger.info(f"[Scheduler] Launching %s task, %r on %r",
                             dev.architecture.id, task, worker)
                 if isinstance(task._state, TaskCompleted):
-                    print(str(task.taskid), " is completed")
                     continue
                 worker.assign_task(task)
                 logger.debug(f"[Scheduler] Launched %r", task)
