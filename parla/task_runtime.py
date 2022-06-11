@@ -1903,10 +1903,18 @@ class Scheduler(ControllableThread, SchedulerContext):
                 (str(compute_task.taskid), compute_task))
 
         # If a task has no dependency after it is assigned to devices,
-        # immediately enqueue a corresponding data movement task to
-        # the ready queue.
+        # return the data movement task.
+        # It should not be enqeueued immediately even though
+        # it has no dependent task. This is because if this data movement
+        # starts and finishes immediately, it will try to notify
+        # the computation task even though the computation task would
+        # create more data movement tasks and make additional dependencies.
+        # The computation task should not be run until all the data movement
+        # tasks are created.
+        # 
         if not datamove_task.is_blocked_by_dependencies_mutex():
-            self.enqueue_task(datamove_task)
+            return datamove_task
+        return None
 
     def _map_tasks(self):
         # The first loop iterates a spawned task queue
@@ -1940,16 +1948,25 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # operands of this task.
                         # TODO(lhc): this is not good.
                         #            will use logical values to make it easy to understand.
+                        mappable_datamove_tasks = []
                         for data in task.dataflow.input:
-                            self._construct_datamove_task(
-                                data, task, OperandType.IN)
+                            dtask = self._construct_datamove_task(
+                                    data, task, OperandType.IN)
+                            if dtask is not None:
+                                mappable_datamove_tasks.append(dtask)
                         for data in task.dataflow.output:
-                            self._construct_datamove_task(
-                                data, task, OperandType.OUT)
+                            dtask = self._construct_datamove_task(
+                                    data, task, OperandType.OUT)
+                            if dtask is not None:
+                                  mappable_datamove_tasks.append(dtask)
                         for data in task.dataflow.inout:
-                            self._construct_datamove_task(
-                                data, task, OperandType.INOUT)
+                            dtask = self._construct_datamove_task(
+                                    data, task, OperandType.INOUT)
+                            if dtask is not None:
+                                  mappable_datamove_tasks.append(dtask)
 
+                        for mp_dtask in mappable_datamove_tasks:
+                            self.enqueue_task(mp_dtask)
 
                         # Update parray tracking and task count on the device
                         for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
