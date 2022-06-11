@@ -13,7 +13,14 @@ from parla.cuda import gpu
 from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
-num_tests = int(sys.argv[1])
+import argparse
+
+parser = argparse.ArgumentParser()
+#How many trials to run
+parser.add_argument('-trials', type=int, default=1)
+args = parser.parse_args()
+
+num_tests = args.trials
 
 def stream_cupy_to_numba(cp_stream):
     '''
