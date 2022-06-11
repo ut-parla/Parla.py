@@ -434,7 +434,10 @@ class Task:
                 self._num_blocking_dependencies -= 1
 
     def is_blocked_by_dependencies(self) -> bool:
-        return bool(self._num_blocking_dependencies)
+        if self._num_blocking_dependencies == 0:
+            return False 
+        else:
+            return True 
 
     def is_blocked_by_dependencies_mutex(self) -> bool:
         with self._mutex:
