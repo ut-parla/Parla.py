@@ -24,10 +24,15 @@ from parla.parray import asarray_batch
 import argparse
 
 parser = argparse.ArgumentParser()
+#Blocksize
 parser.add_argument('-b', type=int, default=2000)
+#How many blocks
 parser.add_argument('-nblocks', type=int, default=14)
+#How many trials to run
 parser.add_argument('-trials', type=int, default=1)
+#What matrix file (.npy) to load
 parser.add_argument('-matrix', default=None)
+#Are the placements fixed by the user or determined by the scheduler?
 parser.add_argument('-fixed', default=0, type=int)
 
 args = parser.parse_args()
