@@ -448,6 +448,9 @@ class Task:
             return self._state.is_terminal
 
     def _is_schedulable(self) -> bool:
+        # The initial task state is TaskRunning and so it
+        # is scheduable.
+        # TODO(hc): Task state should be defined better.
         return isinstance(self._state, TaskRunning) and \
                not self.is_blocked_by_dependencies() and\
                self._assigned
@@ -564,6 +567,7 @@ class ComputeTask(Task):
 
             self.num_unspawned_dependencies = num_unspawned_dependencies
 
+            # Enable tasks who have waited for this task to map.
             self.__notify_spawned_dependents()
 
             # If this task is not waiting for any dependent tasks,
@@ -1784,6 +1788,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         with self._spawned_queue_monitor:
             if (len(self._new_spawned_task_queue) > 0):
                 new_q = self._new_spawned_task_queue
+                #new_tasks = [new_q.popleft() for _ in range(len(new_q))]
                 # Only map tasks having no remaining dependencies.
                 new_tasks = []
                 failed_tasks = []
@@ -2043,27 +2048,31 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def _launch_task(self, queue, dev: Device, is_cpu: bool, num_launched_tasks):
         try:
-            # This loop avoids to enqueue a completed task to
-            # a ready queue. The completed task could be launched again
-            # in the below scenario:
-            # TODO(lhc): I don't know why this happen yet. But it happened.
-            #            I will look into further.
-            #
-            # t's dependencies are completed ->
-            # t is ready to schedule, and enqueued onto the ready queue ->
-            # at the same time, new dependency is added for t ->
-            # after the new dependency is done, t is re-enqueued onto the ready queue ->
-            # but the t is already running or completed. This cause an exception.
-            #
-            # The below loop iterates tasks and if a task is already completed,
-            # pops another task. It repeats until it finds a runnable task.
             while len(queue):
                 task = queue.pop()
                 worker = self._free_worker_threads.pop()  # grab a worker
                 #print("Worker thread:", str(worker.index))
                 logger.info(f"[Scheduler] Launching %s task, %r on %r",
                             dev.architecture.id, task, worker)
+                # XXX(lhc): The error that tried to launch a completed task
+                # is now fixed, and just in case, I keep this if-statement
+                # with this comment.
+                # The previous error was because a data movement task could
+                # immediately start its movement while a computation task is still
+                # trying to create other data movement tasks.
+                # Therefore, the following scenario happened:
+                #   data movement task starts and completes ->
+                #   computation task wakes up (while it is creating other
+                #   data movement tasks) ->
+                #   computation task starts, and creates a new data movement
+                #   task ->
+                #   repeate the above scenarios.
+                #
+                # This error is resolved by avoiding immediate enqueueing the
+                # created data movement task until all other data movement tasks
+                # are created.
                 if isinstance(task._state, TaskCompleted):
+                    logger.info(f"This should not be passed.")
                     continue
                 worker.assign_task(task)
                 logger.debug(f"[Scheduler] Launched %r", task)
