@@ -2,7 +2,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Union, List, Dict, Tuple, Any
 
 import numpy
-import cupy
+
+#TODO: Fix this to be more stable and less of a hack.
+try:
+    import cupy
+except (ImportError, AttributeError):
+    import numpy as cupy
 
 from .coherence import CPU_INDEX
 
@@ -240,9 +245,9 @@ class MultiDeviceBuffer:
                     local_index = global_index
                 elif isinstance(index_map, dict) and len(index_map) == 1:
                     # special case, this axis was indexed by a int, so
-                    # dimension was reduced by 1, 
+                    # dimension was reduced by 1,
                     # need to ignore this axis, just check index match or not
-                    if list(index_map.keys())[0] == global_index:  # false if type or value doesn't match 
+                    if list(index_map.keys())[0] == global_index:  # false if type or value doesn't match
                         continue
                     else:
                         local_index = None
@@ -293,7 +298,7 @@ class MultiDeviceBuffer:
 
             if local_slices is None:  # result is not found for this subarray
                 if subarray_index == len(self._indices_map[device_id]) - 1:  # this is the last subarray
-                    local_slices = None  # non slices is found  
+                    local_slices = None  # non slices is found
                 else: # check next subarray
                     local_slices = []  # clear intermidate result
             else:
@@ -456,7 +461,7 @@ class MultiDeviceBuffer:
         This could be done by replaing list and slice to tuple
         """
         # little chance to have collision, but what if it happened?
-        hash_value = 17 # use a none zero hash value, so hash(0) != 0 
+        hash_value = 17 # use a none zero hash value, so hash(0) != 0
         prime = 31
         if not isinstance(global_slices, tuple):
             if isinstance(global_slices, list):
