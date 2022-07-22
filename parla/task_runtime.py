@@ -1788,7 +1788,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         with self._spawned_queue_monitor:
             if (len(self._new_spawned_task_queue) > 0):
                 new_q = self._new_spawned_task_queue
-                #new_tasks = [new_q.popleft() for _ in range(len(new_q))]
                 # Only map tasks having no remaining dependencies.
                 new_tasks = []
                 failed_tasks = []
@@ -1972,6 +1971,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
                         for mp_dtask in mappable_datamove_tasks:
                             self.enqueue_task(mp_dtask)
+
 
                         # Update parray tracking and task count on the device
                         for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
