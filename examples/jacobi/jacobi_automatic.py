@@ -20,7 +20,10 @@ import argparse
 parser = argparse.ArgumentParser()
 #How many trials to run
 parser.add_argument('-trials', type=int, default=1)
+#What mapping to use
+parser.add_argument('-fixed', type=int, default=1)
 args = parser.parse_args()
+
 
 num_tests = args.trials
 
@@ -181,6 +184,11 @@ def main():
 
                 for j in range(divisions):
                     device = mapper.device(j)
+
+                    if args.fixed:
+                        device = mapper.device(j)
+                    else:
+                        device = devs
 
                     in_list = list()
                     if j > 0:
