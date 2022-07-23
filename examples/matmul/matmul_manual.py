@@ -19,6 +19,8 @@ from parla.parray import asarray_batch
 import argparse
 
 parser = argparse.ArgumentParser()
+#Size of matrix
+parser.add_argument('-n', type=int, default=32000)
 #How many trials to run
 parser.add_argument('-trials', type=int, default=1)
 #Are the placement fixed by the user or determed by the scheduler?
@@ -36,7 +38,7 @@ def main():
         # n is chosen so that all three can be
         # stored within the memory of a single GPU
         # so that strong scaling numbers make sense.
-        n = 32000
+        n = args.n
 
         blocks = ngpus
         block_size = n // ngpus
