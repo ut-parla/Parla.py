@@ -148,13 +148,13 @@ def main():
 
             await matmul
             stop = time.perf_counter()
-            print(f"Iteration {repetition} | Time elapsed: ", stop - start, flush=True)
+            print(f"Iteration {repetition} | Time: ", stop - start, flush=True)
             time_list.append(stop-start)
 
         mean = np.mean(np.array(time_list))
         median = np.median(np.array(time_list))
 
-        print(f"Execution Time:: Average = {mean} | Median = {median}", flush=True)
+        print(f"Execution:: Average = {mean} | Median = {median}", flush=True)
 if __name__ == "__main__":
     with Parla():
         main()
