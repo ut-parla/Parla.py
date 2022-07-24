@@ -33,9 +33,10 @@ import argparse
 from parla.array import clone_here
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-n', type=int, default=20)
-parser.add_argument('-mc', type=int, default=1000)
-parser.add_argument('-mg', type=int, default=2000)
+parser.add_argument('-n', type=int, default=20, help='number of matrices')
+parser.add_argument('--ngpus', type=int, default=0, help='number of gpus')
+parser.add_argument('-m_cpu', type=int, default=2000, help='number of rows for CPU task')
+parser.add_argument('-m_gpu', type=int, default=2000, help='number of rows for GPU task ')
 args = parser.parse_args()
 
 n_gpus = cp.cuda.runtime.getDeviceCount()
@@ -76,30 +77,26 @@ def main():
 
         for i in range(args.n):
             if i <= args.n//4:
-                a = np.random.randn(args.mg, args.mg)
+                a = np.random.randn(args.m_gpu, args.m_gpu)
                 A = a @ a.T + 1
             else:
-                a = np.random.randn(args.mc, args.mc)
+                a = np.random.randn(args.m_cpu, args.m_cpu)
                 A = a @ a.T + 1
 
             matrix_list.append(A)
 
         cp.cuda.Device().synchronize()
         random.shuffle(matrix_list)
+
         start_external_t = time.perf_counter()
         TS = TaskSpace("TaskSpace")
         i = 0
         for A in matrix_list:
             i+=1
 
-            if A.shape[0] < 10000:
-                loc=[cpu]
-                load=1
-                #loc=[gpu(0)]
-                #load=1
-            else:
-                loc=[cpu, gpu(0)]
-                load=1/3
+            loc=[cpu]
+            loc.extend([gpu(i) for i in range(n_gpus)])
+            load=0.5
 
             @spawn(TS[i], placement=loc, vcus=load)
             def matrix_task():
@@ -110,7 +107,7 @@ def main():
 
         await TS
         end_external_t = time.perf_counter()
-        print("Done.", end_external_t - start_external_t, flush=True)
+        print("Time: ", end_external_t - start_external_t, flush=True)
 
 if __name__ == '__main__':
     with Parla():
