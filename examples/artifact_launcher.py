@@ -29,7 +29,7 @@ def run_test(gpu_list, timeout):
 
     #Loop over number of GPUs in each subtest
     for n_gpus in gpu_list:
-        command = f"python test_script.py -gpus {n_gpus}"
+        command = f"python test_script.py -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
