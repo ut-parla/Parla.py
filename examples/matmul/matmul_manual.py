@@ -26,10 +26,9 @@ if cuda_visible_devices is None:
     print("CUDA_VISIBLE_DEVICES is not set. Assuming 0-3")
     cuda_visible_devices = list(range(4))
 else:
-    cuda_visible_devices = map(int, cuda_visible_devices.strip().split(','))
-
+    cuda_visible_devices = cuda_visible_devices.strip().split(',')
 gpus = cuda_visible_devices[:args.ngpus]
-os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpus))
+os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(gpus)
 
 import numpy as np
 import cupy as cp
@@ -42,16 +41,6 @@ from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace, reserve_persistent_memory
 from parla.parray import asarray_batch
-import argparse
-
-parser = argparse.ArgumentParser()
-#Size of matrix
-parser.add_argument('-n', type=int, default=32000)
-#How many trials to run
-parser.add_argument('-trials', type=int, default=1)
-#Are the placement fixed by the user or determed by the scheduler?
-parser.add_argument('-fixed', default=0, type=int)
-args = parser.parse_args()
 
 def main():
 
