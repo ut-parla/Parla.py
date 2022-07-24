@@ -367,7 +367,7 @@ def main():
                 zerofy_start = 0
                 zerofy_end = 0
 
-            print(f"Trial {k}:", (end - start) + (zerofy_end - zerofy_start), "seconds")
+            print(f"Time:", (end - start) + (zerofy_end - zerofy_start))
             summarize_memory()
             clean_memory()
             print("--------")

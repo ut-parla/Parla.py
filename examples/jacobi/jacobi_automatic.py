@@ -282,7 +282,7 @@ def main():
 
             await current_block_tasks
             end = time.perf_counter()
-            print("Total Time: ", end - start, "seconds")
+            print("Time: ", end - start)
 
         del a0
         del a1

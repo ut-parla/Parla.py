@@ -227,7 +227,7 @@ def main():
 
             await current_block_tasks
             end = time.perf_counter()
-            print("Time: ", end - start, "seconds")
+            print("Time: ", end - start)
 
             # This depends on all the tasks from the last iteration step.
             #for j in range(divisions):
