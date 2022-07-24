@@ -304,7 +304,6 @@ def cholesky_blocked_inplace(a):
                 log_memory()
                 a[i][j] = out
                 stream.synchronize()
-
     return subcholesky[len(a) - 1]
 
 def main():
@@ -366,7 +365,7 @@ def main():
                         ap[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_list[i][j].get()
 
             await ts
-
+ 
             if time_zeros:
                 zerofy_start = time.perf_counter()
                 computed_L_cupy = cp.tril(cp.array(ap))
