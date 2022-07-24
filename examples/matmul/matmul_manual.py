@@ -4,6 +4,32 @@ Multi-device matrix multiplication using parla with cupy as the kernel engine.
 """
 import sys
 import time
+import os
+
+
+import argparse
+
+parser = argparse.ArgumentParser()
+#Size of matrix
+parser.add_argument('-n', type=int, default=32000, help='Size of matrix')
+#How many trials to run
+parser.add_argument('-trials', type=int, default=1, help='Number of trials to run')
+#Are the placement fixed by the user or determed by the scheduler?
+parser.add_argument('-fixed', default=0, type=int, help="User Mapping (1) or Scheduler Mapping (0)")
+#Number of devices to use
+parser.add_argument('-ngpus', type=int, default=1, help="Number of GPUs to use")
+args = parser.parse_args()
+
+cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
+
+if cuda_visible_devices is None:
+    print("CUDA_VISIBLE_DEVICES is not set. Assuming 0-3")
+    cuda_visible_devices = list(range(4))
+else:
+    cuda_visible_devices = map(int, cuda_visible_devices.strip().split(','))
+
+gpus = cuda_visible_devices[:args.ngpus]
+os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpus))
 
 import numpy as np
 import cupy as cp
