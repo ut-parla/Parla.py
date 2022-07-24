@@ -26,7 +26,7 @@ if cuda_visible_devices is None:
     print("CUDA_VISIBLE_DEVICES is not set. Assuming 0-3")
     cuda_visible_devices = list(range(3))
 
-backup_cuda_visible_devices = cuda_visible_devices
+cuda_visible_devices = map(int, cuda_visible_devices.strip().split(','))
 gpus = cuda_visible_devices[:args.gpus]
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpus))
 

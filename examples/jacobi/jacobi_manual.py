@@ -1,3 +1,28 @@
+
+import argparse
+import os
+
+parser = argparse.ArgumentParser()
+#How many trials to run
+parser.add_argument('-trials', type=int, default=1)
+#What mapping to use
+parser.add_argument('-fixed', type=int, default=1)
+#How many gpus to use
+parser.add_argument('--ngpus', type=int, default=1)
+args = parser.parse_args()
+
+cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
+
+if cuda_visible_devices is None:
+    print("CUDA_VISIBLE_DEVICES is not set. Assuming 0-3")
+    cuda_visible_devices = list(range(3))
+
+cuda_visible_devices = map(int, cuda_visible_devices.strip().split(','))
+gpus = cuda_visible_devices[:args.gpus]
+os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpus))
+
+#IMPORT CUPY AND PARLA AFTER CUDA_VISIBLE_DEVICES IS SET
+
 import time
 import numba.cuda
 import numpy as np
@@ -14,13 +39,6 @@ from parla.function_decorators import specialized
 from parla.ldevice import LDeviceSequenceBlocked
 from parla.tasks import spawn, TaskSpace, CompletedTaskSpace
 import argparse
-
-parser = argparse.ArgumentParser()
-#How many trials to run
-parser.add_argument('-trials', type=int, default=1)
-#What mapping to use
-parser.add_argument('-fixed', type=int, default=1)
-args = parser.parse_args()
 
 num_tests = args.trials
 
