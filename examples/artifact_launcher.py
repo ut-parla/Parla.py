@@ -3,18 +3,46 @@ import sys
 import argparse
 import pexpect as pe
 
+######
+# Helper functions
+######
+
+def parse_times(output):
+    times = []
+    for line in output.splitlines():
+        line = str(line).strip('\'')
+        if "Time" in line:
+            times.append(float(line.split()[-1].strip()))
+    return times
+
+
+
+
+
 #######
 # Define functions to gather each result (per figure, per app)
 #######
 
-#Figure 10: Cholesky
-def run_cholesky_28(gpu_list):
+#Test:
+def run_test(gpu_list, timeout):
+    output_dict = {}
 
+    #Loop over number of GPUs in each subtest
     for n_gpus in gpu_list:
         command = f"python test_script.py -gpus {n_gpus}"
-        output = pe.run(command, timeout=100, withexitstatus=True)
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        output_dict[n_gpus] = times
 
+    return output_dict
+
+#Figure 10: Cholesky
+def run_cholesky_28(gpu_list):
+    pass
 
 #Figure 13: Parla Cholesky (CPU)
 def run_cholesky_20_host():
@@ -73,15 +101,73 @@ def run_prefetching_test():
 def run_GIL_test():
     pass
 
-test = [run_cholesky_20_host]
+test = [run_test]
 figure_10 = [run_cholesky_28, run_jacobi, run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
 figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 figure_15 = [run_batched_cholesky]
 figure_12 = [run_prefetching_test]
 
+figure_dictionary = {}
+figure_dictionary['Figure_10'] = figure_10
+figure_dictionary['Figure_13'] = figure_13
+figure_dictionary['Figure_15'] = figure_15
+figure_dictionary['Figure_12'] = figure_12
+figure_dictionary['Figure_test'] = test
 
-for f in test:
-    f()
+figure_output = {}
+
+if __name__ == '__main__':
+    import os
+    import sys
+    parser = argparse.ArgumentParser(description='Runs the benchmarks')
+    parser.add_argument('--figures', type=int, nargs="+", help='Figure numbers to generate', default=None)
+    parser.add_argument('--timeout', type=int, help='Max Timeout for a benchmark', default=1000)
+
+    args = parser.parse_args()
+
+    cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
+    if cuda_visible_devices is None:
+        print("Warning CUDA_VISIBLE_DEVICES is not set.")
+        cuda_visible_devices = list(range(4))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        print(f"Setting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+
+    ngpus = [1, 2, 4]
+
+
+    if args.figures is None:
+        figure_list = ["-1"]
+    else:
+        figure_list = args.figures
+
+    for figure_num in figure_list:
+        if int(figure_num) < 0:
+            figure_num = "test"
+        figure = f"Figure_{figure_num}"
+        if figure not in figure_dictionary:
+            print(f"Experiments for {figure} not found")
+            continue
+
+        total_tests = len(figure_dictionary[figure])
+        i = 1
+        print("Starting collection for :", figure)
+        for test in figure_dictionary[figure]:
+            test_output = {}
+            print("\t ++Experiment {}/{}. Name: {}".format(i, total_tests, test.__name__))
+            output_dict = test(ngpus, args.timeout)
+            test_output[test.__name__] = output_dict
+            print("\t --Experiment {}/{} Completed. Output: {}".format(i, total_tests, output_dict))
+            i += 1
+        figure_output[figure] = test_output
+        print(f"Collection for {figure} complete")
+
+
+    print("All experiments complete.")
+    print("Output:")
+    print(figure_output)
+
+
 
 
 
