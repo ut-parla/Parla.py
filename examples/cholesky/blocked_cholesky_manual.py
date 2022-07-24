@@ -1,6 +1,36 @@
 """
 A naive implementation of blocked Cholesky using Numba kernels on CPUs.
 """
+
+import argparse
+import os
+
+parser = argparse.ArgumentParser()
+#Blocksize
+parser.add_argument('-b', type=int, default=2000)
+#How many blocks
+parser.add_argument('-nblocks', type=int, default=14)
+#How many trials to run
+parser.add_argument('-trials', type=int, default=1)
+#What matrix file (.npy) to load
+parser.add_argument('-matrix', default=None)
+#Are the placements fixed by the user or determined by the scheduler?
+parser.add_argument('-fixed', default=0, type=int)
+#How many GPUs to run on?
+parser.add_argument('-ngpus', default=4, type=int)
+args = parser.parse_args()
+
+cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
+
+if cuda_visible_devices is None:
+    print("CUDA_VISIBLE_DEVICES is not set. Assuming 0-3")
+    cuda_visible_devices = list(range(3))
+
+backup_cuda_visible_devices = cuda_visible_devices
+gpus = cuda_visible_devices[:args.gpus]
+os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpus))
+
+
 import random
 import numpy as np
 from numba import jit, void, float64
@@ -39,19 +69,11 @@ from cupy.cuda import device
 from scipy import linalg
 import sys
 
-import argparse
-
-parser = argparse.ArgumentParser()
-parser.add_argument('-b', type=int, default=2000)
-parser.add_argument('-nblocks', type=int, default=14)
-parser.add_argument('-trials', type=int, default=1)
-parser.add_argument('-matrix', default=None)
-parser.add_argument('-fixed', default=0, type=int)
-
-args = parser.parse_args()
-
 
 ngpus = cp.cuda.runtime.getDeviceCount()
+#Make sure that the enviornment configuration is correct
+assert(ngpus == args.ngpus)
+
 block_size = args.b
 fixed = args.fixed
 
