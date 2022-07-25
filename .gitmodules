@@ -7,3 +7,6 @@
 [submodule "examples/synthetic"]
 	path = examples/synthetic
 	url = git@github.com:ut-parla/synthetic_graphs.git
+[submodule "artifact/magma"]
+	path = artifact/magma
+	url = https://bitbucket.org/icl/magma.git

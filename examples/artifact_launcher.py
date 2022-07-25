@@ -165,7 +165,7 @@ def run_matmul_cublas(gpu_list, timeout):
 
     os.environ["LD_LIBRARY_PATH"] = cudamg_root+"/lib/"+":"+os.environ.get("LD_LIBRARY_PATH")
     os.environ["LD_LIBRARY_PATH"] = cublasmg_root+"/lib/"+":"+os.environ.get("LD_LIBRARY_PATH")
-    os.environ["PATH"] = cublasmg_root+"/samples/"+":"+os.environ.get("PATH")
+    os.environ["PATH"] = cublasmg_root+"/test/"+":"+os.environ.get("PATH")
 
     output_dict = {}
     #Loop over number of GPUs in each subtest
