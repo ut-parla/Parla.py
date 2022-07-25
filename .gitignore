@@ -6,6 +6,16 @@ __pycache__
 *build/
 /runtime_libs/build/
 docs/build
+*.so 
+
+# log
+*.out
+*.npy
+*.bak
+*.txt
+*.nvprof
+*.prof 
+*.err
 
 # IDE
 .idea
@@ -13,5 +23,3 @@ docs/build
 
 # Vim temp files
 *.swp
-*.so
-*.c
