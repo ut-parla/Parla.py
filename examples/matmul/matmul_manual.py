@@ -27,8 +27,10 @@ if cuda_visible_devices is None:
     cuda_visible_devices = list(range(4))
 else:
     cuda_visible_devices = cuda_visible_devices.strip().split(',')
+    cuda_visible_devices = list(map(int, cuda_visible_devices))
+
 gpus = cuda_visible_devices[:args.ngpus]
-os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(gpus)
+os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpus))
 
 import numpy as np
 import cupy as cp

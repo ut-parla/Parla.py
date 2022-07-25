@@ -26,7 +26,8 @@ if cuda_visible_devices is None:
     print("CUDA_VISIBLE_DEVICES is not set. Assuming 0-3")
     cuda_visible_devices = list(range(4))
 else:
-    cuda_visible_devices = map(int, cuda_visible_devices.strip().split(','))
+    cuda_visible_devices = cuda_visible_devices.strip().split(',')
+    cuda_visible_devices = list(map(int, cuda_visible_devices))
 
 gpus = cuda_visible_devices[:args.ngpus]
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpus))
@@ -365,7 +366,7 @@ def main():
                         ap[i*block_size:(i+1)*block_size,j*block_size:(j+1)*block_size] = ap_list[i][j].get()
 
             await ts
- 
+
             if time_zeros:
                 zerofy_start = time.perf_counter()
                 computed_L_cupy = cp.tril(cp.array(ap))
