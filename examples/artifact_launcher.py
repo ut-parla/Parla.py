@@ -10,12 +10,6 @@ import re
 # Helper functions
 ######
 
-def parse_magma_times(output):
-    output = str(output)
-    prog = re.findall(r"\([ ]*\d+\.\d+\)", output)
-    result = prog[-1]
-    result = result.strip("()").strip()
-    return result
 
 def parse_times(output):
     times = []
@@ -35,8 +29,27 @@ def parse_cublas_times(output):
     result = result.strip()
     return result
 
+def parse_synthetic_times(output):
+    output = str(output)
+    prog = re.findall(r"Graph(.*)\\r\\nParla", output)
+    times = []
+    for result in prog:
+        p = re.findall(r"Median = \d+\.\d+", result)
+        r = p[-1]
+        p = re.findall(r"\d+\.\d+", r)
+        r = p[-1]
+        r = r.strip()
+        times.append(r)
+    if len(times) > 1:
+        return times
+    return times[0]
 
-
+def parse_magma_times(output):
+    output = str(output)
+    prog = re.findall(r"\([ ]*\d+\.\d+\)", output)
+    result = prog[-1]
+    result = result.strip("()").strip()
+    return result
 
 #######
 # Define functions to gather each result (per figure, per app)
