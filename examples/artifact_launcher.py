@@ -26,6 +26,15 @@ def parse_times(output):
     return times
 
 
+def parse_cublas_times(output):
+    output = str(output)
+    prog = re.findall(r"T:[ ]*\d+\.\d+", output)
+    result = prog[-1]
+    prog = re.findall(r"\d+\.\d+", result)
+    result = prog[-1]
+    result = result.strip()
+    return result
+
 
 
 
@@ -143,6 +152,34 @@ def run_dask_cholesky_20_gpu(gpu_list):
 def run_jacobi(gpu_list):
     pass
 
+#Figure 10: Matmul 32K Magma
+def run_matmul_cublas(gpu_list, timeout):
+
+    #Put testing directory on PATH
+    cublasmg_root = os.environ.get("CUBLASMG_ROOT")
+    cudamg_root = os.environ.get("CUDAMG_ROOT")
+    if not cublasmg_root:
+        raise Exception("CUBLASMG_ROOT not set")
+    if not cudamg_root:
+        raise Exception("CUDAMG_ROOT not set")
+
+    os.environ["LD_LIBRARY_PATH"] = cudamg_root+"/lib/"+":"+os.environ.get("LD_LIBRARY_PATH")
+    os.environ["LD_LIBRARY_PATH"] = cublasmg_root+"/lib/"+":"+os.environ.get("LD_LIBRARY_PATH")
+    os.environ["PATH"] = cublasmg_root+"/samples/"+":"+os.environ.get("PATH")
+
+    output_dict = {}
+    #Loop over number of GPUs in each subtest
+    for n_gpus in gpu_list:
+        command = f"./{n_gpus}gpuGEMM.exe"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_cublas_times(output)
+        print(f"\t    {n_gpus} GPUs: {times}")
+        output_dict[n_gpus] = times
+
+    return output_dict
 
 #Figure 10: Matmul
 def run_matmul(gpu_list, timeout):
