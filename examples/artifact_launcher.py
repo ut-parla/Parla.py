@@ -2,10 +2,20 @@ import os
 import sys
 import argparse
 import pexpect as pe
+import re
+
+
 
 ######
 # Helper functions
 ######
+
+def parse_magma_times(output):
+    output = str(output)
+    prog = re.findall(r"\([ ]*\d+\.\d+\)", output)
+    result = prog[-1]
+    result = result.strip("()").strip()
+    return result
 
 def parse_times(output):
     times = []
@@ -35,6 +45,29 @@ def run_test(gpu_list, timeout):
         assert(output[1] == 0)
         #Parse output
         times = parse_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        output_dict[n_gpus] = times
+
+    return output_dict
+
+#Figure 10: Cholesky 28K Magma
+def run_cholesky_magma(gpu_list, timeout):
+
+    #Put testing directory on PATH
+    magma_root = os.environ.get("MAGMA_ROOT")
+    if not magma_root:
+        raise Exception("MAGMA_ROOT not set")
+    os.environ["PATH"] = magma_root+"/testing/"+":"+os.environ.get("PATH")
+
+    output_dict = {}
+    #Loop over number of GPUs in each subtest
+    for n_gpus in gpu_list:
+        command = f"./testing_dpotrf_mgpu --ngpu {n_gpus} -N 28000"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_magma_times(output)
         print(f"\t    {n_gpus} GPUs: {times}")
         output_dict[n_gpus] = times
 
