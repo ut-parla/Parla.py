@@ -19,6 +19,13 @@ def parse_times(output):
             times.append(float(line.split()[-1].strip()))
     return times
 
+def parse_nbody_times(output):
+    times = []
+    for line in output.splitlines():
+        line = str(line).strip('\'')
+        if "end-to-end     ," in line:
+            times.append(float(line.split(",")[-1].strip()))
+    return times
 
 def parse_cublas_times(output):
     output = str(output)
@@ -50,6 +57,7 @@ def parse_magma_times(output):
     result = prog[-1]
     result = result.strip("()").strip()
     return result
+
 
 #######
 # Define functions to gather each result (per figure, per app)
@@ -105,10 +113,21 @@ def run_cholesky_28(gpu_list, timeout):
 
     sub_dict = {}
 
+    # Generate input file
+    if not os.path.exists("examples/cholesky/chol_28000.npy"):
+
+        print("\t  --Making input matrix...")
+        command = f"python examples/cholesky/make_cholesky_input.py -n 28000 -output examples/cholesky/chol_28000.npy"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        print("\t  --Generated input matrix.")
+
+
     print("\t   [Running Cholesky 28K (2Kx2K Blocks) 1/3] Manual Movement, User Placement")
     #Test 1: Manual Movement, User Placement
     for n_gpus in gpu_list:
-        command = f"python examples/cholesky/blocked_cholesky_manual.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14"
+        command = f"python examples/cholesky/blocked_cholesky_manual.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14 -matrix examples/cholesky/chol_28000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -123,7 +142,7 @@ def run_cholesky_28(gpu_list, timeout):
     print("\t   [Running Cholesky 28K (2Kx2K Blocks) 2/3] Automatic Movement, User Placement")
     sub_dict = {}
     for n_gpus in gpu_list:
-        command = f"python examples/cholesky/blocked_cholesky_automatic.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14"
+        command = f"python examples/cholesky/blocked_cholesky_automatic.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14 -matrix examples/cholesky/chol_28000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -166,8 +185,54 @@ def run_dask_cholesky_20_gpu(gpu_list):
     pass
 
 #Figure 10: Jacobi
-def run_jacobi(gpu_list):
-    pass
+def run_jacobi(gpu_list, timeout):
+    output_dict = {}
+
+    sub_dict = {}
+
+    print("\t   [Running 1/3] Manual Movement, User Placement")
+    #Test 1: Manual Movement, User Placement
+    for n_gpus in gpu_list:
+        command = f"python examples/jacobi/jacobi_manual.py -ngpus {n_gpus} -fixed 1"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+
+    output_dict["m,u"] = sub_dict
+
+    #Test 2: Automatic Movement, User Placement
+    print("\t   [Running 2/3] Automatic Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/jacobi/jacobi_automatic.py -ngpus {n_gpus} -fixed 1"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,u"] = sub_dict
+
+    #Test 3: Automatic Movement, Policy Placement
+    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/jacobi/jacobi_automatic.py -ngpus {n_gpus} -fixed 0"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,p"] = sub_dict
+
+    return output_dict
 
 #Figure 10: Matmul 32K Magma
 def run_matmul_cublas(gpu_list, timeout):
@@ -255,8 +320,60 @@ def run_blr(gpu_list):
     pass
 
 #Figure 10: NBody
-def run_nbody(gpu_list):
-    pass
+def run_nbody(gpu_list, timeout):
+    output_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/nbody/python-bh/input/n10M.txt"):
+        command = f"python examples/nbody/python-bh/bin/gen_input.py normal 10000000 examples/nbody/python-bh/input/n10M.txt"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+
+    # Test 1: Manual Movement, User Placement
+    print("\t   [Running 1/3] Manual Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}_eager_sched.ini"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_nbody_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+
+        output_dict["m,u"] = sub_dict
+
+    # Test 2: Automatic Movement, User Placement
+    print("\t   [Running 2/3] Automatic Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}_eager.ini"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_nbody_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,u"] = sub_dict
+
+    # Test 3: Automatic Movement, Policy Placement
+    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}.ini"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_nbody_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,p"] = sub_dict
+
+    return output_dict
 
 #Figure 10: Synthetic Reduction
 def run_reduction(gpu_list):
@@ -313,7 +430,7 @@ def run_prefetching_test(gpu_list, timeout):
     idx = 0
     print("\t   [Running 1/2] Manual Movement")
     for data_size in data_sizes:
-        command = f"python synthetic/run.py -graph synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size}"
+        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -328,7 +445,7 @@ def run_prefetching_test(gpu_list, timeout):
     idx = 0
     print("\t   [Running 2/2] Automatic Movement")
     for data_size in data_sizes:
-        command = f"python synthetic/run.py -graph synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size}"
+        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -350,7 +467,7 @@ def run_independent_parla_scaling(thread_list, timeout):
     for size in sizes:
         thread_dict = {}
         for thread in thread_list:
-            command = "python synthetic/run.py -graph synthetic/artifact/graphs/independent_1000.gph -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            command = "python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/independent_1000.gph -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             assert(output[1] == 0)
@@ -370,7 +487,7 @@ def run_independent_dask_thread_scaling(thread_list, timeout):
     for size in sizes:
         thread_dict = {}
         for thread in thread_list:
-            command = "python synthetic/artifact/scripts/run_dask_thread.py -workers ${threads} -size ${size} -n ${n}"
+            command = "python examples/synthetic/artifact/scripts/run_dask_thread.py -workers ${threads} -size ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             assert(output[1] == 0)
@@ -390,7 +507,7 @@ def run_independent_dask_process_scaling(thread_list, timeout):
     for size in sizes:
         thread_dict = {}
         for thread in thread_list:
-            command = "python synthetic/artifact/scripts/run_dask_process.py -workers ${threads} -size ${size} -n ${n}"
+            command = "python examples/synthetic/artifact/scripts/run_dask_process.py -workers ${threads} -size ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             assert(output[1] == 0)
@@ -405,9 +522,8 @@ def run_independent_dask_process_scaling(thread_list, timeout):
 def run_GIL_test():
     pass
 
-test = [run_test]
-#figure_10 = [run_cholesky_28, run_jacobi, run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
-figure_10 = [run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
+test = [run_cholesky_28]
+figure_10 = [run_jacobi, run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
 figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 figure_15 = [run_batched_cholesky]
 figure_12 = [run_prefetching_test]
