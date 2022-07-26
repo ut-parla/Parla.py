@@ -266,8 +266,38 @@ def run_serial():
     pass
 
 #Figure 15: Batched Cholesky Variants
-def run_batched_cholesky():
-    pass
+def run_batched_cholesky(gpu_list, timeout):
+    cpu_dict = {}
+
+    print("\t   [Running 1/2] CPU Support")
+    sub_dict = {}
+    l = [0].extent(gpu_list)
+    for n_gpus in l:
+        command = f"python examples/variants/batched_cholesy.py -ngpus {n_gpus} -use_cpu 1"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    cpu_dict[1] = sub_dict
+
+    print("\t   [Running 2/2] GPU Only")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/variants/batched_cholesy.py -ngpus {n_gpus} -use_cpu 0"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    cpu_dict[0] = sub_dict
+
+    return cpu_dict
+
 
 #Figure 12: Prefetching Plot
 def run_prefetching_test():
