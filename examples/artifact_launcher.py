@@ -177,12 +177,60 @@ def run_cholesky_20_gpu(gpu_list):
     pass
 
 #Figure 13: Dask Cholesky (CPU)
-def run_dask_cholesky_20_host(cores_list):
-    pass
+def run_dask_cholesky_20_host(cores_list, timeout):
+    output_dict = {}
+
+    sub_dict = {}
+
+    worker_list = [ 1, 2, 4 ]
+    # Per-thread per each worker.
+    perthread_list = [ [ 1 ], [ 1 ], [ 1, 2, 4 ] ]
+    print("\t   Running Dask CPU:")
+    #Test 1: Manual Movement, User Placement
+    for wi in range(len(worker_list)):
+        n_workers = worker_list[wi]
+        for pt in perthread_list[wi]:
+            command = f"python examples/cholesky/dask/dask_cpu_cholesky.py -workers {n_workers} -perthread {pt}"
+            print(command, "...")
+            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            #Make sure no errors or timeout were thrown
+            assert(output[1] == 0)
+            #Parse output
+            times = parse_times(output[0])
+            n_threads = n_workers * pt
+            print(f"\t\t    {n_threads} CPU cores: {times}")
+            sub_dict[n_workers] = times
+    output_dict["dask-cpu"] = sub_dict
+    return output_dict
 
 #Figure 13: Dask Cholesky (GPU)
-def run_dask_cholesky_20_gpu(gpu_list):
-    pass
+def run_dask_cholesky_20_gpu(gpu_list, timeout):
+    output_dict = {}
+
+    sub_dict = {}
+
+    gpu_list = [ 1, 2, 3, 4 ]
+    print("\t   Running Dask GPU:")
+    #Test 1: Manual Movement, User Placement
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        os.environ['UCX_TLS'] = "cuda,cuda_copy,cuda_ipc,tpc"
+        command = f"python examples/cholesky/dask/dask_gpu_cholesky.py"
+        print("Current running:", command)
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        print(output)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["dask-gpu"] = sub_dict
+    return output_dict
+
 
 #Figure 10: Jacobi
 def run_jacobi(gpu_list, timeout):
@@ -524,7 +572,9 @@ def run_GIL_test():
 
 test = [run_cholesky_28]
 figure_10 = [run_jacobi, run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
-figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
+#figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
+figure_13 = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
+#figure_13 = [run_dask_cholesky_20_gpu]
 figure_15 = [run_batched_cholesky]
 figure_12 = [run_prefetching_test]
 

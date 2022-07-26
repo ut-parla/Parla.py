@@ -365,12 +365,6 @@ class Task:
                 # Run the task and assign the new task state
                 try:
                     assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(self._state, self.taskid)
-                    # TODO(lhc): This assumes Parla only has two devices.
-                    #            The reason why I am trying to do is importing
-                    #            Parla's cuda.py is expensive.
-                    #            Whenever we import cuda.py, cupy compilation
-                    #            is invoked. We should remove or avoid that.
-
                     # First, create device/stream/event instances.
                     # Second, gets the created event instance.
                     # Third, it scatters the event to dependents who wait for

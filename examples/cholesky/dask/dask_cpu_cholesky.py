@@ -116,8 +116,8 @@ if __name__ == '__main__':
         #print(cluster)
         client = Client(cluster)
         if args.matrix is None:
-            n = 200
-            block_size = 20
+            n = 20000
+            block_size = 2000
             np.random.seed(10)
             a = np.random.rand(n, n)
             a = a @ a.T
