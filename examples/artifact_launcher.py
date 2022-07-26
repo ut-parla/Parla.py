@@ -303,8 +303,9 @@ def run_batched_cholesky(gpu_list, timeout):
 def run_prefetching_test(gpu_list, timeout):
     auto_dict = {}
     data_sizes = [2, 4, 40]
-
+    data_map = ["32MB", "64MB", "640MB"]
     sub_dict = {}
+    idx = 0
     print("\t   [Running 1/2] Manual Movement")
     for data_size in data_sizes:
         command = f"python synthetic/run.py -graph synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size}"
@@ -313,11 +314,13 @@ def run_prefetching_test(gpu_list, timeout):
         assert(output[1] == 0)
         #Parse output
         times = parse_synthetic_times(output[0])
-        print(f"\t  Time: {times}")
+        print(f"\t {data_map[idx]} Data: {times}")
         sub_dict[data_size] = times
+        idx += 1
     auto_dict["m"] = sub_dict
 
     sub_dict = {}
+    idx = 0
     print("\t   [Running 2/2] Automatic Movement")
     for data_size in data_sizes:
         command = f"python synthetic/run.py -graph synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size}"
@@ -326,8 +329,9 @@ def run_prefetching_test(gpu_list, timeout):
         assert(output[1] == 0)
         #Parse output
         times = parse_synthetic_times(output[0])
-        print(f"\t  Time: {times}")
+        print(f"\t {data_map[idx]} Data: {times}")
         sub_dict[data_size] = times
+        idx += 1
     auto_dict["a"] = sub_dict
 
     return auto_dict
