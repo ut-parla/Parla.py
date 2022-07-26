@@ -1,6 +1,7 @@
 import random
 import os
 import mkl
+import argparse
 
 threads = 6
 mkl.set_num_threads(threads)
@@ -9,8 +10,26 @@ os.environ["OMP_NUM_THREADS"] = str(threads)
 os.environ["OPENBLAS_NUM_THREADS"] = str(threads)
 os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)
 
-import numpy as np
+parser = argparse.ArgumentParser()
+parser.add_argument('-n', type=int, default=20, help='number of matrices')
+parser.add_argument('--ngpus', type=int, default=0, help='number of gpus')
+parser.add_argument('-m_cpu', type=int, default=2000, help='number of rows for CPU task')
+parser.add_argument('-m_gpu', type=int, default=2000, help='number of rows for GPU task ')
+args = parser.parse_args()
 
+cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
+
+if cuda_visible_devices is None:
+    print("CUDA_VISIBLE_DEVICES is not set. Assuming 0-3")
+    cuda_visible_devices = list(range(4))
+else:
+    cuda_visible_devices = cuda_visible_devices.strip().split(',')
+    cuda_visible_devices = list(map(int, cuda_visible_devices))
+
+gpus = cuda_visible_devices[:args.ngpus]
+os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpus))
+
+import numpy as np
 from numba import jit, float64
 import math
 import time
@@ -27,17 +46,7 @@ from cupy.cuda import cublas
 from cupy.cuda import device
 
 from parla.parray import asarray_batch
-
-import argparse
-
 from parla.array import clone_here
-
-parser = argparse.ArgumentParser()
-parser.add_argument('-n', type=int, default=20, help='number of matrices')
-parser.add_argument('--ngpus', type=int, default=0, help='number of gpus')
-parser.add_argument('-m_cpu', type=int, default=2000, help='number of rows for CPU task')
-parser.add_argument('-m_gpu', type=int, default=2000, help='number of rows for GPU task ')
-args = parser.parse_args()
 
 n_gpus = cp.cuda.runtime.getDeviceCount()
 
