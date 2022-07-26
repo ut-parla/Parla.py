@@ -370,7 +370,7 @@ def run_independent_dask_thread_scaling(thread_list, timeout):
     for size in sizes:
         thread_dict = {}
         for thread in thread_list:
-            command = "python synthetic/artifact/scripts/run_dask_thread.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            command = "python synthetic/artifact/scripts/run_dask_thread.py -workers ${threads} -size ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             assert(output[1] == 0)
@@ -390,7 +390,7 @@ def run_independent_dask_process_scaling(thread_list, timeout):
     for size in sizes:
         thread_dict = {}
         for thread in thread_list:
-            command = "python synthetic/artifact/scripts/run_dask_process.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            command = "python synthetic/artifact/scripts/run_dask_process.py -workers ${threads} -size ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             assert(output[1] == 0)
