@@ -11,8 +11,9 @@ os.environ["OPENBLAS_NUM_THREADS"] = str(threads)
 os.environ["VECLIB_MAXIMUM_THREADS"] = str(threads)
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-n', type=int, default=20, help='number of matrices')
-parser.add_argument('--ngpus', type=int, default=0, help='number of gpus')
+parser.add_argument('-n', type=int, default=300, help='number of matrices')
+parser.add_argument('-use_cpu', type=int, default=1, help='Use CPU?')
+parser.add_argument('-ngpus', type=int, default=0, help='number of gpus')
 parser.add_argument('-m_cpu', type=int, default=2000, help='number of rows for CPU task')
 parser.add_argument('-m_gpu', type=int, default=2000, help='number of rows for GPU task ')
 args = parser.parse_args()
@@ -26,7 +27,8 @@ else:
     cuda_visible_devices = cuda_visible_devices.strip().split(',')
     cuda_visible_devices = list(map(int, cuda_visible_devices))
 
-gpus = cuda_visible_devices[:args.ngpus]
+gpus = cuda_visible_devices[:max(1, args.ngpus)]
+
 os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(map(str, gpus))
 
 import numpy as np
@@ -48,7 +50,11 @@ from cupy.cuda import device
 from parla.parray import asarray_batch
 from parla.array import clone_here
 
-n_gpus = cp.cuda.runtime.getDeviceCount()
+
+if args.ngpus > 0:
+    n_gpus = cp.cuda.runtime.getDeviceCount()
+else:
+    n_gpus = 0
 
 np.random.seed(10)
 cp.random.seed(10)
@@ -79,7 +85,7 @@ def main():
         #warmup
         for i in range(n_gpus):
             with cp.cuda.Device(i):
-                a = cp.random.randn(args.mg, args.mg)
+                a = cp.random.randn(args.m_gpu, args.m_gpu)
                 A = a @ a.T + 1
                 B = cp.linalg.cholesky(A)
                 cp.cuda.Device(i).synchronize()
@@ -96,15 +102,18 @@ def main():
 
         cp.cuda.Device().synchronize()
         random.shuffle(matrix_list)
-
+        print("Finished setting up matrices.")
         start_external_t = time.perf_counter()
         TS = TaskSpace("TaskSpace")
         i = 0
         for A in matrix_list:
             i+=1
 
-            loc=[cpu]
+            loc = []
+            if args.use_cpu:
+                loc.extend([cpu])
             loc.extend([gpu(i) for i in range(n_gpus)])
+
             load=0.5
 
             @spawn(TS[i], placement=loc, vcus=load)
@@ -112,7 +121,6 @@ def main():
                 start_t = time.perf_counter()
                 B = potrf(A)
                 end_t = time.perf_counter()
-                print(A.shape, type(B), end_t - start_t, flush=True)
 
         await TS
         end_external_t = time.perf_counter()
@@ -121,4 +129,3 @@ def main():
 if __name__ == '__main__':
     with Parla():
         main()
-
