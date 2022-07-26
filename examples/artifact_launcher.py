@@ -112,10 +112,18 @@ def run_cholesky_28(gpu_list, timeout):
 
     sub_dict = {}
 
+    # Generate input file
+    if not os.path.exists("examples/cholesky/chol_28000.npy"):
+        command = f"python make_cholesky_input.py -n 28000 -output examples/cholesky/chol_28000.npy"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+
+
     print("\t   [Running Cholesky 28K (2Kx2K Blocks) 1/3] Manual Movement, User Placement")
     #Test 1: Manual Movement, User Placement
     for n_gpus in gpu_list:
-        command = f"python examples/cholesky/blocked_cholesky_manual.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14"
+        command = f"python examples/cholesky/blocked_cholesky_manual.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14 -matrix examples/cholesky/chol_28000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -130,7 +138,7 @@ def run_cholesky_28(gpu_list, timeout):
     print("\t   [Running Cholesky 28K (2Kx2K Blocks) 2/3] Automatic Movement, User Placement")
     sub_dict = {}
     for n_gpus in gpu_list:
-        command = f"python examples/cholesky/blocked_cholesky_automatic.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14"
+        command = f"python examples/cholesky/blocked_cholesky_automatic.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14 -matrix examples/cholesky/chol_28000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -418,7 +426,7 @@ def run_prefetching_test(gpu_list, timeout):
     idx = 0
     print("\t   [Running 1/2] Manual Movement")
     for data_size in data_sizes:
-        command = f"python synthetic/run.py -graph synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size}"
+        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -433,7 +441,7 @@ def run_prefetching_test(gpu_list, timeout):
     idx = 0
     print("\t   [Running 2/2] Automatic Movement")
     for data_size in data_sizes:
-        command = f"python synthetic/run.py -graph synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size}"
+        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -455,7 +463,7 @@ def run_independent_parla_scaling(thread_list, timeout):
     for size in sizes:
         thread_dict = {}
         for thread in thread_list:
-            command = "python synthetic/run.py -graph synthetic/artifact/graphs/independent_1000.gph -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            command = "python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/independent_1000.gph -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             assert(output[1] == 0)
@@ -475,7 +483,7 @@ def run_independent_dask_thread_scaling(thread_list, timeout):
     for size in sizes:
         thread_dict = {}
         for thread in thread_list:
-            command = "python synthetic/artifact/scripts/run_dask_thread.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            command = "python examples/synthetic/artifact/scripts/run_dask_thread.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             assert(output[1] == 0)
@@ -495,7 +503,7 @@ def run_independent_dask_process_scaling(thread_list, timeout):
     for size in sizes:
         thread_dict = {}
         for thread in thread_list:
-            command = "python synthetic/artifact/scripts/run_dask_process.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            command = "python examples/synthetic/artifact/scripts/run_dask_process.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             assert(output[1] == 0)
