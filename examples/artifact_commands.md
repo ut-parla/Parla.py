@@ -40,4 +40,11 @@ python jacobi_manual.py -trials 1 -fixed 1
 
 # NBody
 
+## Automatic Movement, Policy Placement
+python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla[NUM GPUs]_eager_sched.ini
 
+## Automatic Movement, User Placement
+python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla[NUM GPUs]_eager.ini
+
+## Manual Movement, User Placement
+python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla[NUM GPUs].ini

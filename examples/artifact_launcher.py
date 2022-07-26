@@ -19,6 +19,13 @@ def parse_times(output):
             times.append(float(line.split()[-1].strip()))
     return times
 
+def parse_nbody_times(output):
+    times = []
+    for line in output.splitlines():
+        line = str(line).strip('\'')
+        if "end-to-end     ," in line:
+            times.append(float(line.split(",")[-1].strip()))
+    return times
 
 def parse_cublas_times(output):
     output = str(output)
@@ -60,6 +67,8 @@ def run_test(gpu_list, timeout):
     output_dict = {}
 
     #Loop over number of GPUs in each subtest
+
+    print("\t   [Running Test Script 1/1]")
     for n_gpus in gpu_list:
         command = f"python test_script.py -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
@@ -82,6 +91,8 @@ def run_cholesky_magma(gpu_list, timeout):
     os.environ["PATH"] = magma_root+"/testing/"+":"+os.environ.get("PATH")
 
     output_dict = {}
+
+    print("\t   [Running Cholesky 28K (MAGMA) 1/1]")
     #Loop over number of GPUs in each subtest
     for n_gpus in gpu_list:
         command = f"./testing_dpotrf_mgpu --ngpu {n_gpus} -N 28000"
@@ -182,6 +193,7 @@ def run_matmul_cublas(gpu_list, timeout):
 
     output_dict = {}
     #Loop over number of GPUs in each subtest
+    print("\t   [Running Matmul 32K (MAGMA) 1/1]")
     for n_gpus in gpu_list:
         command = f"./{n_gpus}gpuGEMM.exe"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
@@ -250,8 +262,60 @@ def run_blr(gpu_list):
     pass
 
 #Figure 10: NBody
-def run_nbody(gpu_list):
-    pass
+def run_nbody(gpu_list, timeout):
+    output_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/nbody/python-bh/input/n10M.txt"):
+        command = f"python examples/nbody/python-bh/bin/gen_input.py normal 10000000 examples/nbody/python-bh/input/n10M.txt"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+
+    # Test 1: Manual Movement, User Placement
+    print("\t   [Running 1/3] Manual Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}_eager_sched.ini"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_nbody_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+
+        output_dict["m,u"] = sub_dict
+
+    # Test 2: Automatic Movement, User Placement
+    print("\t   [Running 2/3] Automatic Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}_eager.ini"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_nbody_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,u"] = sub_dict
+
+    # Test 3: Automatic Movement, Policy Placement
+    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}.ini"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_nbody_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,p"] = sub_dict
+
+    return output_dict
 
 #Figure 10: Synthetic Reduction
 def run_reduction(gpu_list):
@@ -335,6 +399,66 @@ def run_prefetching_test(gpu_list, timeout):
     auto_dict["a"] = sub_dict
 
     return auto_dict
+
+#Figure 14: Independent Parla Scaling
+def run_independent_parla_scaling(thread_list, timeout):
+    n = 1000
+    #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
+    sizes = [800, 1600]
+    size_dict = {}
+    for size in sizes:
+        thread_dict = {}
+        for thread in thread_list:
+            command = "python synthetic/run.py -graph synthetic/artifact/graphs/independent_1000.gph -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            #Make sure no errors or timeout were thrown
+            assert(output[1] == 0)
+            #Parse output
+            times = parse_synthetic_times(output[0])
+            print(f"\t{size} ms: {thread} threads: {times}")
+            thread_dict[thread] = times
+        size_dict[size] = thread_dict
+    return size_dict
+
+#Figure 14: Independnet Dask Scaling
+def run_independent_dask_thread_scaling(thread_list, timeout):
+    n = 1000
+    #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
+    sizes = [800, 1600]
+    size_dict = {}
+    for size in sizes:
+        thread_dict = {}
+        for thread in thread_list:
+            command = "python synthetic/artifact/scripts/run_dask_thread.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            #Make sure no errors or timeout were thrown
+            assert(output[1] == 0)
+            #Parse output
+            times = parse_synthetic_times(output[0])
+            print(f"\t{size} ms: {thread} threads: {times}")
+            thread_dict[thread] = times
+        size_dict[size] = thread_dict
+    return size_dict
+
+#Figure 14: Independnet Dask Scaling
+def run_independent_dask_process_scaling(thread_list, timeout):
+    n = 1000
+    #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
+    sizes = [800, 1600]
+    size_dict = {}
+    for size in sizes:
+        thread_dict = {}
+        for thread in thread_list:
+            command = "python synthetic/artifact/scripts/run_dask_process.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            #Make sure no errors or timeout were thrown
+            assert(output[1] == 0)
+            #Parse output
+            times = parse_synthetic_times(output[0])
+            print(f"\t{size} ms: {thread} threads: {times}")
+            thread_dict[thread] = times
+        size_dict[size] = thread_dict
+    return size_dict
 
 #Figure 14: GIL test
 def run_GIL_test():
