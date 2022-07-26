@@ -300,8 +300,37 @@ def run_batched_cholesky(gpu_list, timeout):
 
 
 #Figure 12: Prefetching Plot
-def run_prefetching_test():
-    pass
+def run_prefetching_test(gpu_list, timeout):
+    auto_dict = {}
+    data_sizes = [2, 4, 40]
+
+    sub_dict = {}
+    print("\t   [Running 1/2] Manual Movement")
+    for data_size in data_sizes:
+        command = f"python synthetic/run.py -graph synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_synthetic_times(output[0])
+        print(f"\t  Time: {times}")
+        sub_dict[data_size] = times
+    auto_dict["m"] = sub_dict
+
+    sub_dict = {}
+    print("\t   [Running 2/2] Automatic Movement")
+    for data_size in data_sizes:
+        command = f"python synthetic/run.py -graph synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_synthetic_times(output[0])
+        print(f"\t  Time: {times}")
+        sub_dict[data_size] = times
+    auto_dict["a"] = sub_dict
+
+    return auto_dict
 
 #Figure 14: GIL test
 def run_GIL_test():
