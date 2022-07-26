@@ -146,12 +146,11 @@ def cupy_trsm_wrapper(a, b):
     trans = cublas.CUBLAS_OP_T
     side = cublas.CUBLAS_SIDE_RIGHT
 
-    #trans = cublas.CUBLAS_OP_T
-    #side = cublas.CUBLAS_SIDE_LEFT
-
     diag = cublas.CUBLAS_DIAG_NON_UNIT
     m, n = (b.side, 1) if b.ndim == 1 else b.shape
-    trsm(cublas_handle, side, uplo, trans, diag, m, n, 1.0, a.data.ptr, m, b.data.ptr, m)
+
+    one = np.array(1, dtype=a.dtype)
+    trsm(cublas_handle, side, uplo, trans, diag, m, n, one.ctypes.data, a.data.ptr, m, b.data.ptr, m)
     return b
 
 @ltriang_solve.variant(gpu)
