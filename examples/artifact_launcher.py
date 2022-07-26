@@ -60,6 +60,8 @@ def run_test(gpu_list, timeout):
     output_dict = {}
 
     #Loop over number of GPUs in each subtest
+
+    print("\t   [Running Test Script 1/1]")
     for n_gpus in gpu_list:
         command = f"python test_script.py -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
@@ -82,6 +84,8 @@ def run_cholesky_magma(gpu_list, timeout):
     os.environ["PATH"] = magma_root+"/testing/"+":"+os.environ.get("PATH")
 
     output_dict = {}
+
+    print("\t   [Running Cholesky 28K (MAGMA) 1/1]")
     #Loop over number of GPUs in each subtest
     for n_gpus in gpu_list:
         command = f"./testing_dpotrf_mgpu --ngpu {n_gpus} -N 28000"
@@ -182,6 +186,7 @@ def run_matmul_cublas(gpu_list, timeout):
 
     output_dict = {}
     #Loop over number of GPUs in each subtest
+    print("\t   [Running Matmul 32K (MAGMA) 1/1]")
     for n_gpus in gpu_list:
         command = f"./{n_gpus}gpuGEMM.exe"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
@@ -335,6 +340,66 @@ def run_prefetching_test(gpu_list, timeout):
     auto_dict["a"] = sub_dict
 
     return auto_dict
+
+#Figure 14: Independent Parla Scaling
+def run_independent_parla_scaling(thread_list, timeout):
+    n = 1000
+    #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
+    sizes = [800, 1600]
+    size_dict = {}
+    for size in sizes:
+        thread_dict = {}
+        for thread in thread_list:
+            command = "python synthetic/run.py -graph synthetic/artifact/graphs/independent_1000.gph -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            #Make sure no errors or timeout were thrown
+            assert(output[1] == 0)
+            #Parse output
+            times = parse_synthetic_times(output[0])
+            print(f"\t{size} ms: {thread} threads: {times}")
+            thread_dict[thread] = times
+        size_dict[size] = thread_dict
+    return size_dict
+
+#Figure 14: Independnet Dask Scaling
+def run_independent_dask_thread_scaling(thread_list, timeout):
+    n = 1000
+    #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
+    sizes = [800, 1600]
+    size_dict = {}
+    for size in sizes:
+        thread_dict = {}
+        for thread in thread_list:
+            command = "python synthetic/artifact/scripts/run_dask_thread.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            #Make sure no errors or timeout were thrown
+            assert(output[1] == 0)
+            #Parse output
+            times = parse_synthetic_times(output[0])
+            print(f"\t{size} ms: {thread} threads: {times}")
+            thread_dict[thread] = times
+        size_dict[size] = thread_dict
+    return size_dict
+
+#Figure 14: Independnet Dask Scaling
+def run_independent_dask_process_scaling(thread_list, timeout):
+    n = 1000
+    #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
+    sizes = [800, 1600]
+    size_dict = {}
+    for size in sizes:
+        thread_dict = {}
+        for thread in thread_list:
+            command = "python synthetic/artifact/scripts/run_dask_process.py -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            #Make sure no errors or timeout were thrown
+            assert(output[1] == 0)
+            #Parse output
+            times = parse_synthetic_times(output[0])
+            print(f"\t{size} ms: {thread} threads: {times}")
+            thread_dict[thread] = times
+        size_dict[size] = thread_dict
+    return size_dict
 
 #Figure 14: GIL test
 def run_GIL_test():
