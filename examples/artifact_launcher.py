@@ -173,8 +173,54 @@ def run_dask_cholesky_20_gpu(gpu_list):
     pass
 
 #Figure 10: Jacobi
-def run_jacobi(gpu_list):
-    pass
+def run_jacobi(gpu_list, timeout):
+    output_dict = {}
+
+    sub_dict = {}
+
+    print("\t   [Running 1/3] Manual Movement, User Placement")
+    #Test 1: Manual Movement, User Placement
+    for n_gpus in gpu_list:
+        command = f"python examples/jacobi/jacobi_manual.py -ngpus {n_gpus} -fixed 1"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+
+    output_dict["m,u"] = sub_dict
+
+    #Test 2: Automatic Movement, User Placement
+    print("\t   [Running 2/3] Automatic Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/jacobi/jacobi_automatic.py -ngpus {n_gpus} -fixed 1"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,u"] = sub_dict
+
+    #Test 3: Automatic Movement, Policy Placement
+    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/jacobi/jacobi_automatic.py -ngpus {n_gpus} -fixed 0"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,p"] = sub_dict
+
+    return output_dict
 
 #Figure 10: Matmul 32K Magma
 def run_matmul_cublas(gpu_list, timeout):
@@ -465,8 +511,7 @@ def run_GIL_test():
     pass
 
 test = [run_test]
-#figure_10 = [run_cholesky_28, run_jacobi, run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
-figure_10 = [run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
+figure_10 = [run_jacobi, run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
 figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 figure_15 = [run_batched_cholesky]
 figure_12 = [run_prefetching_test]
