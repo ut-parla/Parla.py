@@ -27,6 +27,14 @@ def parse_nbody_times(output):
             times.append(float(line.split(",")[-1].strip()))
     return times
 
+def parse_blr_times(output):
+    times = []
+    for line in output.splitlines():
+        line = str(line).strip('\'')
+        if "total" in line:
+            times.append(float(line.split(",")[-1].strip()))
+    return times
+
 def parse_cublas_times(output):
     output = str(output)
     prog = re.findall(r"T:[ ]*\d+\.\d+", output)
@@ -82,7 +90,7 @@ def run_test(gpu_list, timeout):
 
     return output_dict
 
-#Figure 10: Cholesky 28K Magma
+#Figure 9: Cholesky 28K Magma
 def run_cholesky_magma(gpu_list, timeout):
 
     #Put testing directory on PATH
@@ -439,9 +447,129 @@ def run_matmul(gpu_list, timeout):
 
     return output_dict
 
-#Figure 10: BLR
-def run_blr(gpu_list):
-    pass
+
+#Figure 10: blr
+def run_blr_threads(gpu_list, timeout):
+
+    output_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/blr/inputs"):
+        print("\t  --Making input directory...")
+        os.makedirs("examples/blr/inputs")
+        print("\t  --Made input directory.")
+
+    if (not os.path.exists("examples/blr/inputs/matrix_10k.npy")) or (not os.path.exists("examples/blr/inputs/vector_10k.npy")):
+        print("\t  --Making input matrix_10k...")
+        command = f"python examples/blr/app/main.py -mode gen -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        print("\t  --Generated input matrix_10k.")
+
+    # Test 1: Manual Movement, User Placement
+    print("\t   [Running 1/3] Manual Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement lazy -ngpus {n_gpus}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_blr_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+        output_dict["m,u"] = sub_dict
+
+    # Test 2: Automatic Movement, User Placement
+    print("\t   [Running 2/3] Automatic Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement eager -ngpus {n_gpus}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_blr_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+        output_dict["a,u"] = sub_dict
+
+    # Test 3: Automatic Movement, Policy Placement
+    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 0 -movement eager -ngpus {n_gpus}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_blr_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+        output_dict["a,p"] = sub_dict
+
+
+#Figure 10: blr
+def run_blr_parla(gpu_list, timeout):
+
+    output_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/blr/inputs"):
+        print("\t  --Making input directory...")
+        os.makedirs("examples/blr/inputs")
+        print("\t  --Made input directory.")
+
+    if (not os.path.exists("examples/blr/inputs/matrix_10k.npy")) or (not os.path.exists("examples/blr/inputs/vector_10k.npy")):
+        print("\t  --Making input matrix_10k...")
+        command = f"python examples/blr/app/main.py -mode gen -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        print("\t  --Generated input matrix_10k.")
+
+    # Test 1: Manual Movement, User Placement
+    print("\t   [Running 1/3] Manual Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement lazy -ngpus {n_gpus}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_blr_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+        output_dict["m,u"] = sub_dict
+
+    # Test 2: Automatic Movement, User Placement
+    print("\t   [Running 2/3] Automatic Movement, User Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement eager -ngpus {n_gpus}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_blr_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+        output_dict["a,u"] = sub_dict
+
+    # Test 3: Automatic Movement, Policy Placement
+    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
+    sub_dict = {}
+    for n_gpus in gpu_list:
+        command = f"python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 0 -movement eager -ngpus {n_gpus}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_blr_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+        output_dict["a,p"] = sub_dict
 
 #Figure 10: NBody
 def run_nbody(gpu_list, timeout):
@@ -545,7 +673,7 @@ def run_batched_cholesky(gpu_list, timeout):
     return cpu_dict
 
 
-#Figure 12: Prefetching Plot
+#Figure 11: Prefetching Plot
 def run_prefetching_test(gpu_list, timeout):
     auto_dict = {}
     data_sizes = [2, 4, 40]
@@ -646,8 +774,8 @@ def run_independent_dask_process_scaling(thread_list, timeout):
 def run_GIL_test():
     pass
 
-test = [run_cholesky_28]
-figure_10 = [run_jacobi, run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
+test = [run_blr_threads]
+figure_10 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
 figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 #figure_13 = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 #figure_13 = [run_cholesky_20_host]
