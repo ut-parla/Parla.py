@@ -682,7 +682,7 @@ def run_prefetching_test(gpu_list, timeout):
     idx = 0
     print("\t   [Running 1/2] Manual Movement")
     for data_size in data_sizes:
-        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size}"
+        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size} -reinit 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -697,7 +697,7 @@ def run_prefetching_test(gpu_list, timeout):
     idx = 0
     print("\t   [Running 2/2] Automatic Movement")
     for data_size in data_sizes:
-        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size}"
+        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size} -reinit 1 -loop 5"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         assert(output[1] == 0)
@@ -774,7 +774,7 @@ def run_independent_dask_process_scaling(thread_list, timeout):
 def run_GIL_test():
     pass
 
-test = [run_blr_threads]
+test = [run_prefetching_test]
 figure_10 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
 figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 #figure_13 = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
@@ -832,7 +832,8 @@ if __name__ == '__main__':
             print("\t ++Experiment {}/{}. Name: {}".format(i, total_tests, test.__name__))
             output_dict = test(ngpus, args.timeout)
             test_output[test.__name__] = output_dict
-            print("\t --Experiment {}/{} Completed. Output: {}".format(i, total_tests, output_dict))
+            #print("\t --Experiment {}/{} Completed. Output: {}".format(i, total_tests, output_dict))
+            print("\t --Experiment {}/{} Completed.)
             i += 1
         figure_output[figure] = test_output
         print(f"Collection for {figure} complete")
