@@ -1,9 +1,15 @@
 [submodule "examples/nbody"]
 	path = examples/nbody
-	url = https://github.com/ut-parla/barnes-hut.git
+    url = https://github.com/ut-parla/barnes-hut.git
+    branch = main
 [submodule "examples/synthetic"]
 	path = examples/synthetic
-	url = git@github.com:ut-parla/synthetic_graphs.git
+    url = git@github.com:ut-parla/synthetic_graphs.git
+    branch = main
 [submodule "artifact/magma"]
 	path = artifact/magma
 	url = https://bitbucket.org/icl/magma.git
+[submodule "examples/blr"]
+	path = examples/blr
+    url = git@github.com:ut-parla/BLR.git
+    branch = main
