@@ -1963,9 +1963,19 @@ class Scheduler(ControllableThread, SchedulerContext):
                             if dtask is not None:
                                   mappable_datamove_tasks.append(dtask)
 
+                        # Only computation needs to set a assigned flag.
+                        # Data movement task is set as assigned when it is created.
+                        task.set_assigned()
+                        # If a task has no dependency after it is assigned to devices,
+                        # immediately enqueue a corresponding data movement task to
+                        # the ready queue.
+                        if not task.is_blocked_by_dependencies_mutex():
+                            self.enqueue_task(task)
+                            logger.debug(
+                                f"[Scheduler] Enqueued %r on ready queue", task)
+
                         for mp_dtask in mappable_datamove_tasks:
                             self.enqueue_task(mp_dtask)
-
 
                         # Update parray tracking and task count on the device
                         for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
@@ -1990,17 +2000,6 @@ class Scheduler(ControllableThread, SchedulerContext):
                                     "Task %r allocating %d %s on device %r", task, amount, resource, device)
                             self._available_resources.allocate_resources(
                                 device, task.req.resources, blocking=True)
-
-                        # Only computation needs to set a assigned flag.
-                        # Data movement task is set as assigned when it is created.
-                        task.set_assigned()
-                        # If a task has no dependency after it is assigned to devices,
-                        # immediately enqueue a corresponding data movement task to
-                        # the ready queue.
-                        if not task.is_blocked_by_dependencies_mutex():
-                            self.enqueue_task(task)
-                            logger.debug(
-                                f"[Scheduler] Enqueued %r on ready queue", task)
                 else:
                     logger.exception("[Scheduler] Tasks on the spawned queue ",
                                      "should be not assigned any device.")
