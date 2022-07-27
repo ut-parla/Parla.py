@@ -7,6 +7,7 @@ from functools import partial
 parser = argparse.ArgumentParser()
 parser.add_argument('-workers', type=int, default=1)
 parser.add_argument('-t', type=int, default=1)
+parser.add_argument('-matrix', default=None)
 parser.add_argument('-process', type=int, default=0)
 args = parser.parse_args()
 
@@ -138,18 +139,26 @@ if __name__ == '__main__':
                              rmm_pool_size="3GB"
                             )
     client = Client(cluster)
-    n = 20000
-    block_size = 2000
-    np.random.seed(10)
-    a = np.random.rand(n, n)
-    a = a @ a.T
+    if args.matrix is None:
+        n = 20000
+        block_size = 2000
+        np.random.seed(10)
+        a = np.random.rand(n, n)
+        a = a @ a.T
+    else:
+        block_size = 2000
+        print("Loading matrix from file: ", args.matrix)
+        a = np.load(args.matrix)
+        print("Loaded matrix from file. Shape=", a.shape)
+        n = a.shape[0]
+
     da = dask.array.from_array(a, chunks='auto')#chunks=(block_size, block_size))
     da = da.map_blocks(cp.asarray)
     chol = blocked_cholesky(da)
     start = time.perf_counter()
     out_cp = chol.compute()
     stop = time.perf_counter()
-    print("Test: ", stop - start, "seconds")
+    print("Time: ", stop - start)
 
     ErrorCheck = True
     if ErrorCheck == True:

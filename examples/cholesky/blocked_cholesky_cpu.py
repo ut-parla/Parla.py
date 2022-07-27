@@ -211,7 +211,7 @@ def main():
             computed_L = np.tril(ap)
             zerofy_end = time.perf_counter()
 
-            print(f"Trial {k}:", (end - start) + (zerofy_end - zerofy_start), "seconds")
+            print("Time:", (end - start) + (zerofy_end - zerofy_start))
 
             # Check result
             print("Is NAN: ", np.isnan(np.sum(ap)))

@@ -169,18 +169,85 @@ def run_cholesky_28(gpu_list, timeout):
     return output_dict
 
 #Figure 13: Parla Cholesky (CPU)
-def run_cholesky_20_host():
-    pass
+def run_cholesky_20_host(core_list, timeout):
+    output_dict = {}
+
+    sub_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/cholesky/chol_20000.npy"):
+        print("\t  --Making input matrix...")
+        command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        print("\t  --Generated input matrix.")
+
+    cpu_cores = [ 1, 2, 4, 8, 16, 32, 52 ]
+    print("\t   Running CPU:")
+    #Test 1: Manual Movement, User Placement
+    for num_cores in cpu_cores:
+        command = f"python examples/cholesky/blocked_cholesky_cpu.py -matrix examples/cholesky/chol_20000.npy -b 2000 -workers {num_cores}"
+        print(command, "...")
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {num_cores} CPU cores: {times}")
+        sub_dict[num_cores] = times
+    output_dict["cpu"] = sub_dict
+    return output_dict
 
 #Figure 13: Parla Cholesky (GPU)
-def run_cholesky_20_gpu(gpu_list):
-    pass
+def run_cholesky_20_gpu(gpu_list, timeout):
+    output_dict = {}
+
+    sub_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/cholesky/chol_20000.npy"):
+        print("\t  --Making input matrix...")
+        command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        print("\t  --Generated input matrix.")
+
+    gpu_list = [ 1, 2, 3, 4 ]
+    print("\t   Running GPU:")
+    #Test 1: Manual Movement, User Placement
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/cholesky/blocked_cholesky_manual.py -matrix examples/cholesky/chol_20000.npy -fix 1 -ngpus {n_gpus}"
+        print("Current running:", command)
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        #Parse output
+        times = parse_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["gpu"] = sub_dict
+    return output_dict
 
 #Figure 13: Dask Cholesky (CPU)
 def run_dask_cholesky_20_host(cores_list, timeout):
     output_dict = {}
 
     sub_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/cholesky/chol_20000.npy"):
+        print("\t  --Making input matrix...")
+        command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        print("\t  --Generated input matrix.")
 
     worker_list = [ 1, 2, 4 ]
     # Per-thread per each worker.
@@ -190,7 +257,7 @@ def run_dask_cholesky_20_host(cores_list, timeout):
     for wi in range(len(worker_list)):
         n_workers = worker_list[wi]
         for pt in perthread_list[wi]:
-            command = f"python examples/cholesky/dask/dask_cpu_cholesky.py -workers {n_workers} -perthread {pt}"
+            command = f"python examples/cholesky/dask/dask_cpu_cholesky.py -workers {n_workers} -perthread {pt} -matrix examples/cholesky/chol_20000.npy"
             print(command, "...")
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
@@ -209,6 +276,15 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
 
     sub_dict = {}
 
+    # Generate input file
+    if not os.path.exists("examples/cholesky/chol_20000.npy"):
+        print("\t  --Making input matrix...")
+        command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        assert(output[1] == 0)
+        print("\t  --Generated input matrix.")
+
     gpu_list = [ 1, 2, 3, 4 ]
     print("\t   Running Dask GPU:")
     #Test 1: Manual Movement, User Placement
@@ -218,12 +294,12 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
         print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         os.environ['UCX_TLS'] = "cuda,cuda_copy,cuda_ipc,tpc"
-        command = f"python examples/cholesky/dask/dask_gpu_cholesky.py"
+        command = f"python examples/cholesky/dask/dask_gpu_cholesky.py -matrix examples/cholesky/chol_20000.npy"
         print("Current running:", command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
-        print(output)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        # DASK-GPU makes an asyncio error after the app completes. so ignore it.
+        #assert(output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -572,9 +648,9 @@ def run_GIL_test():
 
 test = [run_cholesky_28]
 figure_10 = [run_jacobi, run_matmul, run_blr, run_nbody, run_reduction, run_independent, run_serial]
-#figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
-figure_13 = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
-#figure_13 = [run_dask_cholesky_20_gpu]
+figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
+#figure_13 = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
+#figure_13 = [run_cholesky_20_host]
 figure_15 = [run_batched_cholesky]
 figure_12 = [run_prefetching_test]
 
