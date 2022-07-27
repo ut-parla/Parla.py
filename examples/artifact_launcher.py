@@ -833,7 +833,7 @@ if __name__ == '__main__':
             output_dict = test(ngpus, args.timeout)
             test_output[test.__name__] = output_dict
             #print("\t --Experiment {}/{} Completed. Output: {}".format(i, total_tests, output_dict))
-            print("\t --Experiment {}/{} Completed.)
+            print("\t --Experiment {}/{} Completed.")
             i += 1
         figure_output[figure] = test_output
         print(f"Collection for {figure} complete")
