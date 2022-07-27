@@ -1,9 +1,6 @@
 [submodule "examples/nbody"]
 	path = examples/nbody
 	url = https://github.com/ut-parla/barnes-hut.git
-[submodule "examples/blr"]
-	path = examples/blr
-	url = https://github.com/ut-parla/BLR.git
 [submodule "examples/synthetic"]
 	path = examples/synthetic
 	url = git@github.com:ut-parla/synthetic_graphs.git
