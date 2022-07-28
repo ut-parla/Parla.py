@@ -855,45 +855,67 @@ def run_independent_dask_thread_scaling(thread_list, timeout):
     #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
     sizes = [800, 1600]
     size_dict = {}
+    count = 1
     for size in sizes:
         thread_dict = {}
+        print(f"\t   [Running {count}/{len(sizes)}], Task Grain = {size} μs")
         for thread in thread_list:
-            command = "python examples/synthetic/artifact/scripts/run_dask_thread.py -workers ${threads} -size ${size} -n ${n}"
+            command = f"python examples/synthetic/artifact/scripts/run_dask_thread.py -workers {thread} -time {size} -n {n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             wassert(output, output[1] == 0)
             #Parse output
-            times = parse_synthetic_times(output[0])
-            print(f"\t{size} ms: {thread} threads: {times}")
+            times = parse_times(output[0])
+
+            print(f"\t   {size} μs, {thread} threads, {times}")
             thread_dict[thread] = times
         size_dict[size] = thread_dict
     return size_dict
 
 #Figure 14: Independnet Dask Scaling
-def run_independent_dask_process_scaling(thread_list, timeout):
+def run_independent_dask_process_scaling(process_list, timeout):
     n = 1000
     #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
     sizes = [800, 1600]
+    process_list = [1, 4, 8, 16, 32, 36, 40]
     size_dict = {}
+    count = 1
     for size in sizes:
-        thread_dict = {}
-        for thread in thread_list:
-            command = "python examples/synthetic/artifact/scripts/run_dask_process.py -workers ${threads} -size ${size} -n ${n}"
+        process_dict = {}
+        inner_count = 0
+        print(f"\t   [Running {count}/{len(sizes)}], Task Grain = {size} μs")
+        for process in process_list:
+            command = "rm -rf dask-worker-space"
+            output = pe.run(command, timeout=None)
+            command = f"python examples/synthetic/artifact/scripts/run_dask_process.py -workers {process} -time {size} -n {n}"
+            print("LIMIT: ", timeout)
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
-            wassert(output, output[1] == 0)
+            #wassert(output, output[1] == 0, verbose=True, require=False)
+            print("OUTPUT: ", output)
             #Parse output
-            times = parse_synthetic_times(output[0])
-            print(f"\t{size} ms: {thread} threads: {times}")
-            thread_dict[thread] = times
-        size_dict[size] = thread_dict
+            if output[1] == None:
+                times = "TIMEOUT"
+                process_dict[process] = times
+                print(f"\t   {size} μs, {process} processes, {times}")
+                break
+            else:
+                times = parse_times(output[0])
+                print(f"\t   {size} μs, {process} processes, {times}")
+                if inner_count == 0:
+                    timeout = 5*times[0]
+
+                process_dict[process] = times
+
+            inner_count += 1
+        size_dict[size] = process_dict
     return size_dict
 
 #Figure 14: GIL test
 def run_GIL_test():
     pass
 
-test = [run_nbody_threads]
+test = [run_independent_dask_process_scaling]
 #figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
 figure_9 = [run_reduction, run_independent, run_serial]
 figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
@@ -953,7 +975,7 @@ if __name__ == '__main__':
             output_dict = test(ngpus, args.timeout)
             test_output[test.__name__] = output_dict
             #print("\t --Experiment {}/{} Completed. Output: {}".format(i, total_tests, output_dict))
-            print("\t --Experiment {}/{} Completed.")
+            print("\t --Experiment {}/{} Completed.".format(i, total_tests))
             i += 1
         figure_output[figure] = test_output
         print(f"Collection for {figure} complete")
