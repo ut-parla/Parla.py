@@ -628,8 +628,74 @@ def run_nbody(gpu_list, timeout):
     return output_dict
 
 #Figure 10: Synthetic Reduction
-def run_reduction(gpu_list):
-    pass
+def run_reduction(gpu_list, timeout):
+    output_dict = {}
+    sub_dict = {}
+    reduction_policy_path = "examples/synthetic/inputs/reduction_gpu_policy.txt" 
+    reduction_user_path = "examples/synthetic/inputs/reduction_gpu_user.txt" 
+    if not os.path.exists(reduction_policy_path):
+        command = f"python examples/synthetic/graphs/generate_reduce_graph.py -overlap 1 "
+        command += f"-level 8 -branch 2 -N 6250 -gil_time 0 -weight 16000 "
+        command += f"-user 0 -output {reduction_policy_path}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        assert(output[1] == 0)
+        print("\t --Generated input matrix for reduction + policy")
+
+    if not os.path.exists(reduction_user_path):
+        command = f"python examples/synthetic/graphs/generate_reduce_graph.py -overlap 1 "
+        command += f"-level 8 -branch 2 -N 6250 -gil_time 0 -weight 16000 "
+        command += f"-user 1 -output {reduction_user_path}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        assert(output[1] == 0)
+        print("\t --Generated input matrix for reduction + user")
+
+        """
+    print("\t   [Running 1/3] Manual Movement, User Placement")
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/synthetic/run.py -graph {reduction_user_path}"
+        command += f" -d 1000 -loop 6 -reinit 0 -data_move 1"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        times = parse_synthetic_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["m,u"] = sub_dict
+    """
+
+    print("\t   [Running 2/3] Automatic Movement, User Placement")
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/synthetic/run.py -graph {reduction_user_path}"
+        command += f" -d 1000 -loop 6 -reinit 0 -data_move 2"
+        print(command)
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        times = parse_synthetic_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,u"] = sub_dict
+
+    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/synthetic/run.py -graph {reduction_policy_path}"
+        command += f" -d 1000 -loop 6 -reinit 0 -data_move 2"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        times = parse_synthetic_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,p"] = sub_dict
+
+    return output_dict
+
 
 #Figure 10: Synthetic Independent
 def run_independent(gpu_list):
@@ -775,7 +841,8 @@ def run_GIL_test():
     pass
 
 test = [run_prefetching_test]
-figure_10 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
+#figure_10 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
+figure_10 = [run_reduction, run_independent, run_serial]
 figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 #figure_13 = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 #figure_13 = [run_cholesky_20_host]
