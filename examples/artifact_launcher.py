@@ -706,7 +706,7 @@ def run_reduction(gpu_list, timeout):
         command += f"-user 0 -output {reduction_policy_path}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         wassert(output, output[1] == 0)
-        print("\t --Generated input matrix for reduction + policy")
+        print("\t --Generated input graph for reduction + policy")
 
     if not os.path.exists(reduction_user_path):
         command = f"python examples/synthetic/graphs/generate_reduce_graph.py -overlap 1 "
@@ -714,7 +714,7 @@ def run_reduction(gpu_list, timeout):
         command += f"-user 1 -output {reduction_user_path}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         wassert(output, output[1] == 0)
-        print("\t --Generated input matrix for reduction + user")
+        print("\t --Generated input graph for reduction + user")
 
         """
     print("\t   [Running 1/3] Manual Movement, User Placement")
