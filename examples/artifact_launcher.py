@@ -654,6 +654,12 @@ def run_nbody_parla(gpu_list, timeout):
 def run_nbody_threads(gpu_list, timeout):
     output_dict = {}
 
+    # Generate input dir
+    if not os.path.exists("examples/nbody/python-bh/input"):
+        print("\t  --Making input directory...")
+        os.makedirs("examples/nbody/python-bh/input")
+        print("\t  --Made input directory.")
+
     # Generate input file
     if not os.path.exists("examples/nbody/python-bh/input/n10M.txt"):
         command = f"python examples/nbody/python-bh/bin/gen_input.py normal 10000000 examples/nbody/python-bh/input/n10M.txt"
@@ -684,6 +690,14 @@ def run_nbody_threads(gpu_list, timeout):
 def run_reduction(gpu_list, timeout):
     output_dict = {}
     sub_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/synthetic/inputs"):
+        print("\t  --Making input directory...")
+        os.makedirs("examples/synthetic/inputs")
+        print("\t  --Made input directory.")
+
+
     reduction_policy_path = "examples/synthetic/inputs/reduction_gpu_policy.txt"
     reduction_user_path = "examples/synthetic/inputs/reduction_gpu_user.txt"
     if not os.path.exists(reduction_policy_path):
@@ -915,7 +929,7 @@ def run_independent_dask_process_scaling(process_list, timeout):
 def run_GIL_test():
     pass
 
-test = [run_independent_dask_process_scaling]
+test = [run_reduction]
 #figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
 figure_9 = [run_reduction, run_independent, run_serial]
 figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
