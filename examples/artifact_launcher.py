@@ -11,6 +11,19 @@ import re
 ######
 
 
+def wassert(output, condition, required=True, verbose=False):
+    if condition:
+        return True
+    else:
+        print("\t   FAILURE:", output[1])
+        if verbose:
+            print("\t   OUTPUT:", output[0])
+
+        if required:
+            raise Exception("Assertion Failure.")
+        else:
+            return False
+
 def parse_times(output):
     times = []
     for line in output.splitlines():
@@ -82,7 +95,7 @@ def run_test(gpu_list, timeout):
         command = f"python test_script.py -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -107,7 +120,7 @@ def run_cholesky_magma(gpu_list, timeout):
         command = f"./testing_dpotrf_mgpu --ngpu {n_gpus} -N 28000"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_magma_times(output)
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -115,7 +128,7 @@ def run_cholesky_magma(gpu_list, timeout):
 
     return output_dict
 
-#Figure 10: Cholesky
+#Figure 9: Cholesky
 def run_cholesky_28(gpu_list, timeout):
     output_dict = {}
 
@@ -128,7 +141,7 @@ def run_cholesky_28(gpu_list, timeout):
         command = f"python examples/cholesky/make_cholesky_input.py -n 28000 -output examples/cholesky/chol_28000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
 
 
@@ -138,7 +151,7 @@ def run_cholesky_28(gpu_list, timeout):
         command = f"python examples/cholesky/blocked_cholesky_manual.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14 -matrix examples/cholesky/chol_28000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -153,7 +166,7 @@ def run_cholesky_28(gpu_list, timeout):
         command = f"python examples/cholesky/blocked_cholesky_automatic.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14 -matrix examples/cholesky/chol_28000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -167,7 +180,7 @@ def run_cholesky_28(gpu_list, timeout):
         command = f"python examples/cholesky/blocked_cholesky_automatic.py -ngpus {n_gpus} -fixed 0 -b 2000 -nblocks 14"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -176,7 +189,7 @@ def run_cholesky_28(gpu_list, timeout):
 
     return output_dict
 
-#Figure 13: Parla Cholesky (CPU)
+#Figure 12: Parla Cholesky (CPU)
 def run_cholesky_20_host(core_list, timeout):
     output_dict = {}
 
@@ -188,7 +201,7 @@ def run_cholesky_20_host(core_list, timeout):
         command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
 
     cpu_cores = [ 1, 2, 4, 8, 16, 32, 52 ]
@@ -199,7 +212,7 @@ def run_cholesky_20_host(core_list, timeout):
         print(command, "...")
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {num_cores} CPU cores: {times}")
@@ -207,7 +220,7 @@ def run_cholesky_20_host(core_list, timeout):
     output_dict["cpu"] = sub_dict
     return output_dict
 
-#Figure 13: Parla Cholesky (GPU)
+#Figure 12: Parla Cholesky (GPU)
 def run_cholesky_20_gpu(gpu_list, timeout):
     output_dict = {}
 
@@ -219,7 +232,7 @@ def run_cholesky_20_gpu(gpu_list, timeout):
         command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
 
     gpu_list = [ 1, 2, 3, 4 ]
@@ -234,7 +247,7 @@ def run_cholesky_20_gpu(gpu_list, timeout):
         print("Current running:", command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -242,7 +255,7 @@ def run_cholesky_20_gpu(gpu_list, timeout):
     output_dict["gpu"] = sub_dict
     return output_dict
 
-#Figure 13: Dask Cholesky (CPU)
+#Figure 12: Dask Cholesky (CPU)
 def run_dask_cholesky_20_host(cores_list, timeout):
     output_dict = {}
 
@@ -254,7 +267,7 @@ def run_dask_cholesky_20_host(cores_list, timeout):
         command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
 
     worker_list = [ 1, 2, 4 ]
@@ -269,7 +282,7 @@ def run_dask_cholesky_20_host(cores_list, timeout):
             print(command, "...")
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
-            assert(output[1] == 0)
+            wassert(output, output[1] == 0)
             #Parse output
             times = parse_times(output[0])
             n_threads = n_workers * pt
@@ -278,7 +291,7 @@ def run_dask_cholesky_20_host(cores_list, timeout):
     output_dict["dask-cpu"] = sub_dict
     return output_dict
 
-#Figure 13: Dask Cholesky (GPU)
+#Figure 12: Dask Cholesky (GPU)
 def run_dask_cholesky_20_gpu(gpu_list, timeout):
     output_dict = {}
 
@@ -290,7 +303,7 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
         command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
 
     gpu_list = [ 1, 2, 3, 4 ]
@@ -307,7 +320,7 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         # DASK-GPU makes an asyncio error after the app completes. so ignore it.
-        #assert(output[1] == 0)
+        #wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -316,7 +329,7 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
     return output_dict
 
 
-#Figure 10: Jacobi
+#Figure 9: Jacobi
 def run_jacobi(gpu_list, timeout):
     output_dict = {}
 
@@ -328,7 +341,7 @@ def run_jacobi(gpu_list, timeout):
         command = f"python examples/jacobi/jacobi_manual.py -ngpus {n_gpus} -fixed 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -343,7 +356,7 @@ def run_jacobi(gpu_list, timeout):
         command = f"python examples/jacobi/jacobi_automatic.py -ngpus {n_gpus} -fixed 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -357,7 +370,7 @@ def run_jacobi(gpu_list, timeout):
         command = f"python examples/jacobi/jacobi_automatic.py -ngpus {n_gpus} -fixed 0"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -366,7 +379,7 @@ def run_jacobi(gpu_list, timeout):
 
     return output_dict
 
-#Figure 10: Matmul 32K Magma
+#Figure 9: Matmul 32K Magma
 def run_matmul_cublas(gpu_list, timeout):
 
     #Put testing directory on PATH
@@ -388,7 +401,7 @@ def run_matmul_cublas(gpu_list, timeout):
         command = f"./{n_gpus}gpuGEMM.exe"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_cublas_times(output)
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -396,7 +409,7 @@ def run_matmul_cublas(gpu_list, timeout):
 
     return output_dict
 
-#Figure 10: Matmul
+#Figure 9: Matmul
 def run_matmul(gpu_list, timeout):
 
     output_dict = {}
@@ -409,7 +422,7 @@ def run_matmul(gpu_list, timeout):
         command = f"python examples/matmul/matmul_manual.py -ngpus {n_gpus} -fixed 1 -n 32000"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -424,7 +437,7 @@ def run_matmul(gpu_list, timeout):
         command = f"python examples/matmul/matmul_automatic.py -ngpus {n_gpus} -fixed 1 -n 32000"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -438,7 +451,7 @@ def run_matmul(gpu_list, timeout):
         command = f"python examples/matmul/matmul_automatic.py -ngpus {n_gpus} -fixed 0 -n 32000"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -448,7 +461,7 @@ def run_matmul(gpu_list, timeout):
     return output_dict
 
 
-#Figure 10: blr
+#Figure 9: blr
 def run_blr_threads(gpu_list, timeout):
 
     output_dict = {}
@@ -464,7 +477,7 @@ def run_blr_threads(gpu_list, timeout):
         command = f"python examples/blr/app/main.py -mode gen -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         print("\t  --Generated input matrix_10k.")
 
     # Test 1: Manual Movement, User Placement
@@ -474,7 +487,7 @@ def run_blr_threads(gpu_list, timeout):
         command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement lazy -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_blr_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -488,7 +501,7 @@ def run_blr_threads(gpu_list, timeout):
         command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement eager -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_blr_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -502,7 +515,7 @@ def run_blr_threads(gpu_list, timeout):
         command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 0 -movement eager -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_blr_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -510,7 +523,7 @@ def run_blr_threads(gpu_list, timeout):
         output_dict["a,p"] = sub_dict
 
 
-#Figure 10: blr
+#Figure 9: blr
 def run_blr_parla(gpu_list, timeout):
 
     output_dict = {}
@@ -526,7 +539,7 @@ def run_blr_parla(gpu_list, timeout):
         command = f"python examples/blr/app/main.py -mode gen -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         print("\t  --Generated input matrix_10k.")
 
     # Test 1: Manual Movement, User Placement
@@ -536,7 +549,7 @@ def run_blr_parla(gpu_list, timeout):
         command = f"python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement lazy -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_blr_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -550,7 +563,7 @@ def run_blr_parla(gpu_list, timeout):
         command = f"python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement eager -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_blr_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -564,23 +577,31 @@ def run_blr_parla(gpu_list, timeout):
         command = f"python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 0 -movement eager -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_blr_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
         output_dict["a,p"] = sub_dict
 
-#Figure 10: NBody
-def run_nbody(gpu_list, timeout):
+
+#Figure 9: NBody (Parla)
+def run_nbody_parla(gpu_list, timeout):
     output_dict = {}
 
     # Generate input file
+    if not os.path.exists("examples/nbody/python-bh/input"):
+        print("\t  --Making input directory...")
+        os.makedirs("examples/nbody/python-bh/input")
+        print("\t  --Made input directory.")
+
     if not os.path.exists("examples/nbody/python-bh/input/n10M.txt"):
+        print("\t  --Making input particle file...")
         command = f"python examples/nbody/python-bh/bin/gen_input.py normal 10000000 examples/nbody/python-bh/input/n10M.txt"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
+        print("\t  --Made input particle file.")
 
     # Test 1: Manual Movement, User Placement
     print("\t   [Running 1/3] Manual Movement, User Placement")
@@ -589,7 +610,7 @@ def run_nbody(gpu_list, timeout):
         command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}_eager_sched.ini"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_nbody_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -604,7 +625,7 @@ def run_nbody(gpu_list, timeout):
         command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}_eager.ini"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_nbody_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -618,7 +639,7 @@ def run_nbody(gpu_list, timeout):
         command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}.ini"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_nbody_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -627,18 +648,50 @@ def run_nbody(gpu_list, timeout):
 
     return output_dict
 
-#Figure 10: Synthetic Reduction
+
+
+#Figure 9: NBody (Python threading, no tasks)
+def run_nbody_threads(gpu_list, timeout):
+    output_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/nbody/python-bh/input/n10M.txt"):
+        command = f"python examples/nbody/python-bh/bin/gen_input.py normal 10000000 examples/nbody/python-bh/input/n10M.txt"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        wassert(output, output[1] == 0)
+
+    mode_list=["singlegpu", "2gpus", "4gpus"]
+    gpu_list = [1, 2, 4]
+    print("\t   [Running 1/1] Python Threading")
+
+    idx = 0
+    for mode in mode_list:
+        n_gpus = mode_list[idx]
+        command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/{mode}.ini"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #Make sure no errors or timeout were thrown
+        wassert(output, output[1] == 0)
+        #Parse output
+        times = parse_nbody_times(output[0])
+        print(f"\t\t    {n_gpus} GPUs: {times}")
+        output_dict[n_gpus] = times
+        idx += 1
+
+    return output_dict
+
+#Figure 9: Synthetic Reduction
 def run_reduction(gpu_list, timeout):
     output_dict = {}
     sub_dict = {}
-    reduction_policy_path = "examples/synthetic/inputs/reduction_gpu_policy.txt" 
-    reduction_user_path = "examples/synthetic/inputs/reduction_gpu_user.txt" 
+    reduction_policy_path = "examples/synthetic/inputs/reduction_gpu_policy.txt"
+    reduction_user_path = "examples/synthetic/inputs/reduction_gpu_user.txt"
     if not os.path.exists(reduction_policy_path):
         command = f"python examples/synthetic/graphs/generate_reduce_graph.py -overlap 1 "
         command += f"-level 8 -branch 2 -N 6250 -gil_time 0 -weight 16000 "
         command += f"-user 0 -output {reduction_policy_path}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         print("\t --Generated input matrix for reduction + policy")
 
     if not os.path.exists(reduction_user_path):
@@ -646,7 +699,7 @@ def run_reduction(gpu_list, timeout):
         command += f"-level 8 -branch 2 -N 6250 -gil_time 0 -weight 16000 "
         command += f"-user 1 -output {reduction_user_path}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         print("\t --Generated input matrix for reduction + user")
 
         """
@@ -697,11 +750,11 @@ def run_reduction(gpu_list, timeout):
     return output_dict
 
 
-#Figure 10: Synthetic Independent
+#Figure 9: Synthetic Independent
 def run_independent(gpu_list):
     pass
 
-#Figure 10: Synthetic Serial
+#Figure 9: Synthetic Serial
 def run_serial():
     pass
 
@@ -716,7 +769,7 @@ def run_batched_cholesky(gpu_list, timeout):
         command = f"python examples/variants/batched_cholesy.py -ngpus {n_gpus} -use_cpu 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -729,7 +782,7 @@ def run_batched_cholesky(gpu_list, timeout):
         command = f"python examples/variants/batched_cholesy.py -ngpus {n_gpus} -use_cpu 0"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
@@ -751,7 +804,7 @@ def run_prefetching_test(gpu_list, timeout):
         command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size} -reinit 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_synthetic_times(output[0])
         print(f"\t {data_map[idx]} Data: {times}")
@@ -766,7 +819,7 @@ def run_prefetching_test(gpu_list, timeout):
         command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size} -reinit 1 -loop 5"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
-        assert(output[1] == 0)
+        wassert(output, output[1] == 0)
         #Parse output
         times = parse_synthetic_times(output[0])
         print(f"\t {data_map[idx]} Data: {times}")
@@ -788,7 +841,7 @@ def run_independent_parla_scaling(thread_list, timeout):
             command = "python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/independent_1000.gph -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
-            assert(output[1] == 0)
+            wassert(output, output[1] == 0)
             #Parse output
             times = parse_synthetic_times(output[0])
             print(f"\t{size} ms: {thread} threads: {times}")
@@ -808,7 +861,7 @@ def run_independent_dask_thread_scaling(thread_list, timeout):
             command = "python examples/synthetic/artifact/scripts/run_dask_thread.py -workers ${threads} -size ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
-            assert(output[1] == 0)
+            wassert(output, output[1] == 0)
             #Parse output
             times = parse_synthetic_times(output[0])
             print(f"\t{size} ms: {thread} threads: {times}")
@@ -828,7 +881,7 @@ def run_independent_dask_process_scaling(thread_list, timeout):
             command = "python examples/synthetic/artifact/scripts/run_dask_process.py -workers ${threads} -size ${size} -n ${n}"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
-            assert(output[1] == 0)
+            wassert(output, output[1] == 0)
             #Parse output
             times = parse_synthetic_times(output[0])
             print(f"\t{size} ms: {thread} threads: {times}")
@@ -840,9 +893,9 @@ def run_independent_dask_process_scaling(thread_list, timeout):
 def run_GIL_test():
     pass
 
-test = [run_prefetching_test]
-#figure_10 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
-figure_10 = [run_reduction, run_independent, run_serial]
+test = [run_nbody_threads]
+#figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
+figure_9 = [run_reduction, run_independent, run_serial]
 figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 #figure_13 = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 #figure_13 = [run_cholesky_20_host]
@@ -850,7 +903,7 @@ figure_15 = [run_batched_cholesky]
 figure_12 = [run_prefetching_test]
 
 figure_dictionary = {}
-figure_dictionary['Figure_10'] = figure_10
+figure_dictionary['Figure_9'] = figure_9
 figure_dictionary['Figure_13'] = figure_13
 figure_dictionary['Figure_15'] = figure_15
 figure_dictionary['Figure_12'] = figure_12
