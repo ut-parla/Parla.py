@@ -667,7 +667,7 @@ def run_nbody_threads(gpu_list, timeout):
 
     idx = 0
     for mode in mode_list:
-        n_gpus = mode_list[idx]
+        n_gpus = gpu_list[idx]
         command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/{mode}.ini"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
