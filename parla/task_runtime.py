@@ -307,6 +307,7 @@ class Task:
     def name(self) -> Optional[str]:
         return self._name
 
+
     @property
     def req(self):
         return self._req
@@ -1408,6 +1409,9 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._dev_queue_monitor = {dev: threading.Condition(
             threading.Lock()) for dev in self._available_resources.get_resources()}
 
+        #Duplicates
+        self.seen = set()
+
         # Count protection
         self._mapped_count_monitor = {dev: threading.Condition(
             threading.Lock()) for dev in self._available_resources.get_resources()}
@@ -1529,8 +1533,14 @@ class Scheduler(ControllableThread, SchedulerContext):
            Scheduler iterates the queue and assigns resources
            regardless of remaining dependencies.
         """
+
         with self._spawned_queue_monitor:
-            self._new_spawned_task_queue.appendleft(task)
+            #if id(task) in self.seen:
+            #    print("REPEAT", task.taskid)
+            #else:
+            #    self.seen.add(id(task))
+
+                self._new_spawned_task_queue.appendleft(task)
 
     def _dequeue_spawned_task(self) -> Optional[Task]:
         """Dequeue a task from the spawned task queue.
