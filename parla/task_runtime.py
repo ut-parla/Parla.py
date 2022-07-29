@@ -365,6 +365,12 @@ class Task:
                 # Run the task and assign the new task state
                 try:
                     assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(self._state, self.taskid)
+                    # TODO(lhc): This assumes Parla only has two devices.
+                    #            The reason why I am trying to do is importing
+                    #            Parla's cuda.py is expensive.
+                    #            Whenever we import cuda.py, cupy compilation
+                    #            is invoked. We should remove or avoid that.
+
                     # First, create device/stream/event instances.
                     # Second, gets the created event instance.
                     # Third, it scatters the event to dependents who wait for
@@ -485,12 +491,12 @@ class Task:
         with self._mutex:
             return self._add_dependency(dependency)
 
-    def _add_dependency(self, dependency: 'Task') -> bool:
+    def _add_dependency(self, dependency: 'Task', symmetric=True) -> bool:
         """
         :param symmetric: If true, add self to dependant list of the dependency. This serves as a backlink for updating status.
                           If false, only add it to this tasks dependency list. (The dependency will not be aware of this task depending on it)
         """
-        if not dependency._add_dependent_mutex(self):
+        if symmetric and not dependency._add_dependent_mutex(self):
             return False
         self._num_blocking_dependencies += 1
         self._dependencies.append(dependency)
@@ -593,7 +599,7 @@ class ComputeTask(Task):
     def _handle_dependency_spawn(self, dependency: "Task"):
         with self._mutex:
             self.num_unspawned_dependencies -= 1
-            self._add_dependency(dependency)
+            self._add_dependency(dependency, symmetric=False)
             if self.num_unspawned_dependencies == 0:
                 self._ready_to_map()
 
@@ -1908,7 +1914,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         # The computation task should not be run until all the data movement
         # tasks are created.
         # 
-
         if not datamove_task.is_blocked_by_dependencies_mutex():
             return datamove_task
         return None
@@ -1962,6 +1967,10 @@ class Scheduler(ControllableThread, SchedulerContext):
                             if dtask is not None:
                                   mappable_datamove_tasks.append(dtask)
 
+                        for mp_dtask in mappable_datamove_tasks:
+                            self.enqueue_task(mp_dtask)
+
+
                         # Update parray tracking and task count on the device
                         for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
                             assert isinstance(
@@ -1985,9 +1994,6 @@ class Scheduler(ControllableThread, SchedulerContext):
                                     "Task %r allocating %d %s on device %r", task, amount, resource, device)
                             self._available_resources.allocate_resources(
                                 device, task.req.resources, blocking=True)
-
-                        for mp_dtask in mappable_datamove_tasks:
-                            self.enqueue_task(mp_dtask)
 
                         # Only computation needs to set a assigned flag.
                         # Data movement task is set as assigned when it is created.
