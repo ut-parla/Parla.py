@@ -754,7 +754,7 @@ def run_reduction(gpu_list, timeout):
         print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_policy_path}"
-        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 0"
+        command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 0"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         print(output)
         times = parse_synthetic_times(output[0])
@@ -773,7 +773,7 @@ def run_independent(gpu_list):
 def run_serial():
     pass
 
-#Figure 15: Batched Cholesky Variants
+#Figure 14: Batched Cholesky Variants
 def run_batched_cholesky(gpu_list, timeout):
     cpu_dict = {}
 
@@ -844,31 +844,36 @@ def run_prefetching_test(gpu_list, timeout):
 
     return auto_dict
 
-#Figure 14: Independent Parla Scaling
+#Figure 13: Independent Parla Scaling
 def run_independent_parla_scaling(thread_list, timeout):
     n = 1000
     #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
-    sizes = [800, 1600]
+    sizes = [1600, 6400, 51200]
+
     size_dict = {}
+    count = 1
     for size in sizes:
         thread_dict = {}
+        print(f"\t   [Running {count}/{len(sizes)}], Task Grain = {size} μs")
         for thread in thread_list:
-            command = "python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/independent_1000.gph -threads ${threads} -data_move 0 -weight ${size} -n ${n}"
+            command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/independent_1000.gph -threads {thread} -data_move 0 -weight {size} -use_gpu 0"
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
+            #print(output)
             wassert(output, output[1] == 0)
             #Parse output
             times = parse_synthetic_times(output[0])
-            print(f"\t{size} ms: {thread} threads: {times}")
+            print(f"\t   {size} μs, {thread} threads, {times}")
             thread_dict[thread] = times
         size_dict[size] = thread_dict
+        count+=1
     return size_dict
 
-#Figure 14: Independnet Dask Scaling
+#Figure 13: Independnet Dask Scaling
 def run_independent_dask_thread_scaling(thread_list, timeout):
     n = 1000
     #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
-    sizes = [800, 1600]
+    sizes = [1600, 6400, 51200]
     size_dict = {}
     count = 1
     for size in sizes:
@@ -887,11 +892,11 @@ def run_independent_dask_thread_scaling(thread_list, timeout):
         size_dict[size] = thread_dict
     return size_dict
 
-#Figure 14: Independnet Dask Scaling
+#Figure 13: Independent Dask Scaling
 def run_independent_dask_process_scaling(process_list, timeout):
     n = 1000
     #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
-    sizes = [800, 1600]
+    sizes = [1600, 6400, 51200]
     process_list = [1, 4, 8, 16, 32, 36, 40]
     size_dict = {}
     count = 1
@@ -926,24 +931,68 @@ def run_independent_dask_process_scaling(process_list, timeout):
         size_dict[size] = process_dict
     return size_dict
 
-#Figure 14: GIL test
-def run_GIL_test():
-    pass
+#Figure 13: GIL test (Parla)
+def run_GIL_test_parla(thread_list, timeout):
+    n = 1000
+    sizes = [45000]
+    gil = 5000
+    size_dict = {}
+    count = 1
+    for size in sizes:
+        thread_dict = {}
+        print(f"\t   [Running {count}/{len(sizes)}], Task Grain = {size} μs")
+        for thread in thread_list:
+            command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/independent_1000.gph -threads {thread} -data_move 0 -weight {size} -use_gpu 0 -gweight {gil}"
+            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            #Make sure no errors or timeout were thrown
+            print(output)
+            wassert(output, output[1] == 0)
+            #Parse output
+            times = parse_synthetic_times(output[0])
+            print(f"\t   {size} μs, {thread} threads, {times}")
+            thread_dict[thread] = times
+        size_dict[size] = thread_dict
+        count+=1
+    return size_dict
 
-test = [run_reduction]
+#Figure 13: GIL test (Dask Threading)
+def run_GIL_test_dask(thread_list, timeout):
+    n = 1000
+    #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
+    sizes = [50000]
+    gil = 5000
+    size_dict = {}
+    count = 1
+    for size in sizes:
+        thread_dict = {}
+        print(f"\t   [Running {count}/{len(sizes)}], Task Grain = {size} μs")
+        for thread in thread_list:
+            command = f"python examples/synthetic/artifact/scripts/run_dask_thread_gil.py -workers {thread} -time {size} -n {n}"
+            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            #Make sure no errors or timeout were thrown
+            wassert(output, output[1] == 0)
+            #Parse output
+            times = parse_times(output[0])
+
+            print(f"\t   {size} μs, {thread} threads, {times}")
+            thread_dict[thread] = times
+        size_dict[size] = thread_dict
+    return size_dict
+
+test = [run_GIL_test_parla]
 #figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
 figure_9 = [run_reduction, run_independent, run_serial]
-figure_13 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
-#figure_13 = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
-#figure_13 = [run_cholesky_20_host]
-figure_15 = [run_batched_cholesky]
-figure_12 = [run_prefetching_test]
+figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
+figure_13 = [run_independent_parla_scaling, run_independent_dask_thread_scaling, run_independent_dask_process_scaling]
+figure_14 = [run_batched_cholesky]
+figure_11 = [run_prefetching_test]
 
 figure_dictionary = {}
 figure_dictionary['Figure_9'] = figure_9
-figure_dictionary['Figure_13'] = figure_13
-figure_dictionary['Figure_15'] = figure_15
 figure_dictionary['Figure_12'] = figure_12
+figure_dictionary['Figure_14'] = figure_14
+figure_dictionary['Figure_11'] = figure_11
+figure_dictionary['Figure_13'] = figure_13
 figure_dictionary['Figure_test'] = test
 
 figure_output = {}
