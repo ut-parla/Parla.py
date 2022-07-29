@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, TYPE_CHECKING, Dict, Union
+from typing import List, TYPE_CHECKING, Dict, Union, Tuple
 
 import threading
 
@@ -178,7 +178,7 @@ class Coherence:
         return self._versions[self.owner] == self._latest_version
 
     def _write_back_to(self, device_id:int, new_state:int, on_different_device:bool = False, 
-                       this_device_id: int = None, skip_src_check_id: int = None) -> List[MemoryOperation]:
+                       this_device_id: int = None, skip_src_check_id: int = None) -> Tuple[List[MemoryOperation], bool]:
         """
         Generate the list of write back MemoryOperation.
         Which make `device_id` has the latest version with a complete copy.
@@ -190,6 +190,9 @@ class Coherence:
             this_device_id: if `on_different_device` is True, this means current device ID. If None, ignore
             skip_src_check_id: skip checking this device's src condition variable when it is not None
 
+        Return:
+            operations, has_copy (true if need to copy data to the device)
+
         Note: version will be updated
         """
         # write back copies that
@@ -199,6 +202,7 @@ class Coherence:
         target = set() # a tuple of (version, device_id)
         latest_complete_copy_id = None
         latest_complete_version = -1
+        evict_list = []
 
         for id, state in self._local_states.items():
             if isinstance(state, dict):  # subarray need to write back
@@ -219,22 +223,32 @@ class Coherence:
                     latest_complete_copy_id = id
 
                 # downgrade
-                elif self._local_states[id] == self.SHARED:
-                    if new_state == self.MODIFIED:
-                        self._local_states[id] = self.INVALID
+                if id != device_id:
+                    if self._local_states[id] == self.SHARED:
+                        if new_state == self.MODIFIED:
+                            self._local_states[id] = self.INVALID
+                            self._versions[id] = -1
+                            self._is_complete[id] = None
+                            evict_list.append(id)
+                    elif self._local_states[id] == self.MODIFIED:
+                        if new_state == self.SHARED:
+                            self._local_states[id] = self.SHARED
+                        elif new_state == self.MODIFIED:
+                            self._local_states[id] = self.INVALID
+                            self._versions[id] = -1
+                            self._is_complete[id] = None
+                            evict_list.append(id)
 
         if latest_complete_copy_id is None:
             raise RuntimeError("There is no valid complete copy")
 
         if new_state == self.MODIFIED:
-            evict_list = list(target)
+            evict_list += list(target)
 
             # `this_device_id` is the device id of the final destionation
             # so should write it back but not evict it
             if this_device_id is not None:
                 evict_list.remove(this_device_id)
-        else:
-            evict_list = []
 
         if current_version < latest_complete_version:
             target = [latest_complete_copy_id] + list(target)  # complete copy first
@@ -242,7 +256,7 @@ class Coherence:
         # update latest version
         self._versions[device_id] = self._latest_version
         return [MemoryOperation.load(device_id, t, on_different_device=on_different_device, skip_src_check=(skip_src_check_id == t)) for t in target] \
-               + [MemoryOperation.evict(t) for t in evict_list]
+               + [MemoryOperation.evict(t) for t in evict_list], (len(target) != 0)
 
     def read(self, device_id: int, slices_hash: int = None) -> List[MemoryOperation]:
         """ Tell the protocol that this device read from the copy.
@@ -279,7 +293,7 @@ class Coherence:
                 # writeback this subarrays and then copy complete data from owner
 
                 # write back to owner 
-                operations.extend(self._write_back_to(self.owner, self.SHARED, on_different_device=True))
+                operations.extend(self._write_back_to(self.owner, self.SHARED, on_different_device=True)[0])
                 
                 # copy from owner
                 operations.append(MemoryOperation.load(device_id, self.owner))
@@ -319,12 +333,12 @@ class Coherence:
                     operations.append(MemoryOperation.check_data(device_id, ensure_is_complete=True))
                     # no need to check data is ready since assume no overlapping writers
                 else:  # update it to latest
+                    operations.extend(self._write_back_to(device_id, self.SHARED)[0])
                     self._data_ready[device_id] = False
-                    operations.extend(self._write_back_to(device_id, self.SHARED))
             else:
                 if device_local_state == self.INVALID:
                     if self._is_complete[device_id]:
-                        operations.extend(self._write_back_to(device_id, self.SHARED))
+                        operations.extend(self._write_back_to(device_id, self.SHARED)[0])
 
                         self._data_ready[device_id] = False
 
@@ -336,6 +350,7 @@ class Coherence:
                                 self.owner = device_id
                         else:
                             self.owner = device_id
+                        self._versions[device_id] = self._latest_version
                     else:  # since we assume all array are disjoint, so could load directly
                         operations.append(MemoryOperation.load(dst=device_id, src=self.owner, is_subarray=True)) 
 
@@ -393,7 +408,7 @@ class Coherence:
 
                 # write back to owner 
                 operations.extend(self._write_back_to(self.owner, self.MODIFIED, 
-                                  on_different_device=True, skip_src_check_id=device_id))
+                                  on_different_device=True, skip_src_check_id=device_id)[0])
                 
                 # copy from owner
                 operations.append(MemoryOperation.load(device_id, self.owner))
@@ -418,9 +433,12 @@ class Coherence:
 
             if device_id == self.owner:
                 if device_local_state != self.MODIFIED:
-                    operations.extend(self._write_back_to(device_id, self.MODIFIED))
+                    ops, has_copy = self._write_back_to(device_id, self.MODIFIED)
+                    operations.extend(ops)
 
-                    self._data_ready[device_id] = False
+                    # if need to from other device
+                    if has_copy:
+                        self._data_ready[device_id] = False
                     self._latest_version += 1
                     self._versions[device_id] = self._latest_version
                 else:
@@ -428,7 +446,7 @@ class Coherence:
             else:
                 if device_local_state == self.INVALID:
                     if self._is_complete[device_id]:
-                        operations.extend(self._write_back_to(device_id, self.MODIFIED))
+                        operations.extend(self._write_back_to(device_id, self.MODIFIED)[0])
 
                         self._data_ready[device_id] = False
                         self._latest_version += 1
@@ -436,7 +454,7 @@ class Coherence:
 
                         # change owner
                         self.owner = device_id
-                    else:  # since we assume all array are disjoint, so could load directly
+                    else:  # since we assume all subarrays are disjoint, could load directly
                         operations.append(MemoryOperation.load(dst=device_id, src=self.owner, is_subarray=True))
 
                         self._data_ready[device_id][slices_hash] = False
@@ -451,9 +469,29 @@ class Coherence:
 
                         # change owner
                         self.owner = device_id
+
+                        # evict others
+                        ops, has_copy = self._write_back_to(device_id, self.MODIFIED)
+                        operations.extend(ops)
+
+                        # if need to from other device
+                        if has_copy:
+                            self._data_ready[device_id] = False
                     else:
-                        self._versions[device_id][slices_hash] += 1
-                        self._latest_version = max(self._latest_version, self._versions[device_id][slices_hash])
+                        self._latest_version += 1
+                        self._versions[device_id][slices_hash] = self._latest_version
+
+                        # invalidate other complete copies
+                        for id, state in self._local_states.items():
+                            # since we assume all subarrays are disjoint, so don't need to evict other subarrays
+                            if not isinstance(state, dict):
+                                if id != device_id:
+                                    self._local_states[id] = self.INVALID
+
+                                    if id != self.owner:  # owner's buffer will be kept (so won't lost the last complete copy)
+                                        self._versions[id] = -1
+                                        self._is_complete[id] = None
+                                        operations.append(MemoryOperation.evict(id))
 
                     operations.append(MemoryOperation.check_data(device_id, ensure_is_complete=self._is_complete[device_id]))
                 else:

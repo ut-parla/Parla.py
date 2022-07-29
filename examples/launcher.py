@@ -484,10 +484,10 @@ def run_blr_threads(gpu_list, timeout):
         print("\t  --Generated input matrix_10k.")
 
     # Test 1: Manual Movement, User Placement
-    print("\t   [Running 1/3] Manual Movement, User Placement")
+    print("\t   [Running 1/1]")
     sub_dict = {}
     for n_gpus in gpu_list:
-        command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement lazy -ngpus {n_gpus}"
+        command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -ngpus {n_gpus}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
@@ -495,35 +495,9 @@ def run_blr_threads(gpu_list, timeout):
         times = parse_blr_times(output[0])
         print(f"\t\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
-        output_dict["m,u"] = sub_dict
 
-    # Test 2: Automatic Movement, User Placement
-    print("\t   [Running 2/3] Automatic Movement, User Placement")
-    sub_dict = {}
-    for n_gpus in gpu_list:
-        command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement eager -ngpus {n_gpus}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
-        #Make sure no errors or timeout were thrown
-        wassert(output, output[1] == 0)
-        #Parse output
-        times = parse_blr_times(output[0])
-        print(f"\t\t    {n_gpus} GPUs: {times}")
-        sub_dict[n_gpus] = times
-        output_dict["a,u"] = sub_dict
 
-    # Test 3: Automatic Movement, Policy Placement
-    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
-    sub_dict = {}
-    for n_gpus in gpu_list:
-        command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 0 -movement eager -ngpus {n_gpus}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
-        #Make sure no errors or timeout were thrown
-        wassert(output, output[1] == 0)
-        #Parse output
-        times = parse_blr_times(output[0])
-        print(f"\t\t    {n_gpus} GPUs: {times}")
-        sub_dict[n_gpus] = times
-        output_dict["a,p"] = sub_dict
+    return sub_dict
 
 
 #Figure 9: blr
@@ -586,6 +560,8 @@ def run_blr_parla(gpu_list, timeout):
         print(f"\t\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
         output_dict["a,p"] = sub_dict
+
+    return output_dict
 
 
 #Figure 9: NBody (Parla)

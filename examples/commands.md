@@ -37,14 +37,42 @@ python jacobi_manual.py -trials 1 -fixed 1
 
 # BLR
 
+## Input File Generation
+
+mkdir examples/blr/inputs
+python examples/blr/app/main.py -mode gen -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k -b 2500 -nblocks 4
+
+## Parla
+python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -ngpus {n_gpus}
+## Python Threading
+
+python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed {0|1} -movement {eager|lazy} -ngpus {n_gpus}
 
 # NBody
 
-## Automatic Movement, Policy Placement
+## Input File Generation
+
+mkdir examples/nbody/python-bh/input
+python examples/nbody/python-bh/bin/gen_input.py normal 10000000 examples/nbody/python-bh/input/n10M.txt
+
+## Parla
+
+### Automatic Movement, Policy Placement
 python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla[NUM GPUs]_eager_sched.ini
 
-## Automatic Movement, User Placement
+### Automatic Movement, User Placement
 python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla[NUM GPUs]_eager.ini
 
-## Manual Movement, User Placement
+### Manual Movement, User Placement
 python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla[NUM GPUs].ini
+
+## Python Threading Implementation
+
+### 1 GPU
+python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/singlegpu.ini
+
+### 2 GPU
+python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/2gpus.ini
+
+### 3 GPU
+python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/4gpus.ini
