@@ -838,7 +838,7 @@ def run_serial(gpu_list, timeout):
         print("\t --Generated input graph for serial + policy")
 
     if not os.path.exists(serial_user_path):
-        command = f"python examples/synthetic/graphs/generate_serial_graph.py -overlap 0 "
+        command = f"python examples/synthetic/graphs/generate_serial_graph.py -overlap 1 "
         command += f"-level 150 -N 6250 -gil_time 0 -location 1 -weight 16000 "
         command += f"-user 1 -output {serial_user_path}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
@@ -1099,7 +1099,7 @@ def run_GIL_test_dask(thread_list, timeout):
         size_dict[size] = thread_dict
     return size_dict
 
-test = [run_GIL_test_parla]
+test = [run_serial]
 figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_reduction, run_independent, run_serial]
 figure_9 = [run_serial]
 figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
