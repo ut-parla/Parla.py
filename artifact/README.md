@@ -7,6 +7,12 @@ Set `CUBLASMG_ROOT=PARLA_ROOT/artifact/cublasmg` and `CUDAMG_ROOT=PARLA_ROOT/art
 
 `In `CUBLASMG_ROOT/cublasmg/test`, we have the modified block matrix multiplication file to perform: C = A @ B.T at the same size as Parla.
 
+You must compile the examples in the test folder. (Requires CUDA and the set paths above)
+
+```
+cd CUBLASMG_ROOT/cublasmg/test
+make
+```
 
 ## Magma
 

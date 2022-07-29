@@ -694,6 +694,7 @@ def run_reduction(gpu_list, timeout):
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for reduction + user")
 
+    sub_dict = {}
     print("\t   [Running 1/3] Manual Movement, User Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
@@ -708,6 +709,7 @@ def run_reduction(gpu_list, timeout):
         sub_dict[n_gpus] = times
     output_dict["m,u"] = sub_dict
 
+    sub_dict = {}
     print("\t   [Running 2/3] Automatic Movement, User Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
@@ -723,6 +725,7 @@ def run_reduction(gpu_list, timeout):
         sub_dict[n_gpus] = times
     output_dict["a,u"] = sub_dict
 
+    sub_dict = {}
     print("\t   [Running 3/3] Automatic Movement, Policy Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
@@ -770,6 +773,7 @@ def run_independent(gpu_list, timeout):
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for independent + user")
 
+    sub_dict = {}
     print("\t   [Running 1/3] Manual Movement, User Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
@@ -785,6 +789,7 @@ def run_independent(gpu_list, timeout):
         sub_dict[n_gpus] = times
     output_dict["m,u"] = sub_dict
 
+    sub_dict = {}
     print("\t   [Running 2/3] Automatic Movement, User Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
@@ -799,6 +804,7 @@ def run_independent(gpu_list, timeout):
         sub_dict[n_gpus] = times
     output_dict["a,u"] = sub_dict
 
+    sub_dict = {}
     print("\t   [Running 3/3] Automatic Movement, Policy Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
@@ -846,6 +852,7 @@ def run_serial(gpu_list, timeout):
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for serial + user")
 
+    sub_dict = {}
     print("\t   [Running 1/3] Manual Movement, User Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
@@ -862,6 +869,7 @@ def run_serial(gpu_list, timeout):
         sub_dict[n_gpus] = times
     output_dict["m,u"] = sub_dict
 
+    sub_dict = {}
     print("\t   [Running 2/3] Automatic Movement, User Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
@@ -876,6 +884,7 @@ def run_serial(gpu_list, timeout):
         sub_dict[n_gpus] = times
     output_dict["a,u"] = sub_dict
 
+    sub_dict = {}
     print("\t   [Running 3/3] Automatic Movement, Policy Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
@@ -1134,7 +1143,7 @@ if __name__ == '__main__':
         print(f"Setting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
 
-    ngpus = [4]
+    ngpus = [1, 2, 4]
 
 
     if args.figures is None:
