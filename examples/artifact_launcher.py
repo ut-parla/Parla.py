@@ -979,7 +979,7 @@ def run_GIL_test_dask(thread_list, timeout):
         size_dict[size] = thread_dict
     return size_dict
 
-test = [run_GIL_test_parla]
+test = [run_reduction]
 #figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
 figure_9 = [run_reduction, run_independent, run_serial]
 figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
