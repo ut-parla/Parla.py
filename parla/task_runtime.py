@@ -424,7 +424,7 @@ class Task:
             # If a dependency is TaskID, not Task object,
             # it implies that it is not yet spawned.
             # Ignore it.
-            if not isinstance(dependency, TaskID) and not dependency._add_dependent_mutex(self):
+            if not dependency._add_dependent_mutex(self) or isinstance(dependency, TaskID):
                 self._num_blocking_dependencies -= 1
 
     def is_blocked_by_dependencies(self) -> bool:
@@ -509,7 +509,6 @@ class Task:
             if self._is_schedulable():
                 self._enqueue_to_scheduler()
 
-
     def _set_state(self, new_state: TaskState):
         # old_state = self._state
         logger.info("[Task] %r: %r -> %r", str(self._taskid),
@@ -581,7 +580,6 @@ class ComputeTask(Task):
             dt = d_tid.task
             assert isinstance(dt, ComputeTask), type(dt)
             dt._handle_dependency_spawn(self)
-            #self._add_dependent(dt)
 
     def _ready_to_map(self):
         assert self.num_unspawned_dependencies == 0
@@ -1001,7 +999,6 @@ class WorkerThread(ControllableThread, SchedulerContext):
                         self.scheduler.append_free_thread(self)
 
                         # Activate scheduler
-                        #self.scheduler.call_scheduler_phases()
                         self.scheduler.map_tasks_callback()
                         self.scheduler.schedule_tasks_callback()
                         self.scheduler.launch_tasks_callback()
@@ -1493,14 +1490,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         if self._exceptions:
             # TODO: Should combine all of them into a single exception.
             raise self._exceptions[0]
-
-    def call_scheduler_phases(self):
-        with self._monitor:
-            # Activate scheduler
-            self.map_tasks_callback()
-            self.schedule_tasks_callback()
-            self.launch_tasks_callback()
-
 
     def append_free_thread(self, thread: WorkerThread):
         with self._thread_queue_monitor:
@@ -2100,9 +2089,6 @@ class Scheduler(ControllableThread, SchedulerContext):
                         break
                     compute_queue = self._compute_task_dev_queues[dev]
                     datamove_queue = self._datamove_task_dev_queues[dev]
-                    #print("compute length:", len(compute_queue), " data length:", len(datamove_queue))
-                    #print("mapped task:", len(self._ready_queue))
-                    #print("spawned task:", len(self._spawned_task_queue))
                     if len(compute_queue) > 0:
                         num_launched_compute_task_count = self.get_launched_compute_task_count(dev)
                         if is_cpu or num_launched_compute_task_count < (self._num_colocatable_tasks + 1):
