@@ -491,12 +491,12 @@ class Task:
         with self._mutex:
             return self._add_dependency(dependency)
 
-    def _add_dependency(self, dependency: 'Task', symmetric=True) -> bool:
+    def _add_dependency(self, dependency: 'Task') -> bool:
         """
         :param symmetric: If true, add self to dependant list of the dependency. This serves as a backlink for updating status.
                           If false, only add it to this tasks dependency list. (The dependency will not be aware of this task depending on it)
         """
-        if symmetric and not dependency._add_dependent_mutex(self):
+        if not dependency._add_dependent_mutex(self):
             return False
         self._num_blocking_dependencies += 1
         self._dependencies.append(dependency)
@@ -599,7 +599,7 @@ class ComputeTask(Task):
     def _handle_dependency_spawn(self, dependency: "Task"):
         with self._mutex:
             self.num_unspawned_dependencies -= 1
-            self._add_dependency(dependency, symmetric=False)
+            self._add_dependency(dependency)
             if self.num_unspawned_dependencies == 0:
                 self._ready_to_map()
 
@@ -1967,10 +1967,6 @@ class Scheduler(ControllableThread, SchedulerContext):
                             if dtask is not None:
                                   mappable_datamove_tasks.append(dtask)
 
-                        for mp_dtask in mappable_datamove_tasks:
-                            self.enqueue_task(mp_dtask)
-
-
                         # Update parray tracking and task count on the device
                         for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
                             assert isinstance(
@@ -1994,6 +1990,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                                     "Task %r allocating %d %s on device %r", task, amount, resource, device)
                             self._available_resources.allocate_resources(
                                 device, task.req.resources, blocking=True)
+
+                        for mp_dtask in mappable_datamove_tasks:
+                            self.enqueue_task(mp_dtask)
 
                         # Only computation needs to set a assigned flag.
                         # Data movement task is set as assigned when it is created.
