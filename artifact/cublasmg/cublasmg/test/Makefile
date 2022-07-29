@@ -27,8 +27,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # 
 
-CUDAMG_ROOT ?= /work2/06081/wlruys/frontera/cublasmg0.1.0-cuda10.1-ubuntu16.04-x86_64/cudalibmg
-CUBLASMG_ROOT ?= /work2/06081/wlruys/frontera/cublasmg0.1.0-cuda10.1-ubuntu16.04-x86_64/cublasmg
+CUDAMG_ROOT ?= ${PARLA_ROOT}/cublasmg/cudalibmg
+CUBLASMG_ROOT ?= ${PARLA_ROOT}/cublasmg/cublasmg
 CUDA_ROOT ?= ${TACC_CUDA_DIR}
 
 CXX=g++

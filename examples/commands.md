@@ -1,5 +1,11 @@
 # Note
-All commands should be execute in the top level directory of this repo
+All commands should be execute in the top level directory of this repo (PARLA_ROOT)
+Before running any 3rd party examples, make sure you have read the README in PARLA_ROOT/artifact and compiled the relvant tests. 
+Please see source examples/source.h for an example (recommended) configuration. 
+
+Below we list all of the apps (in artifact_launcher) and how they can be run by themselves. 
+
+All scripts aside from `nbody` should have an updated argparse. Please run '-h' to see a list of valid options for each. 
 
 # Cholesky 28k (run_cholesky_28k)
 
@@ -115,5 +121,22 @@ python examples/synthetic/graphs/generate_serial_graph.py -level 150 -N 6250 -gi
 
 python examples/synthetic/run.py -graph examples/synthetic/inputs/serial.gph -d 1000 -loop 6 -reinit 2 -data_move {1=manual|2=automatic} -user {0|1}
 
+# Parla Scaling Tests (run_independent_parla_scaling)
+
+python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/independent_1000.gph -threads {thread_count} -data_move 0 -weight {task_size} -use_gpu 0 -gweight {gil_time}
+
+# Dask Scaling Tests (run_independent_dask_thread_scaling)
+
+python examples/synthetic/artifact/scripts/run_dask_thread_gil.py -workers {thread_count} -time {task_size} -gtime {gil_time} -n 1000
+
+# Third-Party
+
+## MAGMA Cholesky (run_cholesky_magma)
+
+See artifact/README or the function in examples/artifact_launcher.py
+
+## CUBLAS Matmul
+
+See artifact/README or the function in examples/artifact_launcher.py
 
 

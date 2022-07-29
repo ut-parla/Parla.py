@@ -14,12 +14,32 @@ cd CUBLASMG_ROOT/cublasmg/test
 make
 ```
 
+This should make three tests that can be run as the following:
+
+#Run 32k x 32k Matrix Mult on 1 GPU
+./1gpuGEMM.exe
+
+#Run 32k x 32k Matrix Mult on 2 GPUs
+./2gpuGEMM.exe
+
+#Run 32k x 32 Matrix Mult on 4 GPUs
+./4gpuGEMM.exe
+
+
+
 ## Magma
 
-For convience we include the MAGMA linear algebra library as a submodule.
+For convience we include the Magma linear algebra library as a submodule.
 Unless you have a local installation, set MAGMA_ROOT=PARLA_ROOT/artifact/magma
 
-To run the cholesky comparison you must build magma with testing enabled.
-To compare we use the testing/testing_dpotrf_mgpu executable with `-N 28000`
-and the '--ngpu' flag.
-Instructions for this are included in the MAGMA readme.
+Instructions for compiling Magma are included in the MAGMA readme.
+To run the cholesky comparison you must build magma with testing enabled. 
+This is the default in Magma 2.6
+
+To compare we use MAGMA_ROOT/testing/testing_dpotrf_mgpu executable.
+
+The tests can be performed as:
+
+./testing_dpotrf_mgpu -N 28000 --ngpu 1
+./testing_dpotrf_mgpu -N 28000 --ngpu 2
+./testing_dpotrf_mgpu -N 28000 --ngpu 4
