@@ -17,5 +17,5 @@ All scripts assume they are run from $PARLA_ROOT.
 Example Usage:
 
 source examples/source.sh
-python examples/launcher.py --figures 10
+python examples/launcher.py --figures 9
 
