@@ -817,7 +817,7 @@ def run_independent(gpu_list, timeout):
     return output_dict
 
 #Figure 9: Synthetic Serial
-def run_serial():
+def run_serial(gpu_list, timeout):
     output_dict = {}
     sub_dict = {}
 
@@ -830,8 +830,8 @@ def run_serial():
     serial_policy_path = "examples/synthetic/inputs/serial_gpu_policy.txt"
     serial_user_path = "examples/synthetic/inputs/serial_gpu_user.txt"
     if not os.path.exists(serial_policy_path):
-        command = f"python examples/synthetic/graphs/generate_serial_graph.py -overlap 0 "
-        command += f"-width 300 -N 6250 -gil_time 0 -location 1 -weight 16000 "
+        command = f"python examples/synthetic/graphs/generate_serial_graph.py -overlap 1 "
+        command += f"-level 150 -N 6250 -gil_time 0 -location 1 -weight 16000 "
         command += f"-user 0 -output {serial_policy_path}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         wassert(output, output[1] == 0)
@@ -839,9 +839,10 @@ def run_serial():
 
     if not os.path.exists(serial_user_path):
         command = f"python examples/synthetic/graphs/generate_serial_graph.py -overlap 0 "
-        command += f"-width 300 -N 6250 -gil_time 0 -location 1 -weight 16000 "
+        command += f"-level 150 -N 6250 -gil_time 0 -location 1 -weight 16000 "
         command += f"-user 1 -output {serial_user_path}"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
+        print(output)
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for serial + user")
 
@@ -852,9 +853,10 @@ def run_serial():
         #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {serial_user_path}"
-        command += f" -d 1000 -loop 3 -reinit 2 -data_move 1 -user 1"
+        command += f" -d 1000 -loop 6 -reinit 2 -data_move 1 -user 1"
         print(command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
+        print(output)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
@@ -867,7 +869,7 @@ def run_serial():
         #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {serial_user_path}"
-        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 1"
+        command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -881,7 +883,7 @@ def run_serial():
         #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {serial_policy_path}"
-        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 0"
+        command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 0"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #print(output)
         times = parse_synthetic_times(output[0])
@@ -1099,7 +1101,7 @@ def run_GIL_test_dask(thread_list, timeout):
 
 test = [run_GIL_test_parla]
 figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_reduction, run_independent, run_serial]
-figure_9 = [run_independent, run_serial]
+figure_9 = [run_serial]
 figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 figure_13 = [run_independent_parla_scaling, run_independent_dask_thread_scaling, run_independent_dask_process_scaling]
 figure_14 = [run_batched_cholesky]
@@ -1132,7 +1134,7 @@ if __name__ == '__main__':
         print(f"Setting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
 
-    ngpus = [1, 2, 4]
+    ngpus = [4]
 
 
     if args.figures is None:
