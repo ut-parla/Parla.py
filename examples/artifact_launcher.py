@@ -739,7 +739,7 @@ def run_reduction(gpu_list, timeout):
         print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_user_path}"
-        command += f" -d 1000 -loop 6 -reinit 1 -data_move 2"
+        command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 1"
         print(command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         times = parse_synthetic_times(output[0])
@@ -754,8 +754,9 @@ def run_reduction(gpu_list, timeout):
         print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_policy_path}"
-        command += f" -d 1000 -loop 6 -reinit 1 -data_move 2"
+        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 0"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
+        print(output)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
@@ -815,7 +816,7 @@ def run_prefetching_test(gpu_list, timeout):
     idx = 0
     print("\t   [Running 1/2] Manual Movement")
     for data_size in data_sizes:
-        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size} -reinit 1"
+        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size} -reinit 2"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
@@ -830,7 +831,7 @@ def run_prefetching_test(gpu_list, timeout):
     idx = 0
     print("\t   [Running 2/2] Automatic Movement")
     for data_size in data_sizes:
-        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size} -reinit 1 -loop 5"
+        command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size} -reinit 2 -loop 5"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
