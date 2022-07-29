@@ -275,7 +275,7 @@ class PArray:
         if device_id is None:
             device_id = self._current_device_index
 
-        with self._coherence_lock:
+        with self._coherence_cv[device_id]:
             operations = self._coherence.evict(device_id, keep_one_copy)
             for op in operations:
                 self._process_operation(op)
