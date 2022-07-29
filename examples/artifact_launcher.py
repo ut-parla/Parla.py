@@ -204,7 +204,7 @@ def run_cholesky_20_host(core_list, timeout):
         wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
 
-    cpu_cores = [ 1, 2, 4, 8, 16, 32, 52 ]
+    cpu_cores = [ 1, 2, 4, 8, 16 ]
     print("\t   Running CPU:")
     #Test 1: Manual Movement, User Placement
     for num_cores in cpu_cores:
@@ -241,10 +241,10 @@ def run_cholesky_20_gpu(gpu_list, timeout):
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
         cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
-        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/cholesky/blocked_cholesky_manual.py -matrix examples/cholesky/chol_20000.npy -fix 1 -ngpus {n_gpus}"
-        print("Current running:", command)
+        #print("Current running:", command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
@@ -279,7 +279,7 @@ def run_dask_cholesky_20_host(cores_list, timeout):
         n_workers = worker_list[wi]
         for pt in perthread_list[wi]:
             command = f"python examples/cholesky/dask/dask_cpu_cholesky.py -workers {n_workers} -perthread {pt} -matrix examples/cholesky/chol_20000.npy"
-            print(command, "...")
+            #print(command, "...")
             output = pe.run(command, timeout=timeout, withexitstatus=True)
             #Make sure no errors or timeout were thrown
             wassert(output, output[1] == 0)
@@ -312,12 +312,15 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
         cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
-        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         os.environ['UCX_TLS'] = "cuda,cuda_copy,cuda_ipc,tpc"
         command = f"python examples/cholesky/dask/dask_gpu_cholesky.py -matrix examples/cholesky/chol_20000.npy"
-        print("Current running:", command)
+        #print("Current running:", command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
+        if "No module named" in str(output[0]):
+            print("ERROR", output[0])
+            assert(False)
         #Make sure no errors or timeout were thrown
         # DASK-GPU makes an asyncio error after the app completes. so ignore it.
         #wassert(output, output[1] == 0)
@@ -697,7 +700,6 @@ def run_reduction(gpu_list, timeout):
         os.makedirs("examples/synthetic/inputs")
         print("\t  --Made input directory.")
 
-
     reduction_policy_path = "examples/synthetic/inputs/reduction_gpu_policy.txt"
     reduction_user_path = "examples/synthetic/inputs/reduction_gpu_user.txt"
     if not os.path.exists(reduction_policy_path):
@@ -716,31 +718,29 @@ def run_reduction(gpu_list, timeout):
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for reduction + user")
 
-        """
     print("\t   [Running 1/3] Manual Movement, User Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
         cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
-        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_user_path}"
-        command += f" -d 1000 -loop 6 -reinit 1 -data_move 1"
+        command += f" -d 1000 -loop 6 -reinit 2 -data_move 1 -user 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
     output_dict["m,u"] = sub_dict
-    """
 
     print("\t   [Running 2/3] Automatic Movement, User Placement")
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
         cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
-        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_user_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 1"
-        print(command)
+        #print(command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -751,12 +751,12 @@ def run_reduction(gpu_list, timeout):
     for n_gpus in gpu_list:
         cuda_visible_devices = list(range(n_gpus))
         cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
-        print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_policy_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 0"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
-        print(output)
+        #print(output)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
@@ -766,12 +766,154 @@ def run_reduction(gpu_list, timeout):
 
 
 #Figure 9: Synthetic Independent
-def run_independent(gpu_list):
-    pass
+def run_independent(gpu_list, timeout):
+    output_dict = {}
+    sub_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/synthetic/inputs"):
+        print("\t  --Making input directory...")
+        os.makedirs("examples/synthetic/inputs")
+        print("\t  --Made input directory.")
+
+    independent_policy_path = "examples/synthetic/inputs/independent_gpu_policy.txt"
+    independent_user_path = "examples/synthetic/inputs/independent_gpu_user.txt"
+    if not os.path.exists(independent_policy_path):
+        command = f"python examples/synthetic/graphs/generate_independent_graph.py -overlap 0 "
+        command += f"-width 300 -N 6250 -gil_time 0 -location 1 -weight 16000 "
+        command += f"-user 0 -output {independent_policy_path}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        wassert(output, output[1] == 0)
+        print("\t --Generated input graph for independent + policy")
+
+    if not os.path.exists(independent_user_path):
+        command = f"python examples/synthetic/graphs/generate_independent_graph.py -overlap 0 "
+        command += f"-width 300 -N 6250 -gil_time 0 -location 1 -weight 16000 "
+        command += f"-user 1 -output {independent_user_path}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        wassert(output, output[1] == 0)
+        print("\t --Generated input graph for independent + user")
+
+    print("\t   [Running 1/3] Manual Movement, User Placement")
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/synthetic/run.py -graph {independent_user_path}"
+        command += f" -d 1000 -loop 3 -reinit 2 -data_move 1 -user 1"
+        print(command)
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        times = parse_synthetic_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["m,u"] = sub_dict
+
+    print("\t   [Running 2/3] Automatic Movement, User Placement")
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/synthetic/run.py -graph {independent_user_path}"
+        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 1"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        times = parse_synthetic_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,u"] = sub_dict
+
+    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/synthetic/run.py -graph {independent_policy_path}"
+        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 0"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #print(output)
+        times = parse_synthetic_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,p"] = sub_dict
+
+    return output_dict
 
 #Figure 9: Synthetic Serial
 def run_serial():
-    pass
+    output_dict = {}
+    sub_dict = {}
+
+    # Generate input file
+    if not os.path.exists("examples/synthetic/inputs"):
+        print("\t  --Making input directory...")
+        os.makedirs("examples/synthetic/inputs")
+        print("\t  --Made input directory.")
+
+    serial_policy_path = "examples/synthetic/inputs/serial_gpu_policy.txt"
+    serial_user_path = "examples/synthetic/inputs/serial_gpu_user.txt"
+    if not os.path.exists(serial_policy_path):
+        command = f"python examples/synthetic/graphs/generate_serial_graph.py -overlap 0 "
+        command += f"-width 300 -N 6250 -gil_time 0 -location 1 -weight 16000 "
+        command += f"-user 0 -output {serial_policy_path}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        wassert(output, output[1] == 0)
+        print("\t --Generated input graph for serial + policy")
+
+    if not os.path.exists(serial_user_path):
+        command = f"python examples/synthetic/graphs/generate_serial_graph.py -overlap 0 "
+        command += f"-width 300 -N 6250 -gil_time 0 -location 1 -weight 16000 "
+        command += f"-user 1 -output {serial_user_path}"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        wassert(output, output[1] == 0)
+        print("\t --Generated input graph for serial + user")
+
+    print("\t   [Running 1/3] Manual Movement, User Placement")
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/synthetic/run.py -graph {serial_user_path}"
+        command += f" -d 1000 -loop 3 -reinit 2 -data_move 1 -user 1"
+        print(command)
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        times = parse_synthetic_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["m,u"] = sub_dict
+
+    print("\t   [Running 2/3] Automatic Movement, User Placement")
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/synthetic/run.py -graph {serial_user_path}"
+        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 1"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        times = parse_synthetic_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,u"] = sub_dict
+
+    print("\t   [Running 3/3] Automatic Movement, Policy Placement")
+    for n_gpus in gpu_list:
+        cuda_visible_devices = list(range(n_gpus))
+        cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
+        #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
+        command = f"python examples/synthetic/run.py -graph {serial_policy_path}"
+        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 0"
+        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        #print(output)
+        times = parse_synthetic_times(output[0])
+        print(f"\t    {n_gpus} GPUs: {times}")
+        sub_dict[n_gpus] = times
+    output_dict["a,p"] = sub_dict
+
+    return output_dict
 
 #Figure 14: Batched Cholesky Variants
 def run_batched_cholesky(gpu_list, timeout):
@@ -980,8 +1122,8 @@ def run_GIL_test_dask(thread_list, timeout):
     return size_dict
 
 test = [run_GIL_test_parla]
-#figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_nbody, run_reduction, run_independent, run_serial]
-figure_9 = [run_reduction, run_independent, run_serial]
+figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_reduction, run_independent, run_serial]
+figure_9 = [run_independent, run_serial]
 figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 figure_13 = [run_independent_parla_scaling, run_independent_dask_thread_scaling, run_independent_dask_process_scaling]
 figure_14 = [run_batched_cholesky]
