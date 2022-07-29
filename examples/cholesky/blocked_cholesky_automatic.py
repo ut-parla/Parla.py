@@ -145,8 +145,10 @@ def cupy_trsm_wrapper(a, b):
 
     diag = cublas.CUBLAS_DIAG_NON_UNIT
     m, n = (b.side, 1) if b.ndim == 1 else b.shape
-    one = np.array(1, dtype=a.dtype)
-    trsm(cublas_handle, side, uplo, trans, diag, m, n, one.ctypes.data, a.data.ptr, m, b.data.ptr, m)
+    #one = np.array(1, dtype=a.dtype)
+    # TODO(hc): Passing the one gave NaN output. Passing 1.0 on tuxedo gave segfault.
+    # We should dig into this to avoid non-deterministic error.
+    trsm(cublas_handle, side, uplo, trans, diag, m, n, 1.0, a.data.ptr, m, b.data.ptr, m)
     return b
 
 @ltriang_solve.variant(gpu)
@@ -349,6 +351,7 @@ def main():
 
             # Call Parla Cholesky result and wait for completion
             await cholesky_blocked_inplace(ap_parray, block_size)
+            print(ap_parray)
 
             #print(ap)
             end = time.perf_counter()
@@ -375,6 +378,8 @@ def main():
             print("--------")
             # Check result
             print("Is NAN: ", np.isnan(np.sum(ap)))
+            if (np.isnan(np.sum(ap))) == True:
+                print(ap)
 
             if check_error:
                 if time_zeros:

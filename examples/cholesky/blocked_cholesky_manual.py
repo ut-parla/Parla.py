@@ -150,8 +150,10 @@ def cupy_trsm_wrapper(a, b):
     m, n = (b.side, 1) if b.ndim == 1 else b.shape
 
     # Numpy 1.0F and Python native 1.0F have different representation.
-    one = np.array(1, dtype=a.dtype)
-    trsm(cublas_handle, side, uplo, trans, diag, m, n, one.ctypes.data, a.data.ptr, m, b.data.ptr, m)
+    # TODO(hc): Passing the one gave NaN output. Passing 1.0 on tuxedo gave segfault.
+    # We should dig into this to avoid non-deterministic error.
+    #one = np.array(1, dtype=a.dtype)
+    trsm(cublas_handle, side, uplo, trans, diag, m, n, 1.0, a.data.ptr, m, b.data.ptr, m)
     return b
 
 @ltriang_solve.variant(gpu)
