@@ -724,7 +724,7 @@ def run_reduction(gpu_list, timeout):
         print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_user_path}"
-        command += f" -d 1000 -loop 6 -reinit 0 -data_move 1"
+        command += f" -d 1000 -loop 6 -reinit 1 -data_move 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -739,7 +739,7 @@ def run_reduction(gpu_list, timeout):
         print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_user_path}"
-        command += f" -d 1000 -loop 6 -reinit 0 -data_move 2"
+        command += f" -d 1000 -loop 6 -reinit 1 -data_move 2"
         print(command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         times = parse_synthetic_times(output[0])
@@ -754,7 +754,7 @@ def run_reduction(gpu_list, timeout):
         print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_policy_path}"
-        command += f" -d 1000 -loop 6 -reinit 0 -data_move 2"
+        command += f" -d 1000 -loop 6 -reinit 1 -data_move 2"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
