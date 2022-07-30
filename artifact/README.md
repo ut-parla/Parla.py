@@ -61,5 +61,7 @@ More detailed information of the installations can be found from the official
 Dask web pages:
 
 Dask: https://www.dask.org
+
 Dask-distributed: https://distributed.dask.org/en/stable
+
 Dask-cuda: https://docs.rapids.ai
