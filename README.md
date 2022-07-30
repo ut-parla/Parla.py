@@ -2,17 +2,17 @@
 
 Parla is a high-level programming system for running numerical simulations on heterogeneous architectures.
 The current prototype emphasizes orchestrating data movement and kernel calls across all the CPUs and GPUs available on a given machine.
-<!--API documentation is available at [http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html](http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html). --> 
+<!--API documentation is available at [http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html](http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html). -->
 
 
 # Installation
 
-Parla is currently distributed from this repository as a Python module. 
-In the future, Parla will be available as a Conda package; for now, it must manually be installed. 
-For new users unfamiliar with Python package management, we recommend using Miniconda to manage Parla and its dependencies. 
-To install Miniconda you can follow the detailed instructions available from [Miniconda's documentation](https://docs.conda.io/en/latest/miniconda.html). 
-Abbreviated instructions are included here. 
-If you are running Linux and have `wget` available, you can download and install Miniconda into the Miniconda subdirectory of your home directory by running 
+Parla is currently distributed from this repository as a Python module.
+In the future, Parla will be available as a Conda package; for now, it must manually be installed.
+For new users unfamiliar with Python package management, we recommend using Miniconda to manage Parla and its dependencies.
+To install Miniconda you can follow the detailed instructions available from [Miniconda's documentation](https://docs.conda.io/en/latest/miniconda.html).
+Abbreviated instructions are included here.
+If you are running Linux and have `wget` available, you can download and install Miniconda into the Miniconda subdirectory of your home directory by running
 
 ```
 wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
@@ -20,14 +20,15 @@ bash miniconda.sh
 rm miniconda.sh
 ```
 
-Restart your shell for changes to take effect. 
+Restart your shell for changes to take effect.
 
-<!--Parla is available as a Conda package. --> 
-<!--A docker image with the Conda package already set up is also available. --> 
-Parla requires Python 3.7, numpy, cython, and psutil. 
-It also depends on C package libunwind. 
-The examples require scipy, numba, and cupy. 
-You may want to create a new Conda environment with the required Python version, like so 
+<!--Parla is available as a Conda package. -->
+<!--A docker image with the Conda package already set up is also available. -->
+Parla requires Python>=3.7, numpy, cupy, cython, and psutil.
+Features for VECs (dlm_open execution spaces) also depends on the C package libunwind.
+
+To run all examples you require: scipy, numba, pexpect, and cupy.
+You may want to create a new Conda environment with the required Python version, like so
 
 ```
 conda create -n environment_name python=3.7
@@ -39,14 +40,14 @@ If you have sudo privileges on your system, install libunwind-dev as follows:
 sudo apt-get install libunwind-dev # Installs libunwind on your system
 ```
 
-If you do not have sudo privileges and libunwind-dev is not already installed, you will have to build it yourself. 
-The repository and build instructions are located [here](https://github.com/libunwind/libunwind).  
+If you do not have sudo privileges and libunwind-dev is not already installed, you will have to build it yourself.
+The repository and build instructions are located [here](https://github.com/libunwind/libunwind).
 
-To activate your Conda environment and install the other required dependencies, run 
+To activate your Conda environment and install the other required dependencies, run
 
 ```
 conda activate environment_name # Opens your Conda environment
-conda install numpy cython psutil scipy numba cupy # Installs Python packages into your environment
+conda install numpy cython psutil scipy numba cupy pexpect # Installs Python packages into your environment
 ```
 
 To install Parla itself, navigate to the top-level directory of this repository, and from it, run ONE of the following two commands:
@@ -56,11 +57,11 @@ pip install .     # For Parla Users
 pip install -e .  # For Parla Developers who are modifying Parla and would like to see their changes reflected as they work
 ```
 
-The installation process creates extra files in the repository. 
-Virtual execution contexts (experimental - see below) require on some of these files to be present. 
-If you are not using virtual execution contexts and would like to clear out the extra files created by Parla on installation, use [`git clean`](https://git-scm.com/docs/git-clean).  
+The installation process creates extra files in the repository.
+Virtual execution contexts (experimental - see below) require on some of these files to be present.
+If you are not using virtual execution contexts and would like to clear out the extra files created by Parla on installation, use [`git clean`](https://git-scm.com/docs/git-clean).
 
-Now all the scripts in this repository are runnable as normal Python scripts. 
+Now all the scripts in this repository are runnable as normal Python scripts.
 To test your installation, try running
 
 ```
@@ -73,7 +74,7 @@ This should print
 Hello, World!
 ```
 
-We recommend entering the tutorial directory and working through it as a starting point for learning Parla.  
+We recommend entering the tutorial directory and working through it as a starting point for learning Parla.
 
 ## Running the Docker Container
 The Parla container requires CUDA support in the Docker host environment. To get a shell inside the provided docker container run
