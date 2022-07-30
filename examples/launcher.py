@@ -11,7 +11,7 @@ import re
 ######
 
 
-def wassert(output, condition, required=True, verbose=False):
+def wassert(output, condition, required=True, verbose=True):
     if condition:
         return True
     else:
