@@ -43,3 +43,23 @@ The tests can be performed as:
 ./testing_dpotrf_mgpu -N 28000 --ngpu 1
 ./testing_dpotrf_mgpu -N 28000 --ngpu 2
 ./testing_dpotrf_mgpu -N 28000 --ngpu 4
+
+
+## Dask
+
+To enable users to reproduce Cholesky comparison experiments, we include the conda
+environment file that we used.
+
+Before running the Dask Cholesky evaluations, please run the following commands:
+
+```
+# Create a conda environment from the provided environment file.
+$ conda create --name <env> --file "$PARLA_ROOT/dask-requirements.txt"
+```
+
+More detailed information of the installations can be found from the official
+Dask web pages:
+
+Dask: https://www.dask.org
+Dask-distributed: https://distributed.dask.org/en/stable
+Dask-cuda: https://docs.rapids.ai
