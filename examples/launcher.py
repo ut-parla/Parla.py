@@ -1207,7 +1207,7 @@ def run_GIL_test_dask(thread_list, timeout):
     return size_dict
 
 test = [run_serial]
-figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_blr_threads, run_reduction, run_independent, run_serial]
+figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_blr_threads, run_nbody_parla, run_nbody_threads, run_reduction, run_independent, run_serial]
 figure_9_cublas = [run_matmul_cublas]
 figure_11 = [run_prefetching_test]
 figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu]
