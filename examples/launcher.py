@@ -86,6 +86,10 @@ def parse_magma_times(output):
 
 #Test:
 def run_test(gpu_list, timeout):
+    """
+    Sample function to test launcher
+    """
+
     output_dict = {}
 
     #Loop over number of GPUs in each subtest
@@ -105,6 +109,11 @@ def run_test(gpu_list, timeout):
 
 #Figure 9: Cholesky 28K Magma
 def run_cholesky_magma(gpu_list, timeout):
+    """
+    Figure 9. 3rd Party Comparison. Run blocked cholesky factorization on gpus with magma.
+    Requires artifact/magma built with testing enabled on the path.
+    See README.
+    """
 
     #Put testing directory on PATH
     magma_root = os.environ.get("MAGMA_ROOT")
@@ -130,6 +139,10 @@ def run_cholesky_magma(gpu_list, timeout):
 
 #Figure 9: Cholesky
 def run_cholesky_28(gpu_list, timeout):
+    """
+    Figure 9. Parla. Run blocked cholesky factorization on gpus.
+    """
+
     output_dict = {}
 
     sub_dict = {}
@@ -191,6 +204,10 @@ def run_cholesky_28(gpu_list, timeout):
 
 #Figure 12: Parla Cholesky (CPU)
 def run_cholesky_20_host(core_list, timeout):
+    """
+    Figure 12. Parla. Run blocked cholesky on the CPU
+    """
+
     output_dict = {}
 
     sub_dict = {}
@@ -204,6 +221,7 @@ def run_cholesky_20_host(core_list, timeout):
         wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
 
+    #NOTE: Number of CPU cores is set manually.
     cpu_cores = [ 1, 2, 4, 8, 16 ]
     print("\t   Running CPU:")
     #Test 1: Manual Movement, User Placement
@@ -222,6 +240,10 @@ def run_cholesky_20_host(core_list, timeout):
 
 #Figure 12: Parla Cholesky (GPU)
 def run_cholesky_20_gpu(gpu_list, timeout):
+    """
+    Figure 12. Parla. Run blocked cholesky on the GPUs.
+    """
+
     output_dict = {}
 
     sub_dict = {}
@@ -257,6 +279,10 @@ def run_cholesky_20_gpu(gpu_list, timeout):
 
 #Figure 12: Dask Cholesky (CPU)
 def run_dask_cholesky_20_host(cores_list, timeout):
+    """
+    Figure 12. Dask. Run blocked cholesky on the CPU.
+    """
+
     output_dict = {}
 
     sub_dict = {}
@@ -293,6 +319,10 @@ def run_dask_cholesky_20_host(cores_list, timeout):
 
 #Figure 12: Dask Cholesky (GPU)
 def run_dask_cholesky_20_gpu(gpu_list, timeout):
+    """
+    Figure 12. Dask. Run blocked cholesky on the GPUs.
+    """
+
     output_dict = {}
 
     sub_dict = {}
@@ -334,6 +364,10 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
 
 #Figure 9: Jacobi
 def run_jacobi(gpu_list, timeout):
+    """
+    Figure 9. Parla. Run Jacobi on the GPUs.
+    """
+
     output_dict = {}
 
     sub_dict = {}
@@ -384,6 +418,10 @@ def run_jacobi(gpu_list, timeout):
 
 #Figure 9: Matmul 32K Magma
 def run_matmul_cublas(gpu_list, timeout):
+    """
+    Figure 9. 3rd Party. Run Matmul on the GPUs.
+    Needs artifact/cublasmg/ to be compiled and on the path. See README.
+    """
 
     #Put testing directory on PATH
     cublasmg_root = os.environ.get("CUBLASMG_ROOT")
@@ -414,6 +452,9 @@ def run_matmul_cublas(gpu_list, timeout):
 
 #Figure 9: Matmul
 def run_matmul(gpu_list, timeout):
+    """
+    Figure 9. Parla. Run Matmul on the GPUs.
+    """
 
     output_dict = {}
 
@@ -466,6 +507,9 @@ def run_matmul(gpu_list, timeout):
 
 #Figure 9: blr
 def run_blr_threads(gpu_list, timeout):
+    """
+    Figure 9. Non-Parla. Run BLR on the GPUs.
+    """
 
     output_dict = {}
 
@@ -502,6 +546,9 @@ def run_blr_threads(gpu_list, timeout):
 
 #Figure 9: blr
 def run_blr_parla(gpu_list, timeout):
+    """
+    Figure 9. Parla. Run BLR on the GPUs.
+    """
 
     output_dict = {}
 
@@ -566,6 +613,10 @@ def run_blr_parla(gpu_list, timeout):
 
 #Figure 9: NBody (Parla)
 def run_nbody_parla(gpu_list, timeout):
+    """
+    Figure 9. NBody (Parla). Run NBody on the GPUs.
+    """
+
     output_dict = {}
 
     # Generate input file
@@ -631,6 +682,10 @@ def run_nbody_parla(gpu_list, timeout):
 
 #Figure 9: NBody (Python threading, no tasks)
 def run_nbody_threads(gpu_list, timeout):
+    """
+    Figure 9. NBody (Python threading, no tasks). Run NBody on the GPUs.
+    """
+
     output_dict = {}
 
     # Generate input dir
@@ -667,6 +722,10 @@ def run_nbody_threads(gpu_list, timeout):
 
 #Figure 9: Synthetic Reduction
 def run_reduction(gpu_list, timeout):
+    """
+    Figure 9. Parla. Synthetic Reduction. Run Reduction on the GPUs.
+    """
+
     output_dict = {}
     sub_dict = {}
 
@@ -746,6 +805,10 @@ def run_reduction(gpu_list, timeout):
 
 #Figure 9: Synthetic Independent
 def run_independent(gpu_list, timeout):
+    """
+    Figure 9. Run Independent on the GPUs.
+    """
+
     output_dict = {}
     sub_dict = {}
 
@@ -824,6 +887,10 @@ def run_independent(gpu_list, timeout):
 
 #Figure 9: Synthetic Serial
 def run_serial(gpu_list, timeout):
+    """
+    Figure 9. Run Serial on the GPUs.
+    """
+
     output_dict = {}
     sub_dict = {}
 
@@ -904,6 +971,9 @@ def run_serial(gpu_list, timeout):
 
 #Figure 14: Batched Cholesky Variants
 def run_batched_cholesky(gpu_list, timeout):
+    """
+    Figure 14. Run Batched Cholesky on the GPUs. (Test variants)
+    """
     cpu_dict = {}
 
     print("\t   [Running 1/2] CPU Support")
@@ -938,6 +1008,9 @@ def run_batched_cholesky(gpu_list, timeout):
 
 #Figure 11: Prefetching Plot
 def run_prefetching_test(gpu_list, timeout):
+    """
+    Figure 11. Run Prefetching Test on the GPUs. (Test data movement)
+    """
     auto_dict = {}
     data_sizes = [2, 4, 40]
     data_map = ["32MB", "64MB", "640MB"]
@@ -975,7 +1048,15 @@ def run_prefetching_test(gpu_list, timeout):
 
 #Figure 13: Independent Parla Scaling
 def run_independent_parla_scaling(thread_list, timeout):
+    """
+    Figure 13. Run Independent Parla Scaling on the CPU. (Tests overhead)
+    """
+
     n = 1000
+
+    #NOTE: Task sizes in microseconds.
+    #These are set manually. The full test takes a long time.
+
     #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
     sizes = [1600, 6400, 51200]
 
@@ -1000,7 +1081,13 @@ def run_independent_parla_scaling(thread_list, timeout):
 
 #Figure 13: Independnet Dask Scaling
 def run_independent_dask_thread_scaling(thread_list, timeout):
+    """
+    Figure 13. Run Independent Dask Thread Scaling on the CPU. (Tests overhead)
+    """
     n = 1000
+
+    #NOTE: Task sizes in microseconds.
+    #These are set manually. The full test takes a long time.
     #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
     sizes = [1600, 6400, 51200]
     size_dict = {}
@@ -1023,7 +1110,13 @@ def run_independent_dask_thread_scaling(thread_list, timeout):
 
 #Figure 13: Independent Dask Scaling
 def run_independent_dask_process_scaling(process_list, timeout):
+    """
+    Figure 13. Run Independent Dask Process Scaling on the CPU. (Tests overhead)
+    """
     n = 1000
+
+    #NOTE: Task sizes in microseconds.
+    #These are set manually. The full test takes a long time.
     #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
     sizes = [1600, 6400, 51200]
     process_list = [1, 4, 8, 16, 32, 36, 40]
@@ -1062,6 +1155,10 @@ def run_independent_dask_process_scaling(process_list, timeout):
 
 #Figure 13: GIL test (Parla)
 def run_GIL_test_parla(thread_list, timeout):
+    """
+    Figure 13. Run Independent Parla Scaling on the CPU. (Tests overhead).
+    This uses the interface to set time spent holding the GIL.
+    """
     n = 1000
     sizes = [45000]
     gil = 5000
@@ -1086,8 +1183,11 @@ def run_GIL_test_parla(thread_list, timeout):
 
 #Figure 13: GIL test (Dask Threading)
 def run_GIL_test_dask(thread_list, timeout):
+    """
+    Figure 13. Run Independent Dask Thread Scaling on the CPU. (Tests overhead).
+    This uses the interface to set time spent holding the GIL.
+    """
     n = 1000
-    #sizes = [800, 1600, 3200, 6400, 12800, 25600, 51200, 102400]
     sizes = [50000]
     gil = 5000
     size_dict = {}
@@ -1143,8 +1243,9 @@ if __name__ == '__main__':
         print(f"Setting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
 
+    #NOTE: Set ngpus and nthreads for your machine here
     ngpus = [1, 2, 4]
-
+    nthreads = [1, 2, 4, 8, 16]
 
     if args.figures is None:
         figure_list = ["-1"]
@@ -1152,8 +1253,12 @@ if __name__ == '__main__':
         figure_list = args.figures
 
     for figure_num in figure_list:
+        device_list = ngpus
         if int(figure_num) < 0:
             figure_num = "test"
+        if int(figure_num) == 13:
+            device_list = nthreads
+
         figure = f"Figure_{figure_num}"
         if figure not in figure_dictionary:
             print(f"Experiments for {figure} not found")
@@ -1165,7 +1270,7 @@ if __name__ == '__main__':
         for test in figure_dictionary[figure]:
             test_output = {}
             print("\t ++Experiment {}/{}. Name: {}".format(i, total_tests, test.__name__))
-            output_dict = test(ngpus, args.timeout)
+            output_dict = test(device_list, args.timeout)
             test_output[test.__name__] = output_dict
             #print("\t --Experiment {}/{} Completed. Output: {}".format(i, total_tests, output_dict))
             print("\t --Experiment {}/{} Completed.".format(i, total_tests))
