@@ -314,9 +314,8 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
         cuda_visible_devices = ','.join(map(str, cuda_visible_devices))
         #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
-        os.environ['UCX_TLS'] = "cuda,cuda_copy,cuda_ipc,tpc"
+        os.environ['UCX_TLS'] = "cuda,cuda_copy,cuda_ipc,tcp"
         command = f"python examples/cholesky/dask/dask_gpu_cholesky.py -matrix examples/cholesky/chol_20000.npy"
-        #print("Current running:", command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         if "No module named" in str(output[0]):
             print("ERROR", output[0])
@@ -382,7 +381,7 @@ def run_jacobi(gpu_list, timeout):
 
     return output_dict
 
-#Figure 9: Matmul 32K Magma
+#Figure 9: Matmul 32K cuBLAS
 def run_matmul_cublas(gpu_list, timeout):
 
     #Put testing directory on PATH
@@ -399,7 +398,7 @@ def run_matmul_cublas(gpu_list, timeout):
 
     output_dict = {}
     #Loop over number of GPUs in each subtest
-    print("\t   [Running Matmul 32K (MAGMA) 1/1]")
+    print("\t   [Running Matmul 32K (cuBLAS) 1/1]")
     for n_gpus in gpu_list:
         command = f"./{n_gpus}gpuGEMM.exe"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
@@ -460,6 +459,9 @@ def run_matmul(gpu_list, timeout):
         print(f"\t\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
     output_dict["a,p"] = sub_dict
+
+    # Cublas (third-party implementation) running.
+    run_matmul_cublas(gpu_list, timeout)
 
     return output_dict
 
@@ -781,7 +783,7 @@ def run_independent(gpu_list, timeout):
         #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {independent_user_path}"
-        command += f" -d 1000 -loop 3 -reinit 2 -data_move 1 -user 1"
+        command += f" -d 1000 -loop 6 -reinit 2 -data_move 1 -user 1"
         print(command)
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         times = parse_synthetic_times(output[0])
@@ -797,7 +799,7 @@ def run_independent(gpu_list, timeout):
         #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {independent_user_path}"
-        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 1"
+        command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -812,7 +814,7 @@ def run_independent(gpu_list, timeout):
         #print(f"Resetting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {independent_policy_path}"
-        command += f" -d 1000 -loop 3 -reinit 2 -data_move 2 -user 0"
+        command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 0"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #print(output)
         times = parse_synthetic_times(output[0])
@@ -1109,12 +1111,11 @@ def run_GIL_test_dask(thread_list, timeout):
     return size_dict
 
 test = [run_serial]
-figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_reduction, run_independent, run_serial]
-figure_9 = [run_serial]
+figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_blr_threads, run_reduction, run_independent, run_serial]
+figure_11 = [run_prefetching_test]
 figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 figure_13 = [run_independent_parla_scaling, run_independent_dask_thread_scaling, run_independent_dask_process_scaling]
 figure_14 = [run_batched_cholesky]
-figure_11 = [run_prefetching_test]
 
 figure_dictionary = {}
 figure_dictionary['Figure_9'] = figure_9
@@ -1177,10 +1178,3 @@ if __name__ == '__main__':
     print("All experiments complete.")
     print("Output:")
     print(figure_output)
-
-
-
-
-
-
-
