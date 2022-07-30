@@ -150,3 +150,6 @@ Using the parla.sh shell script you can run parla programs as "sh parla.sh $ARGS
 
 ## Acknowledgements
 This software is based upon work supported by the Department of Energy, National Nuclear Security Administration under Award Number DE-NA0003969.
+
+## How to Cite Parla.py
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6941889.svg)](https://doi.org/10.5281/zenodo.6941889)
