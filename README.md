@@ -76,6 +76,12 @@ Hello, World!
 
 We recommend entering the tutorial directory and working through it as a starting point for learning Parla.
 
+To run examples for blr, nbody, and synthetic graphs you have to initalize the submodules.
+We recommend running:
+```
+git submodule update --init --recursive --remote
+```
+
 ## Running the Docker Container
 The Parla container requires CUDA support in the Docker host environment. To get a shell inside the provided docker container run
 
