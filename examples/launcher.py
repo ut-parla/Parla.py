@@ -500,10 +500,6 @@ def run_matmul(gpu_list, timeout):
         print(f"\t\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
     output_dict["a,p"] = sub_dict
-
-    # Cublas (third-party implementation) running.
-    run_matmul_cublas(gpu_list, timeout)
-
     return output_dict
 
 
@@ -1212,14 +1208,18 @@ def run_GIL_test_dask(thread_list, timeout):
 
 test = [run_serial]
 figure_9 = [run_jacobi, run_matmul, run_blr_parla, run_blr_threads, run_reduction, run_independent, run_serial]
+figure_9_cublas = [run_matmul_cublas]
 figure_11 = [run_prefetching_test]
-figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu, run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
+figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu]
+figure_12_dask = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
 figure_13 = [run_independent_parla_scaling, run_independent_dask_thread_scaling, run_independent_dask_process_scaling]
 figure_14 = [run_batched_cholesky]
 
 figure_dictionary = {}
 figure_dictionary['Figure_9'] = figure_9
+figure_dictionary['Figure_9_cublas'] = figure_9_cublas
 figure_dictionary['Figure_12'] = figure_12
+figure_dictionary['Figure_12_dask'] = figure_12_dask
 figure_dictionary['Figure_14'] = figure_14
 figure_dictionary['Figure_11'] = figure_11
 figure_dictionary['Figure_13'] = figure_13
@@ -1231,7 +1231,8 @@ if __name__ == '__main__':
     import os
     import sys
     parser = argparse.ArgumentParser(description='Runs the benchmarks')
-    parser.add_argument('--figures', type=int, nargs="+", help='Figure numbers to generate', default=None)
+    parser.add_argument('--figures', type=str, nargs="+",
+        help='Figure numbers to test (9, 9_cublas, 11, 12, 12_dask, 13, 14)', default=None)
     parser.add_argument('--timeout', type=int, help='Max Timeout for a benchmark', default=1000)
 
     args = parser.parse_args()
@@ -1255,10 +1256,11 @@ if __name__ == '__main__':
 
     for figure_num in figure_list:
         device_list = ngpus
-        if int(figure_num) < 0:
-            figure_num = "test"
-        if int(figure_num) == 13:
-            device_list = nthreads
+        if figure_num.isdigit():
+            if int(figure_num) < 0:
+                figure_num = "test"
+            if int(figure_num) == 13:
+                device_list = nthreads
 
         figure = f"Figure_{figure_num}"
         if figure not in figure_dictionary:
