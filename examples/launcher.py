@@ -976,9 +976,8 @@ def run_batched_cholesky(gpu_list, timeout):
 
     print("\t   [Running 1/2] CPU Support")
     sub_dict = {}
-    l = [0].extent(gpu_list)
-    for n_gpus in l:
-        command = f"python examples/variants/batched_cholesy.py -ngpus {n_gpus} -use_cpu 1"
+    for n_gpus in gpu_list:
+        command = f"python examples/variants/batched_cholesky.py -ngpus {n_gpus} -use_cpu 1"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
@@ -991,7 +990,7 @@ def run_batched_cholesky(gpu_list, timeout):
     print("\t   [Running 2/2] GPU Only")
     sub_dict = {}
     for n_gpus in gpu_list:
-        command = f"python examples/variants/batched_cholesy.py -ngpus {n_gpus} -use_cpu 0"
+        command = f"python examples/variants/batched_cholesky.py -ngpus {n_gpus} -use_cpu 0"
         output = pe.run(command, timeout=timeout, withexitstatus=True)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
@@ -1246,7 +1245,9 @@ if __name__ == '__main__':
     import sys
     parser = argparse.ArgumentParser(description='Runs the benchmarks')
     parser.add_argument('--figures', type=str, nargs="+",
-        help='Figure numbers to test (9, 9_cublas, 9_magma, 11, 12, 12_dask, 13, 13_dask, 14)', default=None)
+        help='Figure numbers to test (9, 9_cublas, 9_magma, 11, 12, 12_dask, 13, 13_dask, 14). \
+              Execution time expectations: 9 (1 min), 9_magma (2 min), 11 (1 min), 12 (21 min), \
+              12_dask (23 min), 13 (7 min), 13_dask (9 min), 14 (8 min)', default=None)
     parser.add_argument('--timeout', type=int, help='Max Timeout for a benchmark', default=1000)
 
     args = parser.parse_args()
