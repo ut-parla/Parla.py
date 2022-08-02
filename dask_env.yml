@@ -1,3 +1,4 @@
+name: dask_env
 channels:
   - rapidsai
   - nvidia
@@ -8,13 +9,14 @@ dependencies:
   - bokeh=2.4.2=py38h578d9bd_1
   - brotlipy=0.7.0=py38h497a2fe_1001
   - bzip2=1.0.8=hb9a14ef_9
-  - ca-certificates=2021.10.8=ha878542_0
-  - certifi=2021.10.8=py38h578d9bd_2
+  - ca-certificates=2022.6.15=ha878542_0
+  - certifi=2022.6.15=py38h578d9bd_0
   - cffi=1.15.0=py38hd667e15_1
   - click=8.1.3=py38h578d9bd_0
   - cloudpickle=2.0.0=pyhd8ed1ab_0
   - cryptography=35.0.0=py38ha5dfef3_0
   - cudatoolkit=11.0.221=h6bb024c_0
+  - cython=0.29.25=py38hab8dbbf_0
   - cytoolz=0.11.0=py38h7b6447c_0
   - dask=2022.5.0=pyhd8ed1ab_0
   - dask-core=2022.5.0=pyhd8ed1ab_0
@@ -24,6 +26,7 @@ dependencies:
   - fsspec=2022.3.0=pyhd8ed1ab_0
   - heapdict=1.0.1=py_0
   - idna=3.3=pyhd8ed1ab_0
+  - intel-openmp=2020.3=intel_304
   - intelpython=2022.1.0=0
   - jinja2=3.1.2=pyhd8ed1ab_0
   - jpeg=9d=h36c2ea0_1
@@ -46,6 +49,8 @@ dependencies:
   - lz4=3.1.3=py38h27cfd23_0
   - lz4-c=1.9.3=h9c3ff4c_1
   - markupsafe=2.0.1=py38h497a2fe_0
+  - mkl=2020.4=intel_304
+  - mkl-service=2.4.0=py38h5c78031_1
   - msgpack-python=1.0.3=py38hd09550d_0
   - ncurses=6.3=h7f8727e_2
   - numba=0.53.1=py38h8b71fd7_1
@@ -56,9 +61,11 @@ dependencies:
   - packaging=21.3=pyhd8ed1ab_0
   - pandas=1.2.3=py38h51da96c_0
   - partd=1.2.0=pyhd8ed1ab_0
+  - pexpect=4.8.0=pyhd3eb1b0_3
   - pillow=7.2.0=py38h9776b28_2
   - pip=21.2.4=py38h06a4308_0
   - psutil=5.8.0=py38h27cfd23_1
+  - ptyprocess=0.7.0=pyhd3eb1b0_2
   - pycparser=2.21=pyhd8ed1ab_0
   - pynvml=11.4.1=pyhd8ed1ab_0
   - pyopenssl=22.0.0=pyhd8ed1ab_0
@@ -74,6 +81,7 @@ dependencies:
   - six=1.16.0=pyh6c4a22f_0
   - sortedcontainers=2.4.0=pyhd8ed1ab_0
   - sqlite=3.38.0=hc218d9a_0
+  - tbb=2020.2=h4bd325d_4
   - tblib=1.7.0=pyhd8ed1ab_0
   - tk=8.6.10=h8e2d9d6_3
   - toolz=0.11.2=pyhd8ed1ab_0
@@ -86,4 +94,6 @@ dependencies:
   - zict=2.2.0=pyhd8ed1ab_0
   - zlib=1.2.11.1=h1e99aa7_5
   - zstd=1.4.5=h3f200d0_0
-prefix: /scratch1/06081/wlruys/miniconda3/envs/dask_cuda
+  - pip:
+    - sleep==0.0.0
+prefix: /home1/06081/wlruys/.conda/envs/dask_env
