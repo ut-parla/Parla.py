@@ -13,14 +13,21 @@ $ cd $PARLA_ROOT
 $ source examples/source.sh
 ```
 
-In `CUBLASMG_ROOT/cublasmg/test`, we have the modified block matrix multiplication file
+By default this sets your CUDA_ROOT to be the location of your current conda env. 
+If you have cudatoolkit=10.1 and cudatoolkit-dev=10.1 installed (such as through the provided requirements.txt) then this should be sufficient. 
+
+Otherwise, set your CUDA_ROOT to the your CUDA installation.
+Note: This requires CUDA/10.1 and gcc>=8.3.0. 
+
+
+In `CUBLASMG_ROOT/test`, we have the modified block matrix multiplication file
 to perform: C = A @ B.T at the same size as Parla.
 
 You must compile the examples in the test folder.
 (Note that it requires CUDA and the set paths above)
 
 ```
-$ cd $CUBLASMG_ROOT/cublasmg/test
+$ cd $CUBLASMG_ROOT/test
 $ make
 ```
 
