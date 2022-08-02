@@ -36,7 +36,7 @@ CXXFLAGS=-std=c++11 -march=native -O0
 
 CUDA_INC=-I${CUDA_ROOT}/include -I${CUBLASMG_ROOT}/include -I${CUDAMG_ROOT}/include
 CUDA_LIB=-L${CUBLASMG_ROOT}/lib -lcublasMg -L${CUDAMG_ROOT}/lib -lcudalibmg
-CUDA_LIB+=-L${CUDA_ROOT}/lib64 -lcudart -lcublas -lnvToolsExt
+CUDA_LIB+=-L${CUDA_ROOT}/lib64 -L${CUDA_ROOT}/lib -lcudart -lcublas -lnvToolsExt -lcublasLt
 
 all:
 	${CXX} 1gpuGEMM.cpp ${CUDA_INC} ${CUDA_LIB} -o 1gpuGEMM.exe ${CXXFLAGS}
