@@ -28,6 +28,9 @@ Parla requires Python>=3.7, numpy, cupy, cython, and psutil.
 Features for VECs (dlm_open execution spaces) also depends on the C package libunwind.
 
 To run all examples you require: scipy, numba, pexpect, mkl, mkl-service, and cupy.
+The synthetic submodule requires compilation of its "busy sleep" routines for GPU and CPUs. 
+See the examples/synthetic/README for details. 
+
 Note that mkl-service is REQUIRED to find and import the mkl module. 
 They can be installed with conda: `conda install -c conda-forge mkl mkl-service`
 They are used to control the number of threads used by linear algebra routines to prevent oversubscription. 
