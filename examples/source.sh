@@ -11,3 +11,6 @@ export CUDA_ROOT=$CONDA_PREFIX
 #Optional: Set PYTHONPATH
 #export PYTHONPATH = $PARLA_ROOT:$PYTHONPATH
 
+
+#Add KOKKOS NVCC_WRAPPER to the PATH (needed for compiling synthetic_graphs module)
+export PATH=$PATH:$PARLA_ROOT/examples/synethic
