@@ -10,15 +10,16 @@ The source file sets `CUBLASMG_ROOT` and `CUDAMG_ROOT` paths.
 ```
 $ export PARLA_ROOT=[Your Parla root directory path]
 $ cd $PARLA_ROOT
+$ conda create --name parla_env --file requirements.txt --channel conda-forge
+$ conda activate parla_env
 $ source examples/source.sh
 ```
 
-By default this sets your CUDA_ROOT to be the location of your current conda env. 
-If you have cudatoolkit=10.1 and cudatoolkit-dev=10.1 installed (such as through the provided requirements.txt) then this should be sufficient. 
+By default this sets your CUDA_ROOT to be the location of your current conda env.
+If you have cudatoolkit=10.1 and cudatoolkit-dev=10.1 installed (such as through the provided requirements.txt for the parla_env) then this should be sufficient.
 
 Otherwise, set your CUDA_ROOT to the your CUDA installation.
-Note: This requires CUDA/10.1 and gcc>=8.3.0. 
-
+Note: This requires CUDA/10.1 and gcc>=8.3.0.
 
 In `CUBLASMG_ROOT/test`, we have the modified block matrix multiplication file
 to perform: C = A @ B.T at the same size as Parla.
@@ -32,6 +33,7 @@ $ make
 ```
 
 This should make three tests that can be run as the following:
+Note: To run them you may need to add $CUDA_ROOT/lib64 to your library paths.
 
 ```
 #Run 32k x 32k Matrix Mult on 1 GPU
@@ -54,7 +56,7 @@ $ export MAGMA_ROOT=PARLA_ROOT/artifact/magma
 ```
 
 Instructions for compiling Magma are included in the `$MAGMA_ROOT/README`.
-To run the cholesky comparison you must build Magma with testing enabled. 
+To run the cholesky comparison you must build Magma with testing enabled.
 This is the default in Magma 2.6.
 
 To compare we use MAGMA_ROOT/testing/testing_dpotrf_mgpu executable.
