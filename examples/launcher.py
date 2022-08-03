@@ -1260,6 +1260,10 @@ if __name__ == '__main__':
         print(f"Setting CUDA_VISIBLE_DEVICES={cuda_visible_devices}")
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
 
+    print("If running synthetic or 3rd party benchmarks, make sure all \
+          executables and submodules are compiled. See artifact/README and \
+          examples/synthetic/README for more information.")
+
     #NOTE: Set ngpus and nthreads for your machine here
     ngpus = [1, 2, 4]
     nthreads = [1, 2, 4, 8, 16]

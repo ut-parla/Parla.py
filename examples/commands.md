@@ -1,11 +1,15 @@
 # Note
 All commands should be execute in the top level directory of this repo (PARLA_ROOT)
-Before running any 3rd party examples, make sure you have read the README in PARLA_ROOT/artifact and compiled the relvant tests. 
-Please see source examples/source.h for an example (recommended) configuration. 
+Before running any 3rd party examples, make sure you have read the README in PARLA_ROOT/artifact and compiled the relvant tests.
+Please see source examples/source.h for an example (recommended) configuration.
 
-Below we list all of the apps (in artifact_launcher) and how they can be run by themselves. 
+Below we list all of the apps (in artifact_launcher) and how they can be run by themselves.
 
-All scripts aside from `nbody` should have an updated argparse. Please run '-h' to see a list of valid options for each. 
+All scripts aside from `nbody` should have an updated argparse. Please run '-h' to see a list of valid options for each.
+
+Note: ALL SYNTHETIC TESTS NEED THE "SLEEP" MODULE COMPILED.
+See synthetic/README.md for details.
+
 
 # Cholesky 28k (run_cholesky_28k)
 
