@@ -5,7 +5,11 @@
 For SC22 Artifact review, we provide Cublasmg here, which is also available from: https://developer.nvidia.com/cudamathlibraryea
 
 First, you should set environment variables. We provide a source file to do this.
-The source file sets `CUBLASMG_ROOT` and `CUDAMG_ROOT` paths.
+The source file sets `CUBLASMG_ROOT` and `CUDAMG_ROOT` paths to the
+subdirectories of this directory (/artifact/):
+
+CUBLASMG_ROOT=$PARLA_ROOT/artifact/cublasmg/cublasmg/
+CUDAMG_ROOT=$PARLA_ROOT/artifact/cublasmg/cudalibmg/
 
 ```
 $ export PARLA_ROOT=[Your Parla root directory path]
@@ -33,7 +37,9 @@ $ make
 ```
 
 This should make three tests that can be run as the following:
-Note: To run them you may need to add $CUDA_ROOT/lib64 to your library paths.
+Note: To run them you may need to add $CUDA_ROOT/lib64 to your library path.
+The examples/launcher.py adds the corresponding cudalibmg and cublasmg
+libraries to your path.
 
 ```
 #Run 32k x 32k Matrix Mult on 1 GPU
