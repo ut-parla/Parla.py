@@ -38,6 +38,8 @@ $ make
 
 This should make three tests that can be run as the following:
 Note: To run them you may need to add $CUDA_ROOT/lib64 to your library path.
+e.g. `export LD_LIBRARY_PATH=$CUDA_ROOT/lib64/libcudart.so:$LD_LIBRARY_PATH`
+
 The examples/launcher.py adds the corresponding cudalibmg and cublasmg
 libraries to your path.
 
@@ -96,3 +98,11 @@ Dask: https://www.dask.org
 Dask-distributed: https://distributed.dask.org/en/stable
 
 Dask-cuda: https://docs.rapids.ai
+
+
+## Synthetic
+
+Make sure examples/synthetic/sleep module has been installed. See the README in
+examples/synthetic for more details and setup.
+
+
