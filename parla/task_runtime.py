@@ -606,6 +606,11 @@ class ComputeTask(Task):
     def _execute_task(self):
         return self._state.func(self, *self._state.args)
 
+    def cleanup(self):
+        self._func = None
+        self._args = None
+        self.dataflow = None
+
     def _finish(self, ctx):
         # Deallocate resources
         for d in self.req.devices:
@@ -617,13 +622,16 @@ class ComputeTask(Task):
             ctx.scheduler.update_mapped_task_count_mutex(self, d, -1)
             ctx.scheduler.update_launched_task_count_mutex(self, d, -1)
 
-        # Update OUT parrays which may have changed size from 0 to something
-        # We assume all IN and INOUT params don't change size
-        for parray in (self.dataflow.output):
-            ctx.scheduler._available_resources.update_parray_nbytes(
-                parray, self.req.devices)
 
+        # _finish() can be called more than once on global task.
+        if (self.dataflow != None):
+            # Update OUT parrays which may have changed size from 0 to something
+            # We assume all IN and INOUT params don't change size
+            for parray in (self.dataflow.output):
+                ctx.scheduler._available_resources.update_parray_nbytes(
+                    parray, self.req.devices)
         ctx.scheduler.decr_active_compute_tasks()
+        self.cleanup()
 
 
 class OperandType(Enum):
@@ -660,6 +668,10 @@ class DataMovementTask(Task):
         self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
         return TaskCompleted(None)
 
+    def cleanup(self):
+        print("Data movement: clean up")
+        self._target_data = target_data
+
     def _finish(self, ctx):
         # DON'T deallocate resources!
         # DataMovementTask has the same resources as the ComputeTask which created it
@@ -674,6 +686,7 @@ class DataMovementTask(Task):
         for d in self.req.devices:
             ctx.scheduler.update_mapped_task_count_mutex(self, d, -1)
             ctx.scheduler.update_launched_task_count_mutex(self, d, -1)
+        self.cleanup()
 
 
 class _TaskLocals(threading.local):
