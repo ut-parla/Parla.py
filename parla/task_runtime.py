@@ -670,7 +670,7 @@ class DataMovementTask(Task):
 
     def cleanup(self):
         print("Data movement: clean up")
-        self._target_data = target_data
+        self._target_data = None
 
     def _finish(self, ctx):
         # DON'T deallocate resources!
