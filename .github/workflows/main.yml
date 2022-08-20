@@ -27,8 +27,11 @@ jobs:
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
 
-      # Runs a single command using the runners shell
+
+      # Runs launcher.py on all figures and app
       - name: Run a one-line script
         run: |
           python3 examples/launcher.py
