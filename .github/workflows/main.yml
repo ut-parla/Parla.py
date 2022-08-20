@@ -30,7 +30,5 @@ jobs:
 
       # Runs a single command using the runners shell
       - name: Run a one-line script
-        working-directory: examples
         run: |
-          conda activate parla
-          python3 launcher.py
+          python3 examples/launcher.py
