@@ -29,5 +29,6 @@ jobs:
       - name: Run a one-line script
         working-directory: examples
         run: |
+          conda init bash
           conda activate parla
           python3 launcher.py
