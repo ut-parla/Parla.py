@@ -19,6 +19,9 @@ jobs:
   build:
     # The type of runner that the job will run on
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: bash -l {0}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -29,6 +32,5 @@ jobs:
       - name: Run a one-line script
         working-directory: examples
         run: |
-          conda init bash
           conda activate parla
           python3 launcher.py
