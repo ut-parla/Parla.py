@@ -16,7 +16,7 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "build"
-  build:
+  run:
     # The type of runner that the job will run on
     runs-on: self-hosted
     defaults:
@@ -30,8 +30,18 @@ jobs:
         with:
           submodules: 'true'
 
-
       # Runs launcher.py on all figures and app
-      - name: Run a one-line script
-        run: |
-          python3 examples/launcher.py
+      - name: Run Figure 9
+        run: python3 examples/launcher.py --figure 9
+        
+      - name: Run Figure 11
+        run: python3 examples/launcher.py --figure 11
+        
+      - name: Run Figure 12
+        run: python3 examples/launcher.py --figure 12
+
+      - name: Run Figure 13
+        run: python3 examples/launcher.py --figure 13
+        
+      - name: Run Figure 14
+        run: python3 examples/launcher.py --figure 14
