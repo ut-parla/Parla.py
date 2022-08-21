@@ -14,6 +14,7 @@ parser.add_argument('-matrix', default=None)
 parser.add_argument('-fixed', default=0, type=int)
 parser.add_argument('-t', type=int, default=1)
 parser.add_argument('-workers', type=int, default=1)
+parser.add_argument('-dask', type=int, default=0)
 args = parser.parse_args()
 
 load = 1.0/args.workers
@@ -60,7 +61,8 @@ except (ImportError, AttributeError):
     def clean_memory():
         pass
 
-from dask.array.utils import array_safe, meta_from_array, solve_triangular_safe
+if args.dask:
+    from dask.array.utils import array_safe, meta_from_array, solve_triangular_safe
 
 from numba import jit, void, float64
 import math
@@ -72,8 +74,8 @@ loc = cpu
 
 def numpy_trsm_wrapper(a, b):
     a = np.array(a, order='F', dtype=np.float64)
-    b = np.array(b, order='F', dtype=np.float64)
-    b = linalg.blas.dtrsm(1.0, a, b, trans_a=1, lower=1, side=1)
+    b = np.array(b.T, order='F', dtype=np.float64)
+    b = linalg.blas.dtrsm(1.0, a, b, trans_a=0, lower=1, side=0)
     return b
 
 def cholesky_inplace(a):
@@ -81,8 +83,10 @@ def cholesky_inplace(a):
     return a
 
 def ltriang_solve(a, b):
-    b = solve_triangular_safe(a, b.T, lower=True)
-    #b = numpy_trsm_wrapper(a, b)
+    if args.dask:
+        b = solve_triangular_safe(a, b.T, lower=True)
+    else:
+        b = numpy_trsm_wrapper(a, b)
     return b.T
 
 def update_kernel(a, b, c):
