@@ -14,12 +14,9 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "build"
-  run:
+  figure_9:
     # The type of runner that the job will run on
     runs-on: self-hosted
-    defaults:
-      run:
-        shell: bash -l {0}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -31,15 +28,47 @@ jobs:
       # Runs launcher.py on all figures and app
       - name: Run Figure 9
         run: python3 examples/launcher.py --figure 9
-        
+
+  figure_11:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+
       - name: Run Figure 11
         run: python3 examples/launcher.py --figure 11
         
+  figure_12:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+
       - name: Run Figure 12
         run: python3 examples/launcher.py --figure 12
+        
+  figure_13:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
 
       - name: Run Figure 13
         run: python3 examples/launcher.py --figure 13
         
+  figure_14:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+
       - name: Run Figure 14
         run: python3 examples/launcher.py --figure 14
