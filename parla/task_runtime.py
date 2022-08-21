@@ -669,7 +669,6 @@ class DataMovementTask(Task):
         return TaskCompleted(None)
 
     def cleanup(self):
-        print("Data movement: clean up")
         self._target_data = None
 
     def _finish(self, ctx):

@@ -1215,6 +1215,7 @@ figure_11 = [run_prefetching_test]
 
 figure_12 = [run_cholesky_20_host, run_cholesky_20_gpu]
 figure_12_dask = [run_dask_cholesky_20_host, run_dask_cholesky_20_gpu]
+figure_12_parla = [run_cholesky_20_gpu]
 
 figure_13 = [run_independent_parla_scaling, run_GIL_test_parla]
 figure_13_dask = [run_independent_dask_thread_scaling, run_independent_dask_process_scaling, run_GIL_test_dask]
@@ -1228,6 +1229,7 @@ figure_dictionary['Figure_9_magma'] = figure_9_magma
 
 figure_dictionary['Figure_12'] = figure_12
 figure_dictionary['Figure_12_dask'] = figure_12_dask
+figure_dictionary['Figure_12_parla'] = figure_12_parla
 
 figure_dictionary['Figure_14'] = figure_14
 
@@ -1245,7 +1247,7 @@ if __name__ == '__main__':
     import sys
     parser = argparse.ArgumentParser(description='Runs the benchmarks')
     parser.add_argument('--figures', type=str, nargs="+",
-        help='Figure numbers to test (9, 9_cublas, 9_magma, 11, 12, 12_dask, 13, 13_dask, 14). \
+        help='Figure numbers to test (9, 9_cublas, 9_magma, 11, 12, 12_dask, 12_parla, 13, 13_dask, 14). \
               Execution time expectations: 9 (1 min), 9_magma (2 min), 11 (1 min), 12 (21 min), \
               12_dask (23 min), 13 (7 min), 13_dask (9 min), 14 (8 min)', default=None)
     parser.add_argument('--timeout', type=int, help='Max Timeout for a benchmark', default=1000)

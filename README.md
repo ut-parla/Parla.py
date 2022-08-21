@@ -166,3 +166,15 @@ This software is based upon work supported by the Department of Energy, National
 
 ## How to Cite Parla.py
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.6941889.svg)](https://doi.org/10.5281/zenodo.6941889)
+
+Please cite the following reference.
+
+```
+@inproceedings{
+    author = {H. Lee, W. Ruys, Y. Yan, S. Stephens, B. You, H. Fingler, I. Henriksen, A. Peters, M. Burtscher, M. Gligoric, K. Schulz, K. Pingali, C. J. Rossbach, M. Erez, and G. Biros},
+    title = {Parla: A Python Orchestration System for Heterogeneous Architectures},
+    year = {2022},
+    booktitle = {Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis},
+    series = {SC'22}
+}
+```
