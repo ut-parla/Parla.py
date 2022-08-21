@@ -36,7 +36,7 @@ jobs:
         run: python3 examples/launcher.py --figure 11
         
       - name: Run Figure 12
-        run: python3 examples/launcher.py --figure 12_parla
+        run: python3 examples/launcher.py --figure 12
 
       - name: Run Figure 13
         run: python3 examples/launcher.py --figure 13
