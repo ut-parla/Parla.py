@@ -145,10 +145,10 @@ def cupy_trsm_wrapper(a, b):
 
     diag = cublas.CUBLAS_DIAG_NON_UNIT
     m, n = (b.side, 1) if b.ndim == 1 else b.shape
-    #one = np.array(1, dtype=a.dtype)
-    # TODO(hc): Passing the one gave NaN output. Passing 1.0 on tuxedo gave segfault.
-    # We should dig into this to avoid non-deterministic error.
-    trsm(cublas_handle, side, uplo, trans, diag, m, n, 1.0, a.data.ptr, m, b.data.ptr, m)
+    alpha = np.array(1, dtype=a.dtype)
+    # Cupy >= 9 requires pointers even for coefficients.
+    # https://github.com/cupy/cupy/issues/7011
+    trsm(cublas_handle, side, uplo, trans, diag, m, n, alpha.ctypes.data, a.data.ptr, m, b.data.ptr, m)
     return b
 
 @ltriang_solve.variant(gpu)
