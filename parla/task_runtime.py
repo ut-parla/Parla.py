@@ -21,6 +21,9 @@ from parla.dataflow import Dataflow
 #logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+import os
+VIZ = os.environ.get("PARLA_VIZ", False)
+
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements",
            "ResourceRequirements", "get_current_devices", "has_environment"]
 
@@ -355,6 +358,10 @@ class Task:
 
 
     def run(self):
+
+        if VIZ:
+            print("+= Task{} =+".format(self._taskid), [task._taskid for task in self.dependencies])
+
         assert self._assigned, "Task was not assigned before running."
         assert isinstance(self.req, EnvironmentRequirements), \
             "Task was not assigned a specific environment requirement before running."
@@ -396,6 +403,9 @@ class Task:
                     logger.info("Finally for task %r", self)
 
                     ctx = get_scheduler_context()
+
+                    if VIZ:
+                        print("-= Task {} =-".format(self.taskid), flush=True)
 
                     # Regardless of the previous notification,
                     # (So, before leaving the current run(), the above)
@@ -655,8 +665,11 @@ class DataMovementTask(Task):
             # Therefore, this class is already assigned to devices.
             self._target_data = target_data
             self._operand_type = operand_type
+            self._computation_task = computation_task
 
     def _execute_task(self):
+        if VIZ:
+            print("+= M({}, {})=+".format(self._computation_task.taskid, self._target_data._name), [task.task_id for task in self.dependencies], flush=True)
         write_flag = True
         if (self._operand_type == OperandType.IN):
             write_flag = False
@@ -682,6 +695,10 @@ class DataMovementTask(Task):
         # If size changes, the ComputeTask will take care of that
 
         # Decrease the number of running tasks on the device d.
+
+        if VIZ:
+            print('-= M({}, {})=-'.format(self._computation_task.taskid, self._target_data._name), flush=True)
+
         for d in self.req.devices:
             ctx.scheduler.update_mapped_task_count_mutex(self, d, -1)
             ctx.scheduler.update_launched_task_count_mutex(self, d, -1)
