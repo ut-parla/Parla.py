@@ -360,7 +360,7 @@ class Task:
     def run(self):
 
         if VIZ:
-            print("+= Task{} =+".format(self._taskid), [task._taskid for task in self.dependencies])
+            print("+= {} Task {} : ".format(self._taskid._name, self._taskid._id), time.perf_counter(), " : ", [(task._taskid._name, task._taskid._id) for task in self.dependencies])
 
         assert self._assigned, "Task was not assigned before running."
         assert isinstance(self.req, EnvironmentRequirements), \
@@ -405,7 +405,7 @@ class Task:
                     ctx = get_scheduler_context()
 
                     if VIZ:
-                        print("-= Task {} =-".format(self.taskid), flush=True)
+                        print("-= {} Task {} : ".format(self.taskid._name, self.taskid._id), time.perf_counter(), flush=True)
 
                     # Regardless of the previous notification,
                     # (So, before leaving the current run(), the above)
@@ -445,9 +445,9 @@ class Task:
 
     def is_blocked_by_dependencies(self) -> bool:
         if self._num_blocking_dependencies == 0:
-            return False 
+            return False
         else:
-            return True 
+            return True
 
     def is_blocked_by_dependencies_mutex(self) -> bool:
         with self._mutex:
@@ -669,7 +669,10 @@ class DataMovementTask(Task):
 
     def _execute_task(self):
         if VIZ:
-            print("+= M({}, {})=+".format(self._computation_task.taskid, self._target_data._name), [task.task_id for task in self.dependencies], flush=True)
+            data_name = self._target_data
+            if data_name == "":
+                data_name = str(hex(self._target_data.ID))
+            print("+= {} M({}, {}) : ".format(self._computation_task.taskid._name, self._computation_task.taskid._id, self._target_data._name), time.perf_counter(), " : ", [task.task_id for task in self.dependencies], flush=True)
         write_flag = True
         if (self._operand_type == OperandType.IN):
             write_flag = False
@@ -697,7 +700,7 @@ class DataMovementTask(Task):
         # Decrease the number of running tasks on the device d.
 
         if VIZ:
-            print('-= M({}, {})=-'.format(self._computation_task.taskid, self._target_data._name), flush=True)
+            print('-= {} M({}, {}) : '.format(self._computation_task.taskid._name, self._computation_task.taskid._id, self._target_data._name), time.perf_counter(), flush=True)
 
         for d in self.req.devices:
             ctx.scheduler.update_mapped_task_count_mutex(self, d, -1)
@@ -1888,7 +1891,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         with self._mapped_count_monitor[dev]:
             return self._device_mapped_datamove_task_counts[dev]
 
-    def _construct_datamove_task(self, target_data, compute_task: ComputeTask, operand_type: OperandType):
+    def _construct_datamove_task(self, target_data, compute_task: ComputeTask, operand_type: OperandType, idx:int):
         """
           This function constructs data movement task for target data.
           This function consists of two steps.
@@ -1900,9 +1903,7 @@ class Scheduler(ControllableThread, SchedulerContext):
           Second, construct a data movement task.
         """
         # Construct data movement task.
-        taskid = TaskID(str(compute_task.taskid)+"."+str(hex(target_data.ID))+".dmt." +
-                        str(len(task_locals.global_tasks)), (len(task_locals.global_tasks),))
-        task_locals.global_tasks += [taskid]
+        taskid = TaskID(str(compute_task.taskid)+".dmt", (idx,))
         datamove_task = DataMovementTask(compute_task, taskid,
                                          compute_task.req, target_data, operand_type,
                                          str(compute_task.taskid) + "." +
@@ -1942,7 +1943,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         # create more data movement tasks and make additional dependencies.
         # The computation task should not be run until all the data movement
         # tasks are created.
-        # 
+        #
         if not datamove_task.is_blocked_by_dependencies_mutex():
             return datamove_task
         return None
@@ -1980,21 +1981,27 @@ class Scheduler(ControllableThread, SchedulerContext):
                         # TODO(lhc): this is not good.
                         #            will use logical values to make it easy to understand.
                         mappable_datamove_tasks = []
+                        idx = 0
                         for data in task.dataflow.input:
                             dtask = self._construct_datamove_task(
-                                    data, task, OperandType.IN)
+                                    data, task, OperandType.IN, idx)
                             if dtask is not None:
                                 mappable_datamove_tasks.append(dtask)
+                                idx += 1
+
                         for data in task.dataflow.output:
                             dtask = self._construct_datamove_task(
-                                    data, task, OperandType.OUT)
+                                    data, task, OperandType.OUT, idx)
                             if dtask is not None:
                                   mappable_datamove_tasks.append(dtask)
+                                  idx += 1
+
                         for data in task.dataflow.inout:
                             dtask = self._construct_datamove_task(
-                                    data, task, OperandType.INOUT)
+                                    data, task, OperandType.INOUT, idx)
                             if dtask is not None:
                                   mappable_datamove_tasks.append(dtask)
+                                  idx += 1
 
                         # Update parray tracking and task count on the device
                         for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
