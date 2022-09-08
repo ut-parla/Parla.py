@@ -434,9 +434,7 @@ def spawn(taskid: Optional[TaskID] = None,
             scope.append(task)
 
         # Activate scheduler
-        scheduler.map_tasks_callback()
-        scheduler.schedule_tasks_callback()
-        scheduler.launch_tasks_callback()
+        scheduler.start_scheduler_callbacks()
 
         # Return the task object to user code
         return task
