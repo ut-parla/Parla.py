@@ -1010,17 +1010,15 @@ class WorkerThread(ControllableThread, SchedulerContext):
                         logger.debug(
                             f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
                         self._status = "Running Task {}".format(self.task)
+                        self.scheduler.incr_running_tasks() 
                         self.task.run()
+                        self.scheduler.decr_running_tasks()
 
                         # Free self back to worker pool
                         self._remove_task()
                         self.scheduler.append_free_thread(self)
-
                         # Activate scheduler
-                        self.scheduler.map_tasks_callback()
-                        self.scheduler.schedule_tasks_callback()
-                        self.scheduler.launch_tasks_callback()
-
+                        self.scheduler.start_scheduler_callbacks()
                     # Thread wakes up without a task (should only happen at end of program)
                     elif not self.task and self._should_run:
                         raise WorkerThreadException(
@@ -1392,6 +1390,9 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Start with one count that is removed when the scheduler is "exited"
         self._active_task_count = 1
 
+        # Track the number of running tasks
+        self._running_task_count = 1
+
         # For load-balancing purposes
         self._active_compute_task_count = 0
 
@@ -1428,6 +1429,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._active_datamove_count_monitor = threading.Condition(
             threading.Lock())
         self._active_count_monitor = threading.Condition(threading.Lock())
+        self._running_count_monitor = threading.Condition(threading.Lock())
 
         # Phase protection
         self._mapping_phase_monitor = threading.Condition(threading.Lock())
@@ -1512,6 +1514,18 @@ class Scheduler(ControllableThread, SchedulerContext):
     def append_free_thread(self, thread: WorkerThread):
         with self._thread_queue_monitor:
             self._free_worker_threads.append(thread)
+
+    def incr_running_tasks(self):
+        with self._running_count_monitor:
+            self._running_task_count += 1
+
+    def decr_running_tasks(self):
+        with self._running_count_monitor:
+            self._running_task_count -= 1
+
+    def no_running_tasks(self):
+        with self._running_count_monitor:
+            return self._running_task_count == 0
 
     def incr_active_tasks(self):
         with self._active_count_monitor:
@@ -2115,6 +2129,20 @@ class Scheduler(ControllableThread, SchedulerContext):
                         if is_cpu or num_launched_datamove_task_count < (self._num_colocatable_tasks + 1):
                             self._launch_task(datamove_queue, dev, is_cpu, num_launched_datamove_task_count)
 
+    def start_scheduler_callbacks(self):
+        map_succeed = True
+        schedule_succeed = True
+        launch_succeed = True
+        map_succeed = self.map_tasks_callback()
+        schedule_succeed = self.schedule_tasks_callback()
+        launch_succeed = self.launch_tasks_callback()
+        while self.no_running_tasks():
+            if not map_succeed and not schedule_succeed and not launch_succeed:
+                break
+            map_succeed = self.map_tasks_callback()
+            schedule_succeed = self.schedule_tasks_callback()
+            launch_succeed = self.launch_tasks_callback()
+
     def map_tasks_callback(self):
         """ This is a callback function for the mapper. Called by WorkerThread and Spawn Decorator to trigger scheduler execution"""
 
@@ -2142,10 +2170,11 @@ class Scheduler(ControllableThread, SchedulerContext):
             self._map_tasks()
             self._mapping_phase_monitor.release()
             logger.info("[Mapping Callback] Complete.")
+            return True
         else:  # If the scheduler is already in mapping phase, do nothing
             logger.info(
                 "[Mapping Callback] Failed to acquire lock. Met condition: %s", "True" if condition else "False")
-            pass
+            return False
 
     def schedule_tasks_callback(self):
         """ This is a callback function for the scheduler. Called by WorkerThread and Spawn Decorator to trigger scheduler execution"""
@@ -2177,10 +2206,11 @@ class Scheduler(ControllableThread, SchedulerContext):
             self._schedule_tasks()
             self._scheduling_phase_monitor.release()
             logger.info("[Scheduling Callback] Complete.")
+            return True
         else:  # If the scheduler is already in scheduling phase, do nothing
             logger.info(
                 "[Scheduling Callback] Failed to acquire lock. Met condition: %s", "True" if condition else "False")
-            pass
+            return False
 
     def launch_tasks_callback(self):
         """ This is a callback function for the launcher. Called by WorkerThread and Spawn Decorator to trigger scheduler execution"""
@@ -2211,10 +2241,11 @@ class Scheduler(ControllableThread, SchedulerContext):
             self._launch_tasks()
             self._launching_phase_monitor.release()
             logger.info("[Launching Callback] Complete.")
+            return True
         else:  # If the scheduler is already in launching phase, do nothing
             logger.info(
                 "[Launching Callback] Failed to acquire lock. Met condition: %s", "True" if condition else "False")
-            pass
+            return False
 
     def run(self) -> None:
         # noinspection PyBroadException
