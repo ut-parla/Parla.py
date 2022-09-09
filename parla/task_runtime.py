@@ -296,6 +296,7 @@ class Task:
             # This flag specifies if a task is assigned device.
             # If it is, it sets to True. Otherwise, it sets to False.
             self._assigned = init_assigned
+            self._mem_reserved = False
             # Predecessor tasks' event objects for runahead scheduling.
             self._dependency_events = []
 
@@ -418,6 +419,20 @@ class Task:
         with self._mutex:
             return self._assigned
 
+    def set_mem_reserved(self):
+        with self._mutex:
+            self._mem_reserved = True
+            for dependent in self._dependents:
+                dependent._dependency_mem_reserved()
+
+    def is_mem_reserved(self):
+        with self._mutex:
+            return self._mem_reserved
+
+    def dependency_mem_reserved(self):
+        with self._mutex:
+            self._num_mem_reserved_dependencies -= 1
+
     @property
     def dependencies(self) -> Tuple["Task"]:
         return tuple(self._dependencies)
@@ -426,12 +441,16 @@ class Task:
     def dependencies(self, dependencies: Collection['Task']):
         self._dependencies: List[Task] = list(dependencies)
         self._num_blocking_dependencies: int = len(dependencies)
+        self._num_mem_reserved_dependencies = self._num_blocking_dependencies
         for dependency in dependencies:
             # If a dependency is TaskID, not Task object,
             # it implies that it is not yet spawned.
             # Ignore it.
             if not dependency._add_dependent_mutex(self) or isinstance(dependency, TaskID):
                 self._num_blocking_dependencies -= 1
+                self._num_mem_reserved_dependencies -= 1
+            if dependency.is_mem_reserved():
+                self._num_mem_reserved_dependencies -= 1
 
     def num_dependents(self) -> int:
         with self._mutex:
