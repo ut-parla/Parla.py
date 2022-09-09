@@ -433,6 +433,10 @@ class Task:
             if not dependency._add_dependent_mutex(self) or isinstance(dependency, TaskID):
                 self._num_blocking_dependencies -= 1
 
+    def num_dependents(self) -> int:
+        with self._mutex:
+            return len(self._dependents)
+
     def is_blocked_by_dependencies(self) -> bool:
         if self._num_blocking_dependencies == 0:
             return False 
@@ -530,6 +534,9 @@ class Task:
             new_state.clear_dependencies()
         if new_state.is_terminal:
             ctx.decr_active_tasks()
+
+    def map_priority_key(self):
+        return self.num_dependents()
 
     def __await__(self):
         return (yield TaskAwaitTasks([self], self))
@@ -960,6 +967,8 @@ class WorkerThread(ControllableThread, SchedulerContext):
         self.scheduler.enqueue_spawned_task(task)
 
     def enqueue_task(self, task: Task):
+        # TODO(hc): this part will be the step 
+        # TODO(hc): this should be planned device queues, not a single queue.
         """Push a task on the queue tail.
         """
         # For the moment, bypass the local queue and put the task in the global scheduler queue
@@ -1823,7 +1832,9 @@ class Scheduler(ControllableThread, SchedulerContext):
                     else:
                         new_tasks.append(task)
                 self._new_spawned_task_queue.extend(failed_tasks)
-
+                # Sort spawned tasks by priority.
+                # Current priority: # of dependent tasks.
+                new_tasks.sort(key=lambda x: x.map_priority_key())
                 # Newly added tasks should be enqueued onto the
                 # right to guarantee FIFO manners.
                 # It is efficient to map higher priority tasks to devices
@@ -1958,6 +1969,9 @@ class Scheduler(ControllableThread, SchedulerContext):
         if len(self._spawned_task_queue) < mapping_limit:
             self.fill_curr_spawned_task_queue()
 
+        # TODO(hc): Sort the ready2map queue by priority here.
+        # self.sort_spawned_task_queue_by_priority()
+
         while failed_mappings < failed_limit and attempted_mappings < mapping_limit:
             task: Optional[Task] = self._dequeue_spawned_task()
             if task:
@@ -2048,6 +2062,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         schedule_count = 0
 
         while schedule_count < schedule_limit:
+            # TODO(hc): pop based on priority; planning priority is locality + memory size.
             task: Optional[Task] = self._dequeue_task()
             if not task:
                 break
