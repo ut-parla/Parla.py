@@ -995,6 +995,7 @@ class WorkerThread(ControllableThread, SchedulerContext):
             with self:
                 for component in self.scheduler.components:
                     component.initialize_thread()
+                self.scheduler.append_free_thread(self)
                 while self._should_run:
                     self._status = "Getting Task"
                     with self._monitor:
@@ -1473,11 +1474,11 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Dictionary mapping data block to task lists.
         self._datablock_dict = defaultdict(list)
 
+        self._free_worker_threads = deque()
         self._worker_threads = [WorkerThread(
             self, i) for i in range(n_threads)]
         for t in self._worker_threads:
             t.start()
-        self._free_worker_threads = deque(self._worker_threads)
         # Start the scheduler thread (likely to change later)
         self.start()
 
