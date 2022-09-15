@@ -997,10 +997,10 @@ class WorkerThread(ControllableThread, SchedulerContext):
                     component.initialize_thread()
                 while self._should_run:
                     self._status = "Getting Task"
-                    if not self.task:
+                    with self._monitor:
                         logger.debug(
                             "[%r] Blocking for a task: (%s)", self, self._monitor)
-                        with self._monitor:
+                        if not self.task:
                             self._monitor.wait()
                         logger.debug(
                             "[WorkerThread %d] Waking up.", self.index)
@@ -1010,10 +1010,8 @@ class WorkerThread(ControllableThread, SchedulerContext):
                         logger.debug(
                             f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
                         self._status = "Running Task {}".format(self.task)
-                        self.scheduler.incr_running_tasks() 
                         self.task.run()
                         self.scheduler.decr_running_tasks()
-
                         # Free self back to worker pool
                         self._remove_task()
                         self.scheduler.append_free_thread(self)
@@ -1526,6 +1524,10 @@ class Scheduler(ControllableThread, SchedulerContext):
     def no_running_tasks(self):
         with self._running_count_monitor:
             return self._running_task_count == 0
+
+    def num_active_tasks(self):
+        with self._active_count_monitor:
+            return self._active_task_count
 
     def incr_active_tasks(self):
         with self._active_count_monitor:
@@ -2097,6 +2099,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 if isinstance(task._state, TaskCompleted):
                     logger.info(f"This should not be passed.")
                     continue
+                self.scheduler.incr_running_tasks() 
                 worker.assign_task(task)
                 logger.debug(f"[Scheduler] Launched %r", task)
 
@@ -2218,7 +2221,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Check runtime conditions
         # Are there any tasks to launch?
         # Are there any free worker threads?
-        condition = len(self._free_worker_threads) > 0
+        condition = len(self._free_worker_threads) > 0 and self.num_active_tasks() != 0
         """
         dev_condition = False
         if condition:
