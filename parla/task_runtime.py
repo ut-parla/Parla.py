@@ -502,6 +502,12 @@ class Task:
         self._dependencies.append(dependency)
         return True
 
+    def check_all_dependency_mapped(self) -> bool:
+        for dependency in self._dependencies:
+            if not dependency.is_assigned():
+                return False
+        return True
+
     def _handle_dependency_event_mutex(self, events):
         with self._mutex:
             self._num_blocking_dependencies -= 1
@@ -1479,6 +1485,13 @@ class Scheduler(ControllableThread, SchedulerContext):
             self, i) for i in range(n_threads)]
         for t in self._worker_threads:
             t.start()
+        # Before starting a scheduler thread,
+        # any free thread should be appended.
+        # Otherwise, no work is proceeded.
+        while True:
+            with self._thread_queue_monitor:
+                if len(self._free_worker_threads) > 0:
+                    break
         # Start the scheduler thread (likely to change later)
         self.start()
 
@@ -1815,13 +1828,13 @@ class Scheduler(ControllableThread, SchedulerContext):
         with self._spawned_queue_monitor:
             if (len(self._new_spawned_task_queue) > 0):
                 new_q = self._new_spawned_task_queue
-                # Only map tasks having no remaining dependencies.
+                # Only map tasks whose dependencies are all mapped 
+                # to avoid resource deadlock. 
                 new_tasks = []
                 failed_tasks = []
                 for _ in range(len(new_q)):
                     task = new_q.popleft()
-                    if task.is_blocked_by_dependencies_mutex() and \
-                                      not task.is_terminal_mutex():
+                    if not task.check_all_dependency_mapped():
                         failed_tasks.append(task)
                     else:
                         new_tasks.append(task)
