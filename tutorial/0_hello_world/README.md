@@ -32,7 +32,7 @@ In line 32, we instruct the Python runtime to execute this block of code only if
 
 Line 33 invokes the Parla runtime to run our code--it creates a threadpool and initializes the scheduler that will dispatch tasks. All Parla code must be run within this context manager. Notice that we do not directly create Parla tasks in the global scope. Instead, we define a `main` function and create our tasks there, and it is best practice to contain all Parla calls in a lower scope than the global scope (more on this in a later lesson).
 
-And finally, line 34 calls our `main` function defined on lines 19 - 26:
+And finally, line 34 calls our `main` function defined on lines 22 - 29:
 
 ```
 22 def main():

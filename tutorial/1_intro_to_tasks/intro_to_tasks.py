@@ -164,19 +164,19 @@ def task_different_taskSpace_dependency():
     # Spawn a task in the first task space
     @spawn(first_taskSpace)
     def task_from_first_taskSpace():
-        print('\tTask from first taskSpace')
+        print('\tTask from first taskSpace', flush=True)
 
     # Declare a second task space and call it 'SecondTaskSpace'
     second_taskSpace = TaskSpace('SecondTaskSpace')
 
     # Spawn a task in the second task space, but only after
     # the tasks in the first taskSpace have completed
-    @spawn(second_taskSpace, [first_taskSpace])
+    @spawn(second_taskSpace[0], [first_taskSpace])
     def task_from_second_taskSpace():
-        print('\tTask from second taskSpace')
+        print('\tTask from second taskSpace', flush=True)
     
     # Return the awaitable second_taskSpace
-    return second_taskSpace
+    return second_taskSpace[0]
 
 
 # Define the main function (required of all Parla implementations)
