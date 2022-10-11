@@ -113,9 +113,9 @@ Note: currently, fine-grained data movement on two overlapping portions is not s
 
 ### Memory Coherence
 
-Since PArray will generate multiple copies of the same data in multiple devices, it need to maintain the correct memory coherence in the system. `input`, `output` and `inout` not only are used by scheduler determine data dependence between tasks, but also used by PArray to update its coherence protocol. Therefore, it is necessary for programmer to correctly identify PArray in `input`, `output` and `inout`.
+Since PArray will generate multiple copies of the same data in multiple devices, it needs to maintain the correct memory coherence in the system. `input`, `output` and `inout` not only are used by scheduler determine data dependence between tasks, but also used by PArray to update its coherence protocol. Therefore, it is necessary for programmer to correctly identify PArray in `input`, `output` and `inout`.
 
-What's more, this memory model requires the application to be data race free in task granularity. That is, read and write on the same PArray between any two parallel tasks.
+What's more, this memory model requires the application to be data race free in task granularity. That is, reads and writes on the same PArray between any two parallel tasks should be serilized.
 
 For example, if there is no dependence between task A and task B, they may be scheduled to run in parallel. If A write on a PArray and B read from it, a data race will happen between two tasks and the behavior is undefined.
 
