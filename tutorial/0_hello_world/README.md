@@ -1,52 +1,78 @@
 # Lesson 0: Hello, World!
 
-In this lesson, we will create our first Parla program and print to the console from a Parla task. There is only one source code file for this lesson: `hello.py`, and if Parla is installed properly, you can run this example as you would any other Python script:
+We create our first Parla program and print to the console from a Parla task. 
 
-```
+There is only one source code file for this lesson: `hello.py` 
+
+If Parla is installed properly, you can run this example as you would any other Python script:
+
+```bash
 $ python hello.py
 ```
 
-Parla uses the task-based parallel programming model, and here we first introduce its main unit of work: tasks. Everything you do in Parla is centered around tasks--"tasks" being defined as blocks of code that are annotated by the programmer to run asynchronously with respect to their enclosing block.  Tasks may have dependencies, may run asynchronously in parallel with other tasks, or may even run on different hardware given various computation and memory constraints.  We will discuss more details on how to configure tasks for these various approaches in a later lesson. For now, we define a single, simple task. We will break down this program line by line.
+Parla's parallel programming model is centered around ***tasks***.
+Tasks are a basic unit of work. Specifically in Parla, tasks are annotated code blocks that run asynchronously with respect to their enclosing block.
+
+
+Although syntactically tasks often look like Python functions, they are semantically different.
+Parla tasks are not functions in the usual sense: the Parla runtime can launch tasks as soon as they are spawned; they capture local variables in the closure by value; they cannot be called and, typically, do not return values.
+
+
+Tasks: 
+- can be defined with dependencies. This creates an online & dynamic workflow DAG that begins execution as it is spawned.
+- may run asynchronously and concurrently with other tasks.
+- may have various constraints (device, memory, data, threads) on where and when they can execute.
+- can launch on different hardware contexts.
+- can specify input and output data objects to prefetch required data into device memory. 
+
+
+ We will discuss more advantaged usage and features of tasks later. For now, we define a single, simple task.
+
+We break down this program line by line:
 
 First, lines 13 - 19:
 
-```
-13  from parla import Parla
+```python
+13  from parla import Parla, spawn
 ...
-16  from parla.cpu import cpu
-...
-19  from parla.tasks import spawn
+15  from parla.cpu import cpu
 ```
 
-Line 13 imports the Parla runtime itself, line 16 imports `cpu` which is needed to place tasks on the cpu, and line 19 imports the `@spawn` decorator, which is the main mechanism for instantiating tasks in Parla.
+Line 13 imports the context manager for the Parla runtime and the `@spawn` decorator for instantiating tasks. 
 
-We'll temporarily skip ahead to lines 32 - 34:
+Line 15 loads and configures the `cpu` device type which is needed to have a valid target for task execution. 
 
-```
-32  if __name__ == "__main__":
-33      with Parla():
-34          main()
-```
+We'll temporarily skip ahead to lines 28 - 30:
 
-In line 32, we instruct the Python runtime to execute this block of code only if running as the main file from the command line (and not from something else such as an import statement in another Python file).
-
-Line 33 invokes the Parla runtime to run our code--it creates a threadpool and initializes the scheduler that will dispatch tasks. All Parla code must be run within this context manager. Notice that we do not directly create Parla tasks in the global scope. Instead, we define a `main` function and create our tasks there, and it is best practice to contain all Parla calls in a lower scope than the global scope (more on this in a later lesson).
-
-And finally, line 34 calls our `main` function defined on lines 22 - 29:
-
-```
-22 def main():
-23 
-24     # ...
-25     @spawn()
-26     def hello_world():
-27 
-28         # ...
-29         print("Hello, World!")
+```python
+28  if __name__ == "__main__":
+29      with Parla():
+30          main()
 ```
 
-On line 25, we call our `@spawn` decorator, the Parla semantic for creating a task, and we decorate the function on line 26 "hello_world()" with this decorator. Keep in mind, however, that Parla tasks are not truly Python "functions" - more on this later as well.  Inside our task, we simply print the statement "Hello, World!" to the console.
+Line 29 enters and starts the Parla runtime.
+This creates a threadpool and begins running a scheduler that will listen for spawned tasks.
+The scheduler can dispatch tasks to all configured device types (defined at import time) before it is initialized. 
 
-As stated previously, you can run this Python file as you would any other Python script with `$ python hello.py`.  Once run, you should see "Hello, World!" the console output.
+**All Parla code must execute within the Parla context manager.**
 
+Notice that we do not directly create Parla tasks in the global scope. Instead, we define a `main` function and create our tasks there. *To ensure correct capture of local variables, Parla tasks should not be defined in the global scope.*
+
+And finally, our `main` function defined on lines 20 - 25:
+
+```python
+20 def main():
+21 
+22     # ...
+23     @spawn()
+24     def hello_world():
+25        print("Hello, World!", flush=True)
+```
+
+On line 25, the `@spawn` decorator creates a task that executes the function it decorates. 
+As soon as the task is spawned, it is visible to the runtime and may begin asynchronous execution. 
+
+In this example, the task is not guaranteed to complete until the Parla context is exited on line 31 (which waits for all unfinished tasks). 
+
+Once run, you should see "Hello, World!" the console output.
 Congratulations! You've run your first Parla program!

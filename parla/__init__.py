@@ -9,7 +9,7 @@ from parla import task_runtime
 from parla.device import get_all_devices
 from parla.environments import TaskEnvironment
 
-__all__ = ["Parla", "multiload", "TaskEnvironment"]
+__all__ = ["Parla", "TaskEnvironment", "spawn", "TaskSpace"]
 
 
 class Parla:
@@ -33,3 +33,5 @@ class Parla:
             return self._sched.__exit__(exc_type, exc_val, exc_tb)
         finally:
             del self._sched
+
+from parla.tasks import spawn, TaskSpace
