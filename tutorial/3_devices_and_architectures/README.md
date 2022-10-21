@@ -35,7 +35,7 @@ We need to import a Parla cpu package (Line 3).
 Line 16 and 17 declares and initialize numpy array objects which are
 operands of the element-wise vector addition. Line 22 sets a placement
 of a task, `cpu_arch_task`, to a CPU architecture and hence, this task will run on
-any available CPU core.
+a single CPU core.
 
 ```
 22  @spawn(placement=cpu)
