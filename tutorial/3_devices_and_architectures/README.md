@@ -4,11 +4,10 @@ Parla provides features to exploit heterogeneous architectures.
 In Parla, users are able to select a specific device or a specific type
 of architecture for each task to launch.
 
-This lesson introduces how to write heterogeneous tasks, and
-function variants specialized to architectures, through simple Parla examples:
+This lesson introduces task placements in Parla through the following simple examples:
 `cpu.py` `gpu.py` `hetero_devices.py`
-This example needs four GPU devices with CUDA and CuPy packages.
 
+These examples need four GPU devices, CUDA, and CuPy packages.
 For this example, we use an element-wise vector addition operation as the main
 computation of a task.
 
