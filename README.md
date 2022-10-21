@@ -1,94 +1,94 @@
-# Parla
+```
+______          _                 ┌─────────┐┌──────┐
+| ___ \        | |                │ Task A  ││Task B│
+| |_/ /_ _ _ __| | __ _           └┬───────┬┘└────┬─┘
+|  __/ _` | '__| |/ _` |          ┌▽─────┐┌▽─────┐│  
+| | | (_| | |  | | (_| |          │Task D││Task C││  
+\_|  \__,_|_|  |_|\__,_|          └┬─────┘└┬─────┘│  
+                                  ┌▽─────┐┌▽──────▽┐ 
+                                  └──────┘└────────┘ 
+```
 
-Parla is a high-level programming system for running numerical simulations on heterogeneous architectures.
-The current prototype emphasizes orchestrating data movement and kernel calls across all the CPUs and GPUs available on a given machine.
-<!--API documentation is available at [http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html](http://www.cs.utexas.edu/~amp/psaap/Parla.py/index.html). -->
+# Introduction
 
+**Parla** is a task-parallel programming library for Python.
+Parla targets the orchestration of heterogeneous (CPU+GPU) workloads on a single shared-memory machine.
+We provide features for resource management, task variants, and automated scheduling of data movement between devices. 
+
+We design for *gradual-adoption* allowing users to easily port sequential code for parallel execution.
+
+The Parla runtime is multi-threaded but *single-process* to utilize a shared address space. 
+In practice this means that the main compute workload within each task *must* release the CPython Global Interpreter Lock (GIL) to achieve parallel speedup.
+
+Note: Parla is not designed with workflow management in mind and does not currently support features for fault-tolerance or checkpointing.
 
 # Installation
 
 Parla is currently distributed from this repository as a Python module.
-In the future, Parla will be available as a Conda package; for now, it must manually be installed.
-For new users unfamiliar with Python package management, we recommend using Miniconda to manage Parla and its dependencies.
-To install Miniconda you can follow the detailed instructions available from [Miniconda's documentation](https://docs.conda.io/en/latest/miniconda.html).
-Abbreviated instructions are included here.
-If you are running Linux and have `wget` available, you can download and install Miniconda into the Miniconda subdirectory of your home directory by running
 
+Parla 0.2 requires `Python>=3.7`, `numpy`, `cupy`, and `psutil` and can be installed as follows:
+
+```bash
+conda (or pip) install -c conda-forge numpy cupy psutil
+git clone https://github.com/ut-parla/Parla.py.git
+cd Parla.py
+pip install .
 ```
-wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-bash miniconda.sh
-rm miniconda.sh
-```
-
-Restart your shell for changes to take effect.
-
-<!--Parla is available as a Conda package. -->
-<!--A docker image with the Conda package already set up is also available. -->
-Parla requires Python>=3.7, numpy, cupy, cython, and psutil.
-Features for VECs (dlm_open execution spaces) also depends on the C package libunwind.
-
-To run all examples you require: scipy, numba, pexpect, mkl, mkl-service, and cupy.
-The synthetic submodule requires compilation of its "busy sleep" routines for GPU and CPUs. 
-See the examples/synthetic/README for details. 
-
-Note that mkl-service is REQUIRED to find and import the mkl module. 
-They can be installed with conda: `conda install -c conda-forge mkl mkl-service`
-They are used to control the number of threads used by linear algebra routines to prevent oversubscription. 
-
-You may want to create a new Conda environment with the required Python version, like so
-
-```
-conda create -n environment_name python=3.7
-```
-
-If you have sudo privileges on your system, install libunwind-dev as follows:
-
-```
-sudo apt-get install libunwind-dev # Installs libunwind on your system
-```
-
-If you do not have sudo privileges and libunwind-dev is not already installed, you will have to build it yourself.
-The repository and build instructions are located [here](https://github.com/libunwind/libunwind).
-
-To activate your Conda environment and install the other required dependencies, run
-
-```
-conda activate environment_name # Opens your Conda environment
-conda install numpy cython psutil scipy numba cupy pexpect # Installs Python packages into your environment
-```
-
-To install Parla itself, navigate to the top-level directory of this repository, and from it, run ONE of the following two commands:
-
-```
-pip install .     # For Parla Users
-pip install -e .  # For Parla Developers who are modifying Parla and would like to see their changes reflected as they work
-```
-
-The installation process creates extra files in the repository.
-Virtual execution contexts (experimental - see below) require on some of these files to be present.
-If you are not using virtual execution contexts and would like to clear out the extra files created by Parla on installation, use [`git clean`](https://git-scm.com/docs/git-clean).
-
-Now all the scripts in this repository are runnable as normal Python scripts.
 To test your installation, try running
 
-```
+```bash
 python tutorial/0_hello_world/hello.py
 ```
 
 This should print
 
-```
+```bash
 Hello, World!
 ```
 
-We recommend entering the tutorial directory and working through it as a starting point for learning Parla.
+We recommend working through the tutorial as a starting point for learning Parla!
 
-To run examples for blr, nbody, and synthetic graphs you have to initalize the submodules.
-We recommend running:
+## Example Usage
+
+Parla tasks are launched in an indexed namespace (the '*TaskSpace*') and capture variables from the local scope through the task body's closure.
+
+Basic usage can be seen below:
+
+```python
+with Parla:
+    T = TaskSpace("Example Space")
+
+    for i in range(4):
+        @spawn(T[i], placement=cpu)
+        def tasks_A():
+            print(f"We run first on the CPU. I am task {i}", flush=True)
+
+    @spawn(T[4], dependencies=[T[0:4]], placement=gpu)
+    def task_B():
+        print("I run second on any GPU", flush=True)
+```
+
+
+## Example Mini-Apps
+The examples have a wider set of dependencies.
+
+Running all requires: `scipy`, `numba`, `pexpect`, `mkl`, `mkl-service`, and `Cython`.
+
+
+To get the full set of examples (BLR, N-Body, and synthetic graphs) initialize the submodules:
 ```
 git submodule update --init --recursive --remote
 ```
 
+Specific running installation instructions for each of these submodules can be found in their directories.
+
+The test-suite over them (reproducing the results in the SC'22 Paper) can be launched as:
+
+```bash
+python examples/launcher.py --figures <list of figures to reproduce>
+```
+
+<!---
 ## Running the Docker Container
 The Parla container requires CUDA support in the Docker host environment. To get a shell inside the provided docker container run
 
@@ -160,6 +160,8 @@ NOTE: the interactive shell doesn't work on some machines right now and we don't
 LD_LIBRARY_PATH="$HOME/Parla.py/runtime_libs/build:$LD_LIBRARY_PATH" LD_PRELOAD="$HOME/Parla.py/runtime_libs/build/libparla_supervisor.so" "$HOME/Parla.py/runtime_libs/usingldso" "$HOME/Parla.py/glibc/install" python "$@"
 ```
 Using the parla.sh shell script you can run parla programs as "sh parla.sh $ARGS" where $ARGS is whatever arguments you'd be passing to Python.
+-->
+
 
 ## Acknowledgements
 This software is based upon work supported by the Department of Energy, National Nuclear Security Administration under Award Number DE-NA0003969.

@@ -7,7 +7,7 @@ except ImportError:
     cupy = numpy  # work around of cupy.ndarray
 
 
-def array(object, dtype=None, copy=True, order='K', subok=False, ndmin=0, like=None, on_gpu=False):
+def array(object, dtype=None, copy=True, order='K', subok=False, ndmin=0, like=None, on_gpu=False, name=""):
     """
     Create a Parla array on the specific device (CPU by default).
 
@@ -32,9 +32,9 @@ def array(object, dtype=None, copy=True, order='K', subok=False, ndmin=0, like=N
             array (default).
         ndmin (int): Minimum number of dimensions. Ones are inserted to the
             head of the shape if needed.
-        like (array_like): Reference object to allow the creation of arrays 
-            which are not NumPy arrays. If an array-like passed in as like 
-            supports the __array_function__ protocol, the result will be defined by it. 
+        like (array_like): Reference object to allow the creation of arrays
+            which are not NumPy arrays. If an array-like passed in as like
+            supports the __array_function__ protocol, the result will be defined by it.
             In this case, it ensures the creation of an array object compatible with that passed in via this argument.
             New in Numpy version 1.20.0.
             Ignored for cupy(GPU) array.
@@ -48,26 +48,26 @@ def array(object, dtype=None, copy=True, order='K', subok=False, ndmin=0, like=N
     # if the input is already an ndarray
     if isinstance(object, (numpy.ndarray, cupy.ndarray)):
         if copy:
-            parray = PArray(object.copy())
+            parray = PArray(object.copy(), name=name)
         else:
-            parray = PArray(object)
+            parray = PArray(object, name=name)
     elif isinstance(object, PArray): # Already an PArray
         if copy:
-            parray = PArray(object.array.copy())
+            parray = PArray(object.array.copy(), name=name)
         else:
-            parray = PArray(object.array)
+            parray = PArray(object.array, name=name)
     else: # create one if it is not an ndarray
         if on_gpu:
-            parray = PArray(cupy.array(object, dtype=dtype, copy=copy, order=order, subok=subok, ndmin=ndmin))
+            parray = PArray(cupy.array(object, dtype=dtype, copy=copy, order=order, subok=subok, ndmin=ndmin), name=name)
         else:
             if like:
-                parray = PArray(numpy.array(object, dtype=dtype, copy=copy, order=order, subok=subok, ndmin=ndmin, like=like))
+                parray = PArray(numpy.array(object, dtype=dtype, copy=copy, order=order, subok=subok, ndmin=ndmin, like=like), name=name)
             else:
-                parray = PArray(numpy.array(object, dtype=dtype, copy=copy, order=order, subok=subok, ndmin=ndmin))
+                parray = PArray(numpy.array(object, dtype=dtype, copy=copy, order=order, subok=subok, ndmin=ndmin), name=name)
     return parray
 
 
-def asarray(a, dtype=None, order=None, like=None, on_gpu=False):
+def asarray(a, dtype=None, order=None, like=None, on_gpu=False, name=""):
     """Converts an object to Parla array.
 
     This is equivalent to :class:``array(a, dtype, on_gpu, copy=False)``.
@@ -83,9 +83,9 @@ def asarray(a, dtype=None, order=None, like=None, on_gpu=False):
             possible.
             If ``obj`` is `numpy.ndarray`, the function returns ``'C'``
             or ``'F'`` order array.
-        like (array_like): Reference object to allow the creation of arrays 
-            which are not NumPy arrays. If an array-like passed in as like 
-            supports the __array_function__ protocol, the result will be defined by it. 
+        like (array_like): Reference object to allow the creation of arrays
+            which are not NumPy arrays. If an array-like passed in as like
+            supports the __array_function__ protocol, the result will be defined by it.
             In this case, it ensures the creation of an array object compatible with that passed in via this argument.
             New in Numpy version 1.20.0.
             Ignored for cupy(GPU) array.
@@ -104,7 +104,7 @@ def asarray(a, dtype=None, order=None, like=None, on_gpu=False):
 
     .. seealso:: :func:`numpy.asarray`
     """
-    return array(a, dtype=dtype, copy=False, order=order, like=like, on_gpu=on_gpu)
+    return array(a, dtype=dtype, copy=False, order=order, like=like, on_gpu=on_gpu, name=name)
 
 
 def asarray_batch(*args):
@@ -140,12 +140,12 @@ def asarray_batch(*args):
             return type(object)(accumulator)
         else:
             raise TypeError(f"Unsupported Type: {type(object)}")
-    
+
     parla_arrays = []
     for arg in args:
         parla_arrays.append(get_parray(arg))
-    
+
     if len(parla_arrays) == 1:
-        return parla_arrays[0]  
+        return parla_arrays[0]
     else:
         return parla_arrays  # recommend user to unpack this

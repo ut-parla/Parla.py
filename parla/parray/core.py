@@ -40,7 +40,10 @@ class PArray:
     _slices: List[SlicesType]
     _coherence_cv: Dict[int, threading.Condition]
 
-    def __init__(self, array: ndarray, parent: "PArray" = None, slices=None) -> None:
+    def __init__(self, array: ndarray, parent: "PArray" = None, slices=None, name=None) -> None:
+
+        self._name = name
+
         if parent is not None:  # create a view (a subarray) of a PArray
             # inherit parent's buffer and coherence states
             # so this PArray will becomes a 'view' of its parents
