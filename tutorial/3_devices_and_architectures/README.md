@@ -42,10 +42,10 @@ a single CPU core.
 ```
 
 Parla allows to specify task placements through Numpy objects.
-Line 32 passes two numpy arrays, `x` and `y`, to the `placement` argument. 
+Line 30 passes two numpy arrays, `x` and `y`, to the `placement` argument. 
 This task will be launched to any available one of devices where `x` or `y` was instantiated 
 when this task was spawned. In this example, this task must run on CPU since
-`x` and `y` are located on CPU as numpy arrays.
+`x` and `y` are numpy arrays located on CPU.
 
 ```
 30  @spawn(placement=[x, y])
@@ -54,11 +54,11 @@ when this task was spawned. In this example, this task must run on CPU since
 The below is an output of the `cpu.py`.
 
 ```
-[Lesson 3-1] Spawns a CPU architecture task.
+Spawns a CPU architecture task.
 CPU kernel is called..
 Output>> 6 8 10 12
 
-[Lesson 3-1] Specifies a placement through data location
+Specifies a placement through data location
 This should be running on CPU
 Spawns a single task on CPU
 CPU kernel is called..
@@ -78,7 +78,8 @@ This lesson consists of two examples. The first example spawns a
 task on a single GPU device and performs element-wise vector addition.
 The next example exploits advanced features to leverage multi-devices
 heterogeneous architecture. This example partitions each input array into 4 slices,
-distributes each of them to respective GPU devices, and performs element-wise vector addition.
+distributes each of them to respective GPU devices, and performs element-wise vector addition
+between the slices.
 
 Note that GPU tasks would require a bit of time in the beginning for
 just-in-time compilation for `cupy` libraries.
@@ -91,14 +92,14 @@ In this example, we need to import cupy (Line 1) and a Parla gpu (Line 6) packag
 ```
 
 Let's start from the first example from line 23 to 34.
-Line 23 sets a placement of `gpu_task_through_arch` task to a GPU architecture.
+Line 23 sets a placement of `gpuarch_place_case` task to a GPU architecture.
 ```
 23  @spawn(placement=[gpu])
 ```
-Therefore, this task will be launched to any avilable GPU device.
+Therefore, this task will be run on any avilable single GPU device.
 Parla allows application programmers to call any Python external libraries
 without any code modification. Based on that, line 26 and 27 declare necessary cupy
-array operands, and line 31 declares and calls a cupy kernel for element-wise vector
+arrays, and line 31 declares and calls a cupy kernel for element-wise vector
 addition. 
 
 ```

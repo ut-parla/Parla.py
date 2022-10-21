@@ -21,7 +21,7 @@ def main():
     # performs element-wise vector addition.
     @spawn(placement=cpu)
     async def single_cpu_task():
-      print("[Lesson 3-1] Spawns a CPU architecture task.")
+      print("Spawns a CPU architecture task.")
       elemwise_add(x, y)
     await single_cpu_task 
 
@@ -29,7 +29,7 @@ def main():
     # placement, and prints its values.
     @spawn(placement=[x, y])
     async def single_cpu_task_through_data_placement():
-      print("[Lesson 3-1] Specifies a placement through data location")
+      print("Specifies a placement through data location")
       print("This should be running on CPU")
       print("Spawns a single task on CPU")
       elemwise_add(x, y)
