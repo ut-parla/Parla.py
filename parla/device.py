@@ -224,3 +224,18 @@ def get_all_architectures() -> List[Architecture]:
     :return: A list of all Architectures.
     """
     return list(_architectures_list)
+
+def get_parla_device(device):
+    if isinstance(device, Device):
+        return device
+    try:
+        import cupy
+    except ImportError:
+        pass
+    else:
+        if isinstance(device, cupy.cuda.Device):
+            from .cuda import gpu
+            index = device.id
+            return gpu(index)
+    raise ValueError(
+        "Don't know how to convert object of type {} to a parla device object.".format(type(device)))

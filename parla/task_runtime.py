@@ -16,6 +16,7 @@ from parla.device import get_all_devices, Device
 from parla.environments import EnvironmentComponentInstance, TaskEnvironmentRegistry, TaskEnvironment
 from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
+from parla.task_states import TaskState, TaskWaiting, TaskRunning, TaskCompleted, TaskException
 
 # Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level=logging.DEBUG)
@@ -65,92 +66,6 @@ class UnspawnedDependencies:
 
 
 unspawned_dependencies = UnspawnedDependencies()
-
-
-class TaskState(object, metaclass=ABCMeta):
-    __slots__ = []
-
-    @property
-    @abstractmethod
-    def is_terminal(self) -> bool:
-        raise NotImplementedError()
-
-
-class TaskWaiting(TaskState):
-    """ This state specifies that a task is waiting for dependencies' spawnings
-    """
-    @property
-    def is_terminal(self):
-        return False
-
-# TODO(lhc): Why do we need dependency information at here?
-#           It is not exploited/managed correctly.
-class TaskRunning(TaskState):
-    __slots__ = ["func", "args", "dependencies"]
-
-    @property
-    def is_terminal(self):
-        return False
-
-    # The argument dependencies intentially has no hint.
-    # But its corresponding member instance value is declared as list.
-    # Callers can pass None if they want to pass empty dependencies.
-    def __init__(self, func, args, dependencies: Optional[List]):
-        if dependencies is not None:
-            # d could be one of four types: Task, DataMovementTask,
-            # TaskID or other types.
-            # Task and DataMovementTask are expected types and
-            # are OK to be in the dependency list.
-            # TaskID is not yet spawned, and will be added as a
-            # Task when it is spawned.
-            # (Please refer to tasks.py:_task_callback() for detiailed
-            #  information)
-            #
-            # Other types are not allowed and not expected.
-            assert all(isinstance(d, (Task, TaskID)) for d in dependencies)
-            self.dependencies = [
-                d for d in dependencies if isinstance(d, Task)]
-        else:
-            self.dependencies = []
-        self.args = args
-        self.func = func
-
-    def clear_dependencies(self):
-        self.dependencies = []
-
-    def __repr__(self):
-        if self.func:
-            # return "TaskRunning({}, {}, {})".format(self.func.__name__, self.args, self.dependencies)
-            return "TaskRunning({})".format(self.func.__name__)
-        else:
-            return "Functionless task"
-
-class TaskCompleted(TaskState):
-    __slots__ = ["ret"]
-
-    def __init__(self, ret):
-        self.ret = ret
-
-    @property
-    def is_terminal(self):
-        return True
-
-    def __repr__(self):
-        return "TaskCompleted({})".format(self.ret)
-
-
-class TaskException(TaskState):
-    __slots__ = ["exc"]
-
-    @property
-    def is_terminal(self):
-        return True
-
-    def __init__(self, exc):
-        self.exc = exc
-
-    def __repr__(self):
-        return "TaskException({})".format(self.exc)
 
 
 ResourceDict = Dict[str, Union[float, int]]

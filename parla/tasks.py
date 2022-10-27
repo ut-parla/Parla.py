@@ -9,16 +9,14 @@ Parla supports simple task parallelism.
 
 """
 import logging
-import threading
 import inspect
-from abc import abstractmethod, ABCMeta
-from contextlib import asynccontextmanager, contextmanager, ExitStack
-from typing import Awaitable, Collection, Iterable, Optional, Any, Union, List, FrozenSet, Dict
+from contextlib import contextmanager, ExitStack
+from typing import Collection, Optional, Any, Union
 
-from parla.device import Device, Architecture, get_all_devices
 from parla.task_runtime import ComputeTask, TaskID, TaskCompleted, TaskRunning, TaskAwaitTasks, TaskState, DeviceSetRequirements, Task, get_scheduler_context, task_locals, WorkerThread
-from parla.utils import parse_index
 from parla.dataflow import Dataflow
+from parla.placement import PlacementSource, get_placement_for_any
+from parla.device import get_parla_device
 
 try:
     from parla import task_runtime, array
@@ -32,171 +30,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "TaskID", "TaskSpace", "spawn", "tasks", "finish", "CompletedTaskSpace", "Task", "reserve_persistent_memory"
 ]
-
-
-class TaskSet(Awaitable, Collection, metaclass=ABCMeta):
-    """
-    A collection of tasks.
-    """
-
-    @property
-    @abstractmethod
-    def _tasks(self) -> Collection:
-        pass
-
-    @property
-    def _flat_tasks(self) -> List[Union[TaskID, Task]]:
-        # Compute the flat dependency set (including unwrapping TaskID objects)
-        dependencies = []
-        for ds in self._tasks:
-            if not isinstance(ds, Iterable):
-                ds = (ds,)
-            for d in ds:
-                if hasattr(d, "task"):
-                    if d.task is not None:
-                        d = d.task
-                # if not isinstance(d, task_runtime.Task):
-                #    raise TypeError("Dependencies must be TaskIDs or Tasks: " + str(d))
-                dependencies.append(d)
-        return dependencies
-
-    def __await__(self):
-        return (yield TaskAwaitTasks(self._flat_tasks, None))
-
-    def __len__(self) -> int:
-        return len(self._tasks)
-
-    def __iter__(self):
-        return iter(self._tasks)
-
-    def __contains__(self, x) -> bool:
-        return x in self._tasks
-
-    def __repr__(self):
-        return "tasks({})".format(self._tasks)
-
-
-class tasks(TaskSet):
-    """
-    An ad-hoc collection of tasks.
-    An instance is basically a reified dependency list as would be passed to `spawn`.
-    This object is awaitable and will block until all tasks are complete.
-
-    >>> await tasks(T1, T2)
-    >>> @spawn(None, tasks(T1, T2)) # Same as @spawn(None, [T1, T2])
-    >>> def f():
-    >>>     pass
-    """
-
-    @property
-    def _tasks(self) -> Collection:
-        return self.args
-
-    __slots__ = ("args",)
-
-    def __init__(self, *args):
-        self.args = args
-
-
-class TaskSpace(TaskSet):
-    """A collection of tasks with IDs.
-
-    A `TaskSpace` can be indexed using any hashable values and any
-    number of "dimensions" (indicies). If a dimension is indexed with
-    numbers then that dimension can be sliced.
-
-    >>> T = TaskSpace()
-    ... for i in range(10):
-    ...     @spawn(T[i], [T[0:i-1]])
-    ...     def t():
-    ...         code
-
-    This will produce a series of tasks where each depends on all previous tasks.
-
-    :note: `TaskSpace` does not support assignment to indicies.
-    """
-    _data: Dict[int, TaskID]
-
-    @property
-    def _tasks(self):
-        return self._data.values()
-
-    def __init__(self, name="", members=None):
-        """Create an empty TaskSpace.
-        """
-        self._name = name
-        self._data = members or {}
-
-    def __getitem__(self, index):
-        """Get the `TaskID` associated with the provided indicies.
-        """
-        if not isinstance(index, tuple):
-            index = (index,)
-        ret = []
-        parse_index((), index, lambda x, i: x + (i,),
-                    lambda x: ret.append(self._data.setdefault(x, TaskID(self._name, x))))
-        if len(ret) == 1:
-            return ret[0]
-        return ret
-
-    def __repr__(self):
-        return "TaskSpace({_name}, {_data})".format(**self.__dict__)
-
-
-class CompletedTaskSpace(TaskSet):
-    """
-    A task space that returns completed tasks instead of unused tasks.
-
-    This is useful as the base case for more complex collections of tasks.
-    """
-
-    @property
-    def _tasks(self) -> Collection:
-        return []
-
-    def __getitem__(self, index):
-        return tasks()
-
-
-# TODO (bozhi): We may need a centralized typing module to reduce types being imported everywhere.
-PlacementSource = Union[Architecture, Device, Task, TaskID, Any]
-
-# TODO (bozhi): We may need a `placement` module to hold these `get_placement_for_xxx` interfaces, which makes more sense than the `tasks` module here. Check imports when doing so.
-
-
-def get_placement_for_value(p: PlacementSource) -> List[Device]:
-    if hasattr(p, "__parla_placement__"):
-        # this handles Architecture, ResourceRequirements, and other types with __parla_placement__
-        return list(p.__parla_placement__())
-    elif isinstance(p, Device):
-        return [p]
-    elif isinstance(p, TaskID):
-        return get_placement_for_value(p.task)
-    elif isinstance(p, task_runtime.Task):
-        return get_placement_for_value(p.req)
-    elif array.is_array(p):
-        return [array.get_memory(p).device]
-    elif isinstance(p, Collection):
-        raise TypeError("Collection passed to get_placement_for_value, probably needed get_placement_for_set: {}"
-                        .format(type(p)))
-    else:
-        raise TypeError(type(p))
-
-
-def get_placement_for_set(placement: Collection[PlacementSource]) -> FrozenSet[Device]:
-    if not isinstance(placement, Collection):
-        raise TypeError(type(placement))
-    return frozenset(d for p in placement for d in get_placement_for_value(p))
-
-
-def get_placement_for_any(placement: Union[Collection[PlacementSource], Any, None]) \
-        -> FrozenSet[Device]:
-    if placement is not None:
-        ps = placement if isinstance(placement, Iterable) and not array.is_array(
-            placement) else [placement]
-        return get_placement_for_set(ps)
-    else:
-        return frozenset(get_all_devices())
 
 
 def _task_callback(task, body) -> TaskState:
@@ -388,6 +221,8 @@ def spawn(taskid: Optional[TaskID] = None,
         if inspect.iscoroutine(body):
             # An already running coroutine does not need changes since we assume
             # it was changed correctly when the original function was spawned.
+
+            # This is for tasks that are "relaunched"
             separated_body = body
         else:
             # Perform a horrifying hack to build a new function which will
@@ -430,6 +265,7 @@ def spawn(taskid: Optional[TaskID] = None,
 
         logger.debug("Created: %s %r", taskid, body)
 
+        #print("task scopes", task_locals.task_scopes, flush=True)
         for scope in task_locals.task_scopes:
             scope.append(task)
 
@@ -441,6 +277,8 @@ def spawn(taskid: Optional[TaskID] = None,
 
     return decorator
 
+
+#TODO(wlr): All of this memory handling should not be in this file. (Also needs to be cleaned up and documented.)
 
 @contextmanager
 def _reserve_persistent_memory(memsize, device):
@@ -454,21 +292,6 @@ def _reserve_persistent_memory(memsize, device):
 
 # TODO: Move this to parla.device and import it from there. It's generally useful.
 
-
-def _get_parla_device(device):
-    if isinstance(device, Device):
-        return device
-    try:
-        import cupy
-    except ImportError:
-        pass
-    else:
-        if isinstance(device, cupy.cuda.Device):
-            from .cuda import gpu
-            index = device.id
-            return gpu(index)
-    raise ValueError(
-        "Don't know how to convert object of type {} to a parla device object.".format(type(device)))
 
 
 @contextmanager
@@ -553,7 +376,7 @@ def reserve_persistent_memory(amount, device=None):
                     return
             device_must_be_iterable = False
             try:
-                device = _get_parla_device(device)
+                device = get_parla_device(device)
             except ValueError:
                 device_must_be_iterable = True
             if device_must_be_iterable:
@@ -574,38 +397,10 @@ def reserve_persistent_memory(amount, device=None):
             assert False
     if device is None:
         raise ValueError("Device cannot be inferred.")
-    device = _get_parla_device(device)
+    device = get_parla_device(device)
     if isinstance(device, cpu._CPUDevice):
         raise ValueError(
             "Reserving space for persistent data in main memory is not yet supported.")
     with _reserve_persistent_memory(memsize, device):
         yield
 
-
-@asynccontextmanager
-async def finish():
-    """
-    Execute the body of the `with` normally and then perform a barrier applying to all tasks created within this block
-    and in this task.
-
-    `finish` does not wait for tasks which are created by the tasks it waits on. This is because tasks are allowed to
-    complete before tasks they create. This is a difference from Cilk and OpenMP task semantics.
-
-    >>> async with finish():
-    ...     @spawn()
-    ...     def task():
-    ...         @spawn()
-    ...         def subtask():
-    ...              code
-    ...         code
-    ... # After the finish block, task will be complete, but subtask may not be.
-
-    """
-    my_tasks = []
-    task_locals.task_scopes.append(my_tasks)
-    try:
-        yield
-    finally:
-        removed_tasks = task_locals.task_scopes.pop()
-        assert removed_tasks is my_tasks
-        await tasks(my_tasks)
