@@ -18,7 +18,7 @@ from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 from parla.task_states import TaskState, TaskWaiting, TaskRunning, TaskCompleted, TaskException
 
-#COMMENT(wlr): About to split out requirements into a separate file
+#COMMENT(wlr): Requirements have been split to a separate file
 
 # Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level=logging.DEBUG)
