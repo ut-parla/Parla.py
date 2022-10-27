@@ -17,9 +17,7 @@ from parla.environments import EnvironmentComponentInstance, TaskEnvironmentRegi
 from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 from parla.task_states import TaskState, TaskWaiting, TaskRunning, TaskCompleted, TaskException
-from parla.task_requirements import ResourceRequirements, DeviceSetRequirements, OptionsRequirements, ResourceDict
-
-#COMMENT(wlr): Requirements have been split to a separate file
+from parla.task_requirements import ResourceRequirements, EnvironmentRequirements, DeviceSetRequirements, OptionsRequirements, ResourceDict
 
 # Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level=logging.DEBUG)
@@ -34,8 +32,6 @@ __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirem
 # make each task have its own lock to mimic atomic-like counters for dependency tracking.
 
 TaskAwaitTasks = namedtuple("AwaitTasks", ("dependencies", "value_task"))
-
-
 class UnspawnedDependencies:
     """ Collection of dependencies where the upstream tasks ("dependencies") are not spawned yet
     and thus making downstream tasks ("dependents") wait.
@@ -50,6 +46,8 @@ class UnspawnedDependencies:
     # - When A is spawned, it should notify B and C.
     # - B and C must have already been spawned.
     _dependencies: Dict['TaskID', List['TaskID']]
+
+    #TODO(wlr): This needs a clear value after the predecessor is spawned.
 
     def __init__(self):
         self._mutex = threading.Lock()
@@ -67,8 +65,10 @@ class UnspawnedDependencies:
         with self._mutex:
             return self._dependencies[tid]
 
-
+#TODO(wlr): This should be in the scheduler scope (not the global scope)
 unspawned_dependencies = UnspawnedDependencies()
+
+
 class Task:
     __slots__ = [
         '_mutex', '_name', '_taskid', '_state', '_dependents', '_dependencies',
@@ -80,22 +80,36 @@ class Task:
                  req: ResourceRequirements, name: Optional[str] = None,
                  init_state: TaskState = TaskWaiting(),
                  init_assigned: bool = False):
+
+        #COMMENT(wlr): Do we actually need a lock here? Nothing should have the reference to this before the object is created.
+        #              Even for unspawned tasks.
+
         self._mutex = threading.Lock()
         with self._mutex:
-            # This is the name of the task, which is distinct from the TaskID. It inherits its name from the func.
+            # This is the name of the task, which is distinct from the TaskID. 
+            # Tasks inherit their name from their body func.
             self._name = name
-            self._dependents: List[Task] = []
+
             self._taskid = taskid
             self._state = init_state
-            # Maintain dependencies as a list object.
-            # Therefore, bi-directional edges exist among dependent tasks.
-            # Some of these dependencies are moved to a data movement task.
+
+            # Maintain lists of dependencies and dependents.
+            # This gives a bi-directional edges between tasks.
+
+            # Dependencies may be added as data-movement tasks are created.
+
+            self._dependents: List[Task] = []
             self.dependencies = dependencies
+
+            #The resource requirements of the task.
             self._req = req
+
             # This flag specifies if a task is assigned device.
             # If it is, it sets to True. Otherwise, it sets to False.
+            #TODO(wlr): Remove this. It will be handled by TaskState and mapped counters. 
             self._assigned = init_assigned
-            # Predecessor tasks' event objects for runahead scheduling.
+
+            # Event objects from predecessor tasks (used for runahead scheduling).
             self._dependency_events = []
 
     @property
@@ -115,28 +129,22 @@ class Task:
         self._req = new_req
 
     def _wait_for_dependency_events(self, env: TaskEnvironment):
+        """
+        Wait for all events dispatched to the hardware queues to complete.
+        """
         if len(self._dependency_events) > 0:
-            # Only wait events if any remaining dependent tasks exist.
-            # TODO(lhc): This does not support nested CPU tasks from GPU tasks.
-            #            When we notify dependents, we don't know places on
-            #            which the dependents will run since those would decide
-            #            at the next step, mapping step.
-            #            Therefore, the current runtime does not consider
-            #            dependents' placements, but just creates events
-            #            on the devices where the current task is running.
-            #            For example, when CPU tasks get GPU events,
-            #            they will just skip and will not wait for them.
-            #            This is not technical limitation, just need refactoring
-            #            and adding more features.
-            #            But our target applications do not have this pattern
-            #            and will do it later.
+            # TODO(lhc): This does not support CPU tasks that depend on GPU tasks.
+            # TODO(wlr): Need to support this pathway in cpu_impl.py 
             env.wait_dependent_events(self._dependency_events)
-            # Already waited all dependent events.
-            # Initialize the dependent event list.
+        
+        #Clear list (as a task may be re-enqueued for its continuation)
         self._dependency_events = []
 
     @property
     def result(self):
+        """
+        The return value (or exception) from a task
+        """
         if isinstance(self._state, TaskCompleted):
             return self._state.ret
         elif isinstance(self._state, TaskException):
@@ -161,9 +169,12 @@ class Task:
             with self._mutex:
                 # A default state to avoid exceptions during catch
                 task_state = TaskException(RuntimeError("Unknown fatal error"))
+
                 # Run the task and assign the new task state
                 try:
                     assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(self._state, self.taskid)
+
+                    #TODO(wlr): I don't understand this comment.
                     # TODO(lhc): This assumes Parla only has two devices.
                     #            The reason why I am trying to do is importing
                     #            Parla's cuda.py is expensive.
@@ -176,17 +187,27 @@ class Task:
                     # the current task.
                     env = self.req.environment
                     with _scheduler_locals._environment_scope(env), env:
+
+                        # Wait for all predecessor events dispatched to the hardware queues to complete before running.
                         events = env.get_events_from_components()
                         self._wait_for_dependency_events(env)
+
+                        #Execute the body of this task (this may be async if its tail call dispatches to a hardware queue)
                         task_state = self._execute_task()
-                        # Events could be multiple for multiple devices task.
+
+                        #Get the last event from the hardware queue (if any) and add it to the list of events the dependents must wait for.
+                        #For multi-device tasks there may be multiple events to sync.
                         env.record_events()
+
                         if len(events) > 0:
-                            # If any event created by the current task exist,
-                            # notify dependents and make them wait for that event,
-                            # not Parla task completion.
+                            #Pass events to dependent tasks 
+                            #The task is dispatched (not complete) and its dependents are marked ready.
                             self._notify_dependents(events)
+
+                        #Synchronize this task
                         env.sync_events()
+                        
+
                     task_state = task_state or TaskCompleted(None)
                 except Exception as e:
                     task_state = TaskException(e)
@@ -579,6 +600,7 @@ class TaskID:
         self._dependencies = v
 
     def __hash__(self):
+        #TODO(wlr): This needs to hash to a unique value (for unspawned dependencies)
         return hash(self._id)
 
     def __repr__(self):

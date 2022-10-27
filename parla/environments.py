@@ -80,7 +80,7 @@ class TaskEnvironment(ContextManager):
             or None meaning the default components should be used.
         :param tags: A set of arbitrary tags associated with this environment. Tasks can select environments by tag.
         """
-        from .tasks import get_placement_for_set
+        from .placement import get_placement_for_set
 
         tags = frozenset(tags)
         try:

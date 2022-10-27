@@ -17,6 +17,7 @@ from parla.task_runtime import ComputeTask, TaskID, TaskCompleted, TaskRunning, 
 from parla.dataflow import Dataflow
 from parla.placement import PlacementSource, get_placement_for_any
 from parla.device import get_parla_device
+from parla.task_collections import tasks as Tasks 
 
 try:
     from parla import task_runtime, array
@@ -240,7 +241,7 @@ def spawn(taskid: Optional[TaskID] = None,
         # Compute the flat dependency set (including unwrapping TaskID objects)
         taskid.dependencies = dependencies
 
-        processed_dependencies = tasks(*dependencies)._flat_tasks
+        processed_dependencies = Tasks(*dependencies)._flat_tasks
 
         # gather input/output/inout, which is hint for data from or to the this task
         # TODO (ses): I gathered these into lists so I could perform concatentation later. This may be inefficient.
