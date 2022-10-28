@@ -11,7 +11,7 @@ Tasks are organized through TaskSpaces.
 A **TaskSpace** object is an indexible collection of tasks.
 These are used as a namespace for task-ids.
 
-A TaskSpace can be indexed by any hashable value, such as an integer, string, or a tuple. Although in Parla 0.2, please keep any strings to length 1. This indexing can be of arbitrary dimension. For ease of use and interpretability, we recommend sticking to sets of integers.
+A TaskSpace can be indexed by any hashable value, such as an integer, string, or a tuple. Although in Parla 0.2, please keep any strings to length 1. The index can be of arbitrary dimension. For ease of use and interpretability, we highly recommend sticking to sets of integers.
 
 The use of TaskSpaces can be seen in `0_taskspaces.py`:
 
@@ -23,9 +23,7 @@ The use of TaskSpaces can be seen in `0_taskspaces.py`:
         print('I am task 0', flush=True)
 ```
 
-The 'taskid' argument to `@spawn` is the name of the task.
-
-**This name as a (TaskSpace + Index) combination must be unique.**
+The 'taskid' argument to `@spawn` is the name of the task. **This name as a (TaskSpace + Index) combination must be unique.**
 If a taskid is not specified, the task will be placed into the default TaskSpace.
 
 `0_taskspaces.py` shows different ways to add a task to a TaskSpace.
@@ -33,7 +31,7 @@ If a taskid is not specified, the task will be placed into the default TaskSpace
 ### Task Dependencies
 
 Tasks can be ordered by specifying dependencies between them.
-If TaskB depends on TaskA then TaskB will be guaranteed to execute after TaskA has completed.
+If TaskB depends on TaskA then TaskB will be guaranteed to execute only after TaskA has completed.
 
 Dependencies can be specified by passing a list of taskids to the `dependencies` argument of `@spawn`. This is the second argument and may be specified without the keyword.
 
@@ -68,7 +66,7 @@ Examples of different ways to specify task dependencies can be seen in `1_depend
 
 ### Barriers
 
-Barriers can also be used to synchronize execution of tasks. Barriers can only be used within tasks.
+Barriers can also be used to synchronize execution of tasks.
 
 Parla uses Python's asyncio `async/await` semantics to wait on task execution. This means any task that contains a barrier must be declared `async def` and spawned normally with `@spawn`.
 
@@ -83,6 +81,7 @@ Parla uses Python's asyncio `async/await` semantics to wait on task execution. T
 Although an `async def` task has an asynchronous body, the task will still wait for its body to fully complete before the task is finished.
 
 Barriers are a special (implicit) type of dependency. When a task encounters a barrier, it will release control of its worker thread and spawn a new continuation of itself as a separate task.
+Because of this Barriers can only be used within tasks.
 This new task will have the targets of the barrier added to its dependency list. The continuation will only execute after all tasks listed in the barrier have completed.
 
 The use of barriers can be seen in `2_barriers.py`.

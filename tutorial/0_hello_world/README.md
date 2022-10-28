@@ -15,7 +15,7 @@ Tasks are a basic unit of work. Specifically in Parla, tasks are annotated code 
 
 
 Although syntactically tasks often look like Python functions, they are semantically different.
-Parla tasks are not functions in the usual sense: the Parla runtime can launch tasks as soon as they are spawned; they capture local variables in the closure by value; they cannot be called and, typically, do not return values.
+Parla tasks are not functions in the usual sense: the Parla runtime can launch tasks as soon as they are spawned; they capture local variables in the closure by value; they cannot be called by user-code, and, typically, they do not return values.
 
 
 Tasks:
