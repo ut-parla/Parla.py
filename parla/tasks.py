@@ -267,8 +267,8 @@ def spawn(taskid: Optional[TaskID] = None,
         logger.debug("Created: %s %r", taskid, body)
 
         #print("task scopes", task_locals.task_scopes, flush=True)
-        for scope in task_locals.task_scopes:
-            scope.append(task)
+        #for scope in task_locals.task_scopes:
+        #    scope.append(task)
 
         # Activate scheduler
         scheduler.start_scheduler_callbacks()
@@ -280,6 +280,7 @@ def spawn(taskid: Optional[TaskID] = None,
 
 
 #TODO(wlr): All of this memory handling should not be in this file. (Also needs to be cleaned up and documented.)
+#TODO(wlr): Cannot be moved until get_scheduler_context() can be imported without the full runtime. Python has the worst import system. 
 
 @contextmanager
 def _reserve_persistent_memory(memsize, device):
@@ -290,8 +291,6 @@ def _reserve_persistent_memory(memsize, device):
         yield
     finally:
         resource_pool.deallocate_resources(device, {'memory': memsize})
-
-# TODO: Move this to parla.device and import it from there. It's generally useful.
 
 
 
