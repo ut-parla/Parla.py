@@ -18,6 +18,45 @@ class TaskWaiting(TaskState):
         return False
 
 
+class TaskMappable(TaskState):
+    """
+    This state specifies that a task is ready to be mapped to a specific device set for execution
+    """
+    @property
+    def is_terminal(self):
+        return False
+
+
+class TaskMapped(TaskState):
+    """
+    This state specifies that a task has been mapped to a device set.
+    """
+
+    @property
+    def is_terminal(self):
+        return False
+
+
+class TaskReserved(TaskState):
+    """
+    This state specifies that a task has had its persistent resources (e.g. memory) reserved on its device set
+    """
+
+    @property
+    def is_terminal(self):
+        return False
+
+
+class TaskReady(TaskState):
+    """
+    This state specifies that a task is "ready" to be launched. Its dependencies have been dispatched to hardware queues (or have completed)
+    """
+
+    @property
+    def is_terminal(self):
+        return False
+
+
 class TaskRunning(TaskState):
     __slots__ = ["func", "args", "dependencies"]
 
