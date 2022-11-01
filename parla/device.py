@@ -239,3 +239,369 @@ def get_parla_device(device):
             return gpu(index)
     raise ValueError(
         "Don't know how to convert object of type {} to a parla device object.".format(type(device)))
+
+class ResourcePool:
+
+    _devices: Dict[Device, Dict[str, float]]
+    _device_lock: Dict[Device, threading.Condition]
+
+    @staticmethod
+    def _initial_resources():
+        """
+        Initialize a resource counter for all devices. MappedResource tracks all values as a float.
+        :return: A dictionary of devices to resource counters (dictionary of resource to amount). Amounts are initialized to zero.
+        """
+        return {dev: {name: amt for name, amt in dev.resources.items()} for dev in get_all_devices()}
+
+
+    def __init__(self):
+
+        #Initialize resources types to the device default types
+        self._devices = self._initial_resources()
+
+        #Initialize per device lock
+        self._device_lock = {dev: threading.Condition(threading.Lock()) for dev in self._devices.keys()}
+
+
+    def get_all_resources(self):
+        """
+        Query the current state
+        Return a dictionary of all devices to a dictionary of all resources to the amount of that resource on that device.
+        """
+        return self._devices
+
+    def _get_locks(self, device_list: List[Device], ordered=False):
+        """
+        Try and back-off scheme to get multi-device locks.
+
+        if device_list is ordered by device id everywhere, then this should perform better
+
+        :param device_list: List of devices to lock
+        """
+
+        #TODO: The unordered scheme is a great target to port to Cython/C++ for performance
+
+        if ordered:
+            for d in device_list:
+                success = self._device_lock[d].acquire()
+                assert success
+            return success
+        else:
+            while True:
+
+                acquired_locks = []
+
+                for dev in device_list:
+                    success = self._device_lock[dev].acquire(blocking=False)
+
+                    if success:
+                        #Add to list of acquired locks
+                        acquired_locks.append(dev)
+
+                    if not success:
+                        #Free all acquired locks
+                        for dev in acquired_locks:
+                            self._device_lock[dev].release()
+                        
+                        #TODO(wlr): Force GIL release here?
+
+                        #Restart attempt to get all locks
+                        break
+                
+                #If all locks acquired, return success
+                if len(acquired_locks) == len(device_list):
+                    return True
+
+    def get_resources_on_device(self, d: Device):
+        """
+        Get the current resources on a device.
+
+        :param d: The device to get resources for.
+        :return: A dictionary of resource names to amounts.
+        """
+        return self._devices[d].copy()
+
+    def get_resource_on_device(self, d: Device, resource: str):
+        """
+        Get the current resources on a device.
+
+        :param d: The device to get resources for.
+        :param resource: The resource to get.
+        :return: The amount of the resource on the device.
+        """
+        return self._devices[d][resource]
+
+    def use_resources_on_device(self, d: Device, resources: ResourceDict):
+        """
+        Update the resource counter for a device. This is used to update the resource counter when a task is assigned to a device.
+        :param d: The device to update
+        :param resources: The resources to update
+        """
+        with self._device_lock[d]:
+            status = self._use_resource_on_device(d, ResourceDict)
+
+        return status
+
+    def _use_resource_on_device(self, d: Device, resources: ResourceDict):
+        """
+        Update the resource counter for a device. This is used to update the resource counter when a task is assigned to a device.
+
+        For internal use only. Not thread-safe.
+
+        :param d: The device to update
+        :param resources: The resources to update
+        """
+        for name, amt in resources.items():
+            self._devices[d][name] -= amt
+
+        #return success
+        return True
+
+
+    def use_resources(self, device_list: List[Device], resources: List[ResourceDict]):
+        """
+        Update the resource counter for a list of devices.
+
+        :param device_list: The devices to update
+        :param resources: The resources to update
+        """
+
+        #Acquire lock on device set
+        self._get_locks(device_list)
+
+        #Update resources
+        status = self._use_resources(device_list, resources)
+
+        #Release lock on device set
+        for d in device_list:
+            self._device_lock[d].release()
+
+        #Return success
+        return status
+
+    def _use_resources(self, device_list: List[Device], resources: List[ResourceDict]):
+        """
+        Update the resource counter for a list of devices. This is used to update the resource counter when a task is assigned to a device.
+
+        For internal use only. Not thread-safe.
+
+        :param device_list: The devices to update
+        :param resources: The resources to update
+        """
+        for d, r in zip(device_list, resources):
+            self._use_resource_on_device(d, r)
+
+        #return success
+        return True
+
+
+    def release_resource_on_device(self, d: Device, resources: ResourceDict):
+        """
+        Update the resource counter for a device. This is used to update the resource counter when a task is assigned to a device.
+        :param d: The device to update
+        :param resources: The resources to update
+        """
+        with self._device_lock[d]:
+            self._remove_resource_on_device_mutex(d, ResourceDict)
+
+        #Return success
+        return True
+
+    def _release_resource_on_device(self, d: Device, resources: ResourceDict):
+        """
+        Update the resource counter for a device. This is used to update the resource counter when a task is assigned to a device.
+
+        For internal use only. Not thread-safe. 
+
+        :param d: The device to update
+        :param resources: The resources to update
+        """
+        for name, amt in resources.items():
+            self._devices[d][name] += amt
+
+        #Return success
+        return True
+
+    def release_resources(self, device_list: List[Device], resources: List[ResourceDict]):
+        """
+        Update the resource counter for a list of devices.
+
+        :param device_list: The devices to update
+        :param resources: The resources to update
+        """
+
+        #Acquire lock on device set
+        self._get_locks(device_list)
+
+        #Update resources
+        status = self._release_resources(device_list, resources)
+
+        #Release lock on device set
+        for d in device_list:
+            self._device_lock[d].release()
+
+        #Return success
+        return status
+
+    def _release_resources(self, device_list: List[Device], resources: List[ResourceDict]):
+        """
+        Update the resource counter for a list of devices. This is used to update the resource counter when a task is assigned to a device.
+
+        For internal use only. Not thread-safe.
+
+        :param device_list: The devices to update
+        :param resources: The resources to update
+        """
+        for d, r in zip(device_list, resources):
+            self._release_resource_on_device(d, r)
+
+        #return success
+        return True
+
+
+class ManagedResources(ResourcePool):
+    """
+    Class to track resources reserved on a device. This includes state and resource checking to ensure valid usage. 
+    There should be a separate instance of this for both persistent and runtime resources.
+
+    Managed resources is a counter:
+    Decreases when a resource is reserved.
+    Increases when a resource is freed. (Task End, Data Eviction, & Possibly Work Stealing)
+    """
+
+    def _check_resources_on_device(self, d: Device, resources: ResourceDict):
+        """
+        Check if necessary resouces are currently available on a device.
+        Note: This is not atomic and does not reserve resources.
+
+        :param d: The device on which resources exist.
+        :param resources: The resources to deallocate.
+        """
+
+        for name, amount in resources.items():
+            dres = self._devices[d]
+
+            #If amount is greater than what is available on the device, return false
+            if amount > dres[name]:
+                return False
+
+        #All resources in the set are available
+        return True
+
+    def _check_resources(self, device_list: List[Device], resources: List[ResourceDict]):
+        """
+        Check if necessary resouces are currently available on a device set.
+        Note: For internal use. Not thread-safe. 
+
+        :param device_list: The devices on which resources exist.
+        :param resources: The resources to deallocate.
+        """
+
+        is_available = True
+
+        for d, res in zip(device_list, resources):
+            if not self._check_resources_on_device(d, res):
+                is_available = False
+                break
+
+        return is_available
+
+    def check_resources(self, device_list: List[Device], resources: List[ResourceDict]):
+        """
+        Check if necessary resouces are currently available on a device set.
+
+        :param device_list: The devices on which resources exist.
+        :param resources: The resources to deallocate.
+        """
+
+        #Acquire lock on all devices
+        self._get_locks(device_list)
+
+        is_available = self._check_resources(device_list, resources)
+
+        #Release lock on all devices
+        for d in device_list:
+            self._device_lock[d].release()
+
+        return is_available
+
+    def use_resources(self, device_list: List[Device], resources: List[ResourceDict]):
+        """
+        Use resources on a device set.
+
+        :param device_list: The devices on which resources exist.
+        :param resources: The resources to deallocate.
+        """
+
+        #Acquire lock on all devices
+        self._get_locks(device_list)
+
+        is_available = self._check_resources(device_list, resources)
+
+        if is_available:
+            self._use_resources(device_list, resources)
+        
+        #Release lock on all devices
+        for d in device_list:
+            self._device_lock[d].release()
+
+        return is_available
+
+    def release_resources(self, device_list: List[Device], resources: List[ResourceDict]):
+        """
+        Use resources on a device set.
+
+        :param device_list: The devices on which resources exist.
+        :param resources: The resources to deallocate.
+        """
+
+        #Acquire lock on all devices
+        self._get_locks(device_list)
+
+        #TODO(wlr): Possibly add a check if we're not releasing more than we started with?
+        self._release_resources(device_list, resources)
+        
+        #Release lock on all devices
+        for d in device_list:
+            self._device_lock[d].release()
+
+        return True
+
+
+class MappedResources(ResourcePool):
+    """
+    Class to track resources (runtime + persistent) that have been mapped to a device.
+
+    Mapped resources is a counter.
+    Increases when the mapping decision is made.
+    Mapped resources decrease when resources are freed or mapping decision is changed. (Task End, Data Eviction, Work Stealing) 
+    All devices start with 0 mapped resources of each type.
+    """
+
+    @staticmethod
+    def _initial_resources():
+        """
+        Initialize a resource counter for all devices. MappedResource tracks all values as a float.
+        #TODO(wlr): Maybe make vcus a fraction type here as well?
+
+        :return: A dictionary of devices to resource counters (dictionary of resource to amount). Amounts are initialized to zero.
+        """
+        return {dev: {name: 0.0 for name, amt in dev.resources.items()} for dev in get_all_devices()}
+
+    def _use_resource(self, d: Device, resources: ResourceDict):
+        """
+        Update the resource counter for a device. This is used to update the resource counter when a task is assigned to a device.
+        :param d: The device to update
+        :param resources: The resources to update
+        """
+        for name, amt in resources.items():
+            self._devices[d][name] += amt
+
+    def _release_resource_mutex(self, d: Device, resources: ResourceDict):
+        """
+        Update the resource counter for a device. This is used to update the resource counter when a task is assigned to a device.
+        :param d: The device to update
+        :param resources: The resources to update
+        """
+        for name, amt in resources.items():
+            self._devices[d][name] -= amt
