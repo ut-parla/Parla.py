@@ -23,7 +23,6 @@ EvictionManager:
 #   - Updating the priority of a slice, updates the priority of the parent
 #   - Updating the priority of a parent, updates the priority of all slices
 
-
 class DataNode:
     """
     A node containing a data object (PArray) on a specific device. 
@@ -68,6 +67,7 @@ class DLList:
     def __init__(self):
         self.head = None
         self.tail = None
+        self.length = 0
 
     def __str__(self):
         return self.__repr__()
@@ -84,20 +84,32 @@ class DLList:
             node.prev = self.tail
             self.tail = node
 
+        self.length += 1
+
     def remove(self, node):
         edit = False
+
         if self.head == node:
             self.head = node.next
             edit = True
+
         if self.tail == node:
             self.tail = node.prev
             edit = True
+
         if node.prev is not None:
             node.prev.next = node.next
             edit = True
+
         if node.next is not None:
             node.next.prev = node.prev
             edit = True
+
+        node.prev = None
+        node.next = None
+
+        if edit:
+            self.length -= 1
 
         return edit
         
@@ -110,6 +122,8 @@ class DLList:
         node.prev = new_node
         new_node.next = node
 
+        self.length += 1
+
     def insert_after(self, node, new_node):
         if node.next is not None:
             node.next.prev = new_node
@@ -119,6 +133,10 @@ class DLList:
         node.next = new_node
         new_node.prev = node
 
+        self.length += 1
+
+    def __len__(self):
+        return self.length
 class EvictionManager:
     """
     Track usage of data objects on devices. Used to chose which blocks to evict.
@@ -330,4 +348,159 @@ class LFUManager(EvictionManager):
         self.active_map = {}
         #holds data objects that are currently being used by tasks.
         self.used_map = {}
+
+    def _add(self, node):
+
+        #Increment usage count
+        node.priority += 1
+
+        #Lookup ListNode in priority table
+        list_node = self.priority_map.get(node.priority, None)
+
+        if list_node is None:
+            #Create new list node
+            list_node = ListNode(node.priority, DLList())
+            self.priority_list[node.priority] = list_node
+
+            if node.priority == 1:
+                #Add to the head of the list
+                self.priority_list.append(list_node)
+            else:
+                #Add as the next node after the previous priority
+                self.priority_list.insert_after(list_node, self.priority_list[node.priority - 1])
+
+        #Add data node to internal list
+        list_node.list.append(node)
+
+    def _remove(self, node, delete=False):
+
+        #Lookup ListNode in priority table
+        list_node = self.priority_map.get(node.priority, None)
+
+        assert(list_node is not None)
+
+        success = list_node.list.remove(node)
+
+        if len(list_node.list) == 0:
+            #Remove the list node from the priority list
+
+            self.priority_list.remove(list_node)
+            del self.priority_map[list_node.priority]
+
+        if delete:
+            del self.data_map[node]
+
+        return success
+
+
+    def _evict(self):
+
+        #Get least frequently used node
+
+        #Get the first list node in the priority list
+
+        list_node = self.priority_list.head
+        data_node = list_node.list.head
+
+        while list_node is not None:
+
+            #Check all data nodes with the same priority
+            while data_node is not None:
+                data_node = data_node.next
+
+                if data_node.data.get_active(self.device) == 0:
+                    break
+            
+            #Continue search in next priority list
+            if data_node.data.get_active(self.device) == 0:
+                break
+
+            list_node = list_node.next
+
+        return data_node
+
+    def start_prefetch_data(self, data):
+
+        data.add_prefetch(self.device)
+        data.add_active(self.device)
+
+        if data in self.data_map:
+            #This is a prefetch of a data object that is already on the device (or is being prefetched).
+            #This means the data is no longer evictable as its about to be in-use by data movement and compute tasks.
+
+            if data.get_active(self.device) == 1:
+                #This is the first prefetch of a data object that is already on the device.
+                #Update the evictable memory size (as this data object is no longer evictable).
+                self.evictable_memory -= data.size
+        else:
+            #This is a new block, update the used memory size.
+            self.used_memory += data.size
+
+        self.prefetch_map[data] = data
+        self.active_map[data] = data
+
+        assert(self.used_memory <= self.memory_limit)
+
+    def stop_prefetch_data(self, data):
+
+        count = data.get_prefetch(self.device)
+        data.remove_prefetch(self.device)
+
+        if count == 1:
+            del self.prefetch_map[data]
+
+    def access_data(self, data):
+
+        #NOTE(wlr): The data should already be removed from the evictable list in the prefetching stage.
+        #           Any logic here would be a sanity check. I'm removing it for now.
+
+        #node = self.data_map.get(data, None)
+        #if node is not None:
+        #    #Remove the node from the eviction list while it's in use
+        #    success = self.data_list.remove(node)
+
+        self.used_map[data] = data
+        data.add_use(self.device)
+
+
+    def release_data(self, data):
+        node = self.data_map[data]
+
+        active_count = data.get_active(self.device)
+        use_count = data.get_use(self.device)
+
+        data.remove_active(self.device)
+        data.remove_use(self.device)
+
+        self._add(node)
+
+        if active_count == 1:
+            del self.active_map[data]
+            self.evictable_memory += data.nbytes
+
+        if use_count == 1:
+            del self.used_map[data]
+
+    def evict_data(self, data):
+        node = self.data_map[data]
+
+        assert(data.get_use(self.device) == 0)
+        assert(data.get_active(self.device) == 0)
+
+        #Call internal data object evict method
+        #This should:
+        #  - Backup the data if its not in a SHARED state
+        #    (SHARED state means the data has a valid copy on multiple devices. Eviction should never destroy the only remaining copy)
+        #  - Mark the data for deletion (this may be done by the CuPy/Python GC)
+        data.evict(self.device)
+
+        self._remove(node, delete=True)
         
+        self.used_memory -= data.nbytes
+        self.evictable_memory -= data.nbytes
+
+
+    def evict(self):
+        # Get the oldest data object and remove it
+        node = self._evict()
+        self.evict_data(node)
