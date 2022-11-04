@@ -9,6 +9,8 @@ EvictionManager:
  - Implements an eviction policy for a managed list of PArray objects on a single device 
 """
 
+import threading
+
 #TODO(wlr): Nothing in this file is threadsafe at the moment. Developing structure first, then we'll add locks.
 
 #TODO(wlr): I assume PArrays hash to a unique value during their lifetime. If not, we'll need to add such a hash function to PArray.
@@ -23,6 +25,11 @@ EvictionManager:
 #   - Updating the priority of a slice, updates the priority of the parent
 #   - Updating the priority of a parent, updates the priority of all slices
 
+
+#Needs:
+# - wrap in locks (use external locks on base class)
+
+
 class DataNode:
     """
     A node containing a data object (PArray) on a specific device. 
@@ -32,6 +39,7 @@ class DataNode:
         self.data = data
         self.device = device
         self.priority = priority
+
         self.next = None
         self.prev = None
 
@@ -150,16 +158,32 @@ class EvictionManager:
         self.used_memory = 0
         self.evictable_memory = 0
 
+        self.lock = threading.Condition(threading.Lock())
+
     def map_data(self, data):
         """
         Called when a data object is mapped to a device.
         """
+        with self.lock:
+            self._map_data(data)
+
+    def _map_data(self, data):
+        """
+        Called when a data object is mapped to a device.
+        """
+        pass
+
+    def _unmap_data(self, data):
         pass
 
     def unmap_data(self, data):
         """
         Called when a data object is unmapped from a device.
         """
+        with self.lock:
+            self._unmap_data(self, data)
+
+    def _start_prefetch_data(self, data):
         pass
 
     def start_prefetch_data(self, data):
@@ -169,6 +193,15 @@ class EvictionManager:
 
         Can update the priority of the data object.
         """
+        with self.lock:
+            self._start_prefetch_data(data)
+
+    def _stop_prefetch_data(self, data):
+        """
+        Called when a data object is no longer being prefetched.
+
+        Updates the priority of the data object.
+        """
         pass
 
     def stop_prefetch_data(self, data):
@@ -177,7 +210,12 @@ class EvictionManager:
 
         Updates the priority of the data object.
         """
+        with self.lock:
+            self._stop_prefetch_data(data)
+
+    def _access_data(self, data):
         pass
+
 
     def access_data(self, data):
         """
@@ -187,6 +225,11 @@ class EvictionManager:
         Locks the data object (cannot be evicted while in use)
         Updates the evictable memory size.
         """
+        with self.lock:
+            self._access_data(data)
+
+
+    def _release_data(self, data):
         pass
 
     def release_data(self, data):
@@ -197,6 +240,10 @@ class EvictionManager:
         Unlocks the data object (can be evicted)
         Updates the evictable memory size.
         """
+        with self.lock:
+            self._release_data(data)
+
+    def _evict_data(self, data):
         pass
 
     def evict_data(self, data):
@@ -204,7 +251,17 @@ class EvictionManager:
         Called to evict a specific data object.
         Updates the used memory size and evictable memory size.
         """
+        with self.lock:
+            self._evict_data(data)
+
+    def _evict(self):
+        """
+        Called when memory is needed.
+
+        Evicts the data object with the highest priority (based on the policy).
+        """
         pass
+
 
     def evict(self):
         """
@@ -212,7 +269,8 @@ class EvictionManager:
 
         Evicts the data object with the highest priority (based on the policy).
         """
-        pass
+        with self.lock:
+            self._evict()    
 
 class LRUManager(EvictionManager):
     """
@@ -235,7 +293,7 @@ class LRUManager(EvictionManager):
         self.used_map = {}
 
 
-    def start_prefetch_data(self, data):
+    def _start_prefetch_data(self, data):
 
         data.add_prefetch(self.device)
         data.add_active(self.device)
@@ -260,7 +318,7 @@ class LRUManager(EvictionManager):
 
         assert(self.used_memory <= self.memory_limit)
 
-    def stop_prefetch_data(self, data):
+    def _stop_prefetch_data(self, data):
 
         count = data.get_prefetch(self.device)
         data.remove_prefetch(self.device)
@@ -268,7 +326,7 @@ class LRUManager(EvictionManager):
         if count == 1:
             del self.prefetch_map[data]
 
-    def access_data(self, data):
+    def _access_data(self, data):
 
         #NOTE(wlr): The data should already be removed from the evictable list in the prefetching stage.
         #           Any logic here would be a sanity check. I'm removing it for now.
@@ -281,7 +339,7 @@ class LRUManager(EvictionManager):
         self.used_map[data] = data
         data.add_use(self.device)
 
-    def release_data(self, data):
+    def _release_data(self, data):
         node = self.data_map[data]
 
         active_count = data.get_active(self.device)
@@ -300,7 +358,7 @@ class LRUManager(EvictionManager):
         if use_count == 1:
             del self.used_map[data]
         
-    def evict_data(self, data):
+    def _evict_data(self, data):
         node = self.data_map[data]
 
         assert(data.get_use(self.device) == 0)
@@ -319,12 +377,12 @@ class LRUManager(EvictionManager):
         self.used_memory -= data.nbytes
         self.evictable_memory -= data.nbytes
 
-    def evict(self):
+    def _evict(self):
         # Get the oldest data object
         # Because we append after use this is at the front of the list
 
         node = self.data_list.head
-        self.evict_data(node)
+        self._evict_data(node)
 
 class LFUManager(EvictionManager):
     """
@@ -393,7 +451,7 @@ class LFUManager(EvictionManager):
         return success
 
 
-    def _evict(self):
+    def _get_evict_target(self):
 
         #Get least frequently used node
 
@@ -419,7 +477,7 @@ class LFUManager(EvictionManager):
 
         return data_node
 
-    def start_prefetch_data(self, data):
+    def _start_prefetch_data(self, data):
 
         data.add_prefetch(self.device)
         data.add_active(self.device)
@@ -441,7 +499,7 @@ class LFUManager(EvictionManager):
 
         assert(self.used_memory <= self.memory_limit)
 
-    def stop_prefetch_data(self, data):
+    def _stop_prefetch_data(self, data):
 
         count = data.get_prefetch(self.device)
         data.remove_prefetch(self.device)
@@ -449,7 +507,7 @@ class LFUManager(EvictionManager):
         if count == 1:
             del self.prefetch_map[data]
 
-    def access_data(self, data):
+    def _access_data(self, data):
 
         #NOTE(wlr): The data should already be removed from the evictable list in the prefetching stage.
         #           Any logic here would be a sanity check. I'm removing it for now.
@@ -463,7 +521,7 @@ class LFUManager(EvictionManager):
         data.add_use(self.device)
 
 
-    def release_data(self, data):
+    def _release_data(self, data):
         node = self.data_map[data]
 
         active_count = data.get_active(self.device)
@@ -481,7 +539,7 @@ class LFUManager(EvictionManager):
         if use_count == 1:
             del self.used_map[data]
 
-    def evict_data(self, data):
+    def _evict_data(self, data):
         node = self.data_map[data]
 
         assert(data.get_use(self.device) == 0)
@@ -500,7 +558,7 @@ class LFUManager(EvictionManager):
         self.evictable_memory -= data.nbytes
 
 
-    def evict(self):
+    def _evict(self):
         # Get the oldest data object and remove it
-        node = self._evict()
-        self.evict_data(node)
+        node = self._get_evict_target()
+        self._evict_data(node)

@@ -41,6 +41,11 @@ class PArray:
     _coherence_cv: Dict[int, threading.Condition]
 
     def __init__(self, array: ndarray, parent: "PArray" = None, slices=None) -> None:
+
+        self.prefetch_count = 0
+        self.active_count = 0
+        self.use_count = 0
+
         if parent is not None:  # create a view (a subarray) of a PArray
             # inherit parent's buffer and coherence states
             # so this PArray will becomes a 'view' of its parents
@@ -143,6 +148,26 @@ class PArray:
             # assume GPU here, won't check device.architecture == gpu
             # to avoid import `gpu`, which is slow to setup.
             return device.index
+
+
+    def add_active(self):
+        self.active_count += 1
+    
+    def add_prefetch(self):
+        self.prefetch_count += 1
+    
+    def add_use(self):
+        self.use_count += 1
+
+    def remove_active(self):
+        self.active_count -= 1
+    
+    def remove_prefetch(self):
+        self.prefetch_count -= 1
+
+    def remove_use(self):
+        self.use_count -= 1
+
 
     # Public API:
 
