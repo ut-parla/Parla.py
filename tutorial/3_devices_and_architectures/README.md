@@ -44,13 +44,13 @@ If the placement argument is a task, then the spawning task will be scheduled on
 
 For example, the following will constrain a task to only execute on a gpu.
 
-```
+```python
 @spawn(placement=gpu)
 ```
 
 And the following will constrain a task to only execute on the `0`th gpu.
 
-```
+```python
 @spawn(placement=gpu(0))
 ```
 
@@ -60,7 +60,7 @@ Specify task placements through `ndarray` objects.
 This task will be launched to either of devices where `x` or `y` was defined
 when this task was spawned.
 
-```
+```python
 x = np.ones(10)
 with cp.cuda.Device(1):
     y = cp.ones(10)
@@ -89,7 +89,7 @@ In `gpu.py`, all data is initialized on the host. Each task must first should co
 To simplify data movements between devices at runtime, Parla provides the following APIs: `clone_here()` and `copy()`. `clone_here()` copies a data to the current device memory regardless of the data's location. `copy()` copies data between arrays
 regardless of their current locations.
 
-```
+```python
 53  tmp_x = clone_here(x_c[gpu_id:(gpu_id+1)])
 54  tmp_y = clone_here(y_c[gpu_id:(gpu_id+1)])
 55  z_chunk = elemwise_add(tmp_x, tmp_y)
@@ -133,7 +133,7 @@ that function is for a CPU execution and its variants for different computing de
 exist in the program.
 Line 11 declares a CPU element-wise vector addition, and sets that its variant may exist.
 
-```
+```python
 11  @specialized
 12  def elemwise_add():
 ```
@@ -141,7 +141,7 @@ Line 11 declares a CPU element-wise vector addition, and sets that its variant m
 Line 20 declares a variant of the `elemewise_add()` that exploits cupy kernels
 for a GPU execution.
 
-```
+```python
 20  @elemwise_add.variant(gpu)
 21  def elemwise_add_gpu():
 ```
