@@ -5,13 +5,15 @@ There is only one source code file for this lesson: `task_constraints.py`
 
 The Parla `@spawn` decorator can take optional parameters limiting the resource usage of tasks. 
 Two resource constraints are currently supported: `memory` and `vcus`. 
-`vcus` are currently an experimental feature. 
+`vcus` specifies how much computing units should be allocated for a task.
+It is currently an experimental feature and we are not going to explain it in this lesson. 
 In this lesson, we will explore usage of the `memory` constraint.  
 
-In the current implementation of Parla, task constraints can best be thought of as hints to the Parla scheduler rather than as true restrictions. 
-The `memory` constraint informs the Parla scheduler of the peak memory usage of a task in bytes, enabling it to make better scheduling decisions; 
-however, Parla does not currently enforce the task to operate within its set constraints, and it is the programmer's duty to ensure that tasks do not exceed
-the constraints passed to the scheduler.  
+In the current implementation of Parla, task constraints can best be thought of as hints to the Parla scheduler
+rather than as true restrictions. The `memory` constraint informs the Parla scheduler of
+the peak memory usage of a task in bytes, enabling it to make better scheduling decisions; 
+however, Parla does not currently enforce the task to operate within its set constraints, and it is the
+programmer's duty to ensure that tasks do not exceed the constraints passed to the scheduler.  
 
 Let's take a look at how the `memory` constraint can be used to improve the scheduling of GPU-based tasks. 
 When running GPU tasks, Parla creates a new CUDA stream in which to run each task. 
