@@ -37,7 +37,7 @@ def main():
     # Parla data partitioning,
     # assigns each of the chunks to each task, and
     # performs element-wise vector addition.
-    NUM_GPUS=4
+    NUM_GPUS=2
     # Operands for element-wise vector addition.
     x_c = numpy.array([1, 2, 3, 4])
     y_c = numpy.array([5, 6, 7, 8])

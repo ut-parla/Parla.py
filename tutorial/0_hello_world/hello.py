@@ -10,25 +10,21 @@ This is a Parla tutorial introducing the Parla runtime, where a simple console-p
 '''
 
 # Import Parla
-from parla import Parla
-
-# Import cpu
+from parla import Parla, spawn
+# Import the 'cpu' device type
 from parla.cpu import cpu
 
-# Import for the spawn decorator
-from parla.tasks import spawn
 
-# Define the main function (required of all Parla implementations)
+# Define the main function (recommended when using Parla)
+# Tasks cannot be defined in the global scope
 def main():
 
     # Spawn a task to be scheduled by the Parla runtime
     @spawn()
     def hello_world():
+        print("Hello, World!", flush=True)
 
-        # Simply print a console message
-        print("Hello, World!")
-
-# Execute the Parla program with the Parla Context
+# Execute the Parla program within the Parla context
 if __name__ == "__main__":
     with Parla():
         main()

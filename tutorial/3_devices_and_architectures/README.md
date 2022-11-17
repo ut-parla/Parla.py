@@ -1,57 +1,75 @@
 # Lesson 3: Devices and Architectures
 
-Parla provides features to exploit heterogeneous architectures.
-In Parla, users are able to select a specific device or a specific type
-of architecture for each task to launch.
+Parla provides features to organize execution on heterogeneous architectures. We currently only support Nvidia GPUs, but have active development on AMD GPU support and plan to extend to other device types and accelerators in the future.
+
+When launching a task, the user can list a `placement` constraint to specify a specific device or type of device that the task can launch on.
 
 This lesson introduces task placements in Parla through the following simple examples:
-`cpu.py` `gpu.py` `hetero_devices.py`
+`cpu.py`, `gpu.py`, and `hetero_devices.py`
 
-These examples need four GPU devices, CUDA, and CuPy packages.
-For this example, we use an element-wise vector addition operation as the main
+To run these examples, you need at least 2 GPU devices, a CUDA driver & runtime, and CuPy.
+
+We use an element-wise vector addition operation as the main
 computation of a task.
 
-For simplicity, we will not address features that we handled in the previous
-examples.
+## Device Initialization
 
-## Lesson 3-1: CPU tasks
+In the first three lessons you've already been running tasks on the CPU. By default, Parla schedules an unlabeled task on any of the initialized device. So far the lessons have only initialized CPU devices through the following import:
 
-The first example places a task on a CPU.
-You can run this example by the below command:
-```
-python cpu.py
+```python
+from parla.cpu import cpu
 ```
 
-Now, let's understand how to place a task on CPU.
-We need to import a Parla cpu package (Line 3). 
+This configures and adds a "CPU" device to the runtime using your system's information. The `cpu` object is the general class of "CPU" type devices.
 
-```
-1  import numpy
-2  from parla import Parla
-3  from parla.cpu import cpu
-4  from parla.tasks import spawn, TaskSpace
+If you want to activate all CUDA devices on the machine, you can import the `cuda` module. Note that this requires a CUDA runtime and CuPy.
+
+```python
+from parla.cuda import gpu
 ```
 
-Line 16 and 17 declares and initialize numpy array objects which are
-operands of the element-wise vector addition. Line 22 sets a placement
-of a task, `cpu_arch_task`, to a CPU architecture and hence, this task will run on
-a single CPU core.
+This will initialize all devices seen by the `CUDA_VISIBLE_DEVICES` environment variable.
+The `gpu` object represents the general class of "CUDA GPU" type devices. Querying `gpu(i)` returns the specific `i`th device.
+
+All devices your application uses must be initialized before the Parla runtime context manager is entered.
+
+## Task Placement
+
+The spawn decorator takes a `placement` argument. Placement takes a device type, device, ndarray, or task.
+
+If the argument is a device type, then the task may be scheduled on any available device of the specified type.
+If it is a specific device, the task will only be scheduled on that device.
+If it is an ndarray (cupy or numpy), the task will be scheduled on the device that holds that data at spawn time.
+If the placement argument is a task, then the spawning task will be scheduled on the same device as the argument task.
+
+For example, the following will constrain a task to only execute on a gpu.
 
 ```
-22  @spawn(placement=cpu)
+@spawn(placement=gpu)
 ```
 
-Parla allows to specify task placements through Numpy objects.
-Line 30 passes two numpy arrays, `x` and `y`, to the `placement` argument. 
-This task will be launched to any available one of devices where `x` or `y` was instantiated 
-when this task was spawned. In this example, this task must run on CPU since
-`x` and `y` are numpy arrays located on CPU.
+And the following will constrain a task to only execute on the `0`th gpu.
 
 ```
-30  @spawn(placement=[x, y])
+@spawn(placement=gpu(0))
 ```
 
-The below is an output of the `cpu.py`.
+Placement can also take a list of objects. In this case, the task could be scheduled on any of the specified devices.
+
+Specify task placements through `ndarray` objects.
+This task will be launched to either of devices where `x` or `y` was defined
+when this task was spawned.
+
+```
+x = np.ones(10)
+with cp.cuda.Device(1):
+    y = cp.ones(10)
+@spawn(placement=[x, y])
+def task():
+    //do work
+```
+
+The below is an output of `cpu.py`.
 
 ```
 Spawns a CPU architecture task.
@@ -65,72 +83,11 @@ CPU kernel is called..
 Output>> 6 8 10 12
 ```
 
-## Lesson 3-2: GPU tasks
+## Relative Data Movement
 
-Now, let's learn how to create GPU tasks. 
-You can run this example by the below command:
-
-```
-python gpu.py
-```
-
-This lesson consists of two examples. The first example spawns a
-task on a single GPU device and performs element-wise vector addition.
-The next example exploits advanced features to leverage multi-devices
-heterogeneous architecture. This example partitions each input array into 4 slices,
-distributes each of them to respective GPU devices, and performs element-wise vector addition
-between the slices.
-
-Note that GPU tasks would require a bit of time in the beginning for
-just-in-time compilation for `cupy` libraries.
-
-In this example, we need to import cupy (Line 1) and a Parla gpu (Line 6) packages. 
-```
-1  import cupy
-...
-6  from parla.cuda import gpu
-```
-
-Let's start from the first example from line 23 to 34.
-Line 23 sets a placement of `gpuarch_place_case` task to a GPU architecture.
-```
-23  @spawn(placement=[gpu])
-```
-Therefore, this task will be run on any avilable single GPU device.
-Parla allows application programmers to call any Python external libraries
-without any code modification. Based on that, line 26 and 27 declare necessary cupy
-arrays, and line 31 declares and calls a cupy kernel for element-wise vector
-addition. 
-
-```
-12  def elemwise_add(x, y):
-13    print("GPU kernel is called..")
-14    cupy_elemwise_add = cupy.ElementwiseKernel("int64 x, int64 y", "int64 z", "z = x + y")
-15    return cupy_elemwise_add(x, y)
-...
-31  z_g = elemwise_add(x_g, y_g)
-```
-
-Now, let's move to the next example from lines 40 to 58. This example uses
-four numpy arrays, `x_c`, `y_c`, and `z_c`, declared from lines 42 to 44.
-Parla allows selecting a specific device for a task. Lines 48 to 50 spawns a single
-task for each GPU device.
-
-```
-48  for gpu_id in range(NUM_GPUS):
-49    @spawn(placement=gpu(gpu_id))
-50      async def workpart_across_gpus(gpu_id=gpu_id):
-```
-
-Each task takes a slice of `x_c`, `y_c`, and `z_c`, and performs element-wise vector
-addition between them. Since all data are numpy arrays and are located on CPU memory, 
-each task first should copy the slices to the current GPU device memory.
-To simplify data movements between devices, Parla provides the following APIs: `clone_here()`
-and `copy()`. `clone_here()` copies a data to the current device memory regardless
-of the data's location. `copy()` copies data between parameter arrays
-regardless of their current locations. By exploiting them, lines 53 to 56 copies data
-to the current device, calculates elementwise addition, and copies back to `z_c`
-that is located on CPU memory.
+In `gpu.py`, all data is initialized on the host. Each task must first should copy their corresponding slice to device memory.
+To simplify data movements between devices at runtime, Parla provides the following APIs: `clone_here()` and `copy()`. `clone_here()` copies a data to the current device memory regardless of the data's location. `copy()` copies data between arrays
+regardless of their current locations.
 
 ```
 53  tmp_x = clone_here(x_c[gpu_id:(gpu_id+1)])
@@ -144,7 +101,7 @@ The below is an output of `gpu.py`.
 ```
 This should be running on GPU
 GPU kernel is called..
-Output>> [ 6  8 10 12] 
+Output>> [ 6  8 10 12]
 
 GPU[0] calculates z[0]
 GPU kernel is called..
@@ -157,32 +114,30 @@ GPU kernel is called..
 Output>> 6 8 10 12
 ```
 
-## Lesson 3-2: Heterogeneous Task 
+## Heterogeneous Function Variants
 
-This examples shows a task which could schedule either CPU or GPU architecture.
-You can run this example by the below command:
+Some tasks can be scheduled on either CPU or GPU architectures.
+You can find an example in `hetero_devices.py`.
 
-```
-python hetero_devices.py
-```
-Now, let's see how to implement a heterogeneous task in Parla. 
 Line 35 sets the placement to a CPU or GPU architecture.
 
 ```
 35  @spawn(placement=[cpu, gpu])
 ```
-Therefore, when this task is launched, it will run either a CPU core or a GPU device.
-Different types of devices should call different kernel codes. 
+
+Different types of devices should call different kernel codes.
 To handle this case, Parla supports `@specialized` and
-`@[ORIGINAL FUNCTION].variant([ARCHITECTURE TYPE])` 
+`@[ORIGINAL FUNCTION].variant([ARCHITECTURE TYPE])`
 decorators. If `@specialized` is prepended to a function declaration, it implies that
 that function is for a CPU execution and its variants for different computing devices may
 exist in the program.
-Line 11 declares a CPU element-wise vector addition, and sets that its variant may exist. 
+Line 11 declares a CPU element-wise vector addition, and sets that its variant may exist.
+
 ```
 11  @specialized
 12  def elemwise_add():
 ```
+
 Line 20 declares a variant of the `elemewise_add()` that exploits cupy kernels
 for a GPU execution.
 
@@ -190,16 +145,19 @@ for a GPU execution.
 20  @elemwise_add.variant(gpu)
 21  def elemwise_add_gpu():
 ```
+
 When the `elemwise_add()` is called at line 38, the Parla runtime automatically finds
 the placement of `single_task_on_both` task, finds a compatible function variant, and
-calls it.  
+calls it.
+
+Parla defines variants of functions instead of tasks. This allows the construction of larger tasks with bodies is composed of multiple function variants. The modularity allows parts of a task to be ported to the device slowly.
 
 The below is an output of `hetero_devices.py`.
 
 ```
 Spawns a single task on either CPU or GPU
 GPU kernel is called..
-Output>> 6 8 10 12 
+Output>> 6 8 10 12
 ```
 
-Congratulations! You've run how to utilize heterogeneous architectures/tasks on Parla.
+Congratulations! You've learned about how to utilize heterogeneous architectures/tasks in Parla.
