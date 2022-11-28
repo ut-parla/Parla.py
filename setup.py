@@ -2,9 +2,10 @@
 
 import os
 from setuptools import setup, Extension
-from Cython.Build import cythonize
 
 """
+from Cython.Build import cythonize
+
 cython_modules = cythonize('parla/*.pyx')
 
 cache_filler_modules = []
