@@ -367,7 +367,8 @@ class PArray:
                     self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
             elif op.inst == MemoryOperation.EVICT:
                 self._array.clear(op.src)  # decrement the reference counter, relying on GC to free the memory
-                self._coherence.set_data_as_ready(op.src, None)  # mark it as done
+                if MemoryOperation.NO_MARK_AS_READY not in op.flag:
+                    self._coherence.set_data_as_ready(op.src, None)  # mark it as done
             elif op.inst == MemoryOperation.ERROR:
                 raise RuntimeError("PArray gets an error from coherence protocol")
             else:
