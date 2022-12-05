@@ -1744,8 +1744,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         task_env = next(task_env_gen)
         task.req = EnvironmentRequirements(
             task.req.resources, task_env, task.req.tags)
-
-        task.set_assigned()
         logger.debug(f"[Scheduler] Mapped %r to %r.", task, best_device)
         return True
 
@@ -1815,8 +1813,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         task_env = next(task_env_gen)
         task.req = EnvironmentRequirements(
             task.req.resources, task_env, task.req.tags)
-
-        task.set_assigned()
         logger.debug(f"[Scheduler] RANDOMLY Mapped %r to %r.",
                      task, best_device)
         return True

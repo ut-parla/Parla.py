@@ -28,6 +28,7 @@ class MemoryOperation:
     SKIP_SRC_CHECK = 102      # if the flag is set, no need to hold condition variable of src
     LOAD_SUBARRAY = 103       # if the flag is set, it means a subarray of src should be loaded
     ENSURE_IS_COMPLETE = 104  # if the flag is set, check data will also check if the data is complete
+    NO_MARK_AS_READY = 105    # if the flag is set, the operation won't mark the data as ready after completed
 
     def __init__(self, inst: int = NOOP, dst: int = -1, src: int = -1, flag: int = []):
         self.inst = inst
@@ -69,12 +70,16 @@ class MemoryOperation:
         return MemoryOperation(MemoryOperation.LOAD, dst, src, flag)
 
     @staticmethod
-    def evict(src: int) -> MemoryOperation:
+    def evict(src: int, mark_as_ready: bool = True) -> MemoryOperation:
         """ invalidate the data in src """
-        return MemoryOperation(MemoryOperation.EVICT, src=src)
+        flag = []
+        if not mark_as_ready:
+            flag.append(MemoryOperation.NO_MARK_AS_READY)
+
+        return MemoryOperation(MemoryOperation.EVICT, src=src, flag=flag)
 
     @staticmethod
-    def check_data(src: int, ensure_is_complete:bool = False) -> MemoryOperation:
+    def check_data(src: int, ensure_is_complete: bool = False) -> MemoryOperation:
         """ check if the data is ready, wait if not 
 
         If `ensure_is_complete` is True
@@ -184,7 +189,7 @@ class Coherence:
         Which make `device_id` has the latest version with a complete copy.
 
         Args:
-            device_id: id of this device
+            device_id: id of dst device (where writeback to)
             new_state: new state of `dcvice_id`
             on_different_device: True if this device is not current deivce
             this_device_id: if `on_different_device` is True, this means current device ID. If None, ignore
@@ -213,6 +218,7 @@ class Coherence:
                     self._local_states[id] = self.INVALID
                     self._versions[id] = -1
                     self._is_complete[id] = None
+                    evict_list.append(id)
                 else:
                     # change all states to SHARED
                     for hash, state in self._local_states[id].items():
@@ -292,10 +298,16 @@ class Coherence:
                 # special case: need a complete copy but there are already subarrays in this deivce
                 # writeback this subarrays and then copy complete data from owner
 
-                # write back to owner 
-                operations.extend(self._write_back_to(self.owner, self.SHARED, on_different_device=True)[0])
+                # write back to owner
+                # skip_src_check_id is required since device_id will be marked as not ready later
+                operations.extend(self._write_back_to(self.owner, self.SHARED, on_different_device=True, skip_src_check_id=device_id)[0])
+
+                # evict previous subarries at device_id
+                # should not mark the array as ready after eviction since load is not completed
+                operations.append(MemoryOperation.evict(device_id, mark_as_ready=False))
                 
                 # copy from owner
+                # skip_src_checking is NOT required since owner will be ready after the above write back operaton
                 operations.append(MemoryOperation.load(device_id, self.owner))
 
                 # update status
