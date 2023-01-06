@@ -170,6 +170,7 @@ class DataMapType(TypedDict):
     """
     Track information of data instance in a device
     """
+    # TODO(hc): state should be an enum type.
     state: str
     ref_count: int
 
@@ -229,7 +230,7 @@ class LRUManager:
                 self.evictable_memory -= data.size
             self._increase_ref_count(data)
         else:
-            self.data_map[data.ID] = {"state" : "Reserved", "ref_count" : 1}
+            self.data_map[data.ID] = {"state" : "Prefetching", "ref_count" : 1}
             #This is a new block, update the used memory size.
             self.used_memory += data.size
         self.prefetch_map[data] = data
@@ -237,15 +238,10 @@ class LRUManager:
 
         assert(self.used_memory <= self.memory_limit)
 
-    '''
     def _stop_prefetch_data(self, data):
+        self.data_map[data.ID]["state"] = "Reserved"
 
-        count = data.get_prefetch(self.device)
-        data.remove_prefetch(self.device)
-
-        if count == 1:
-            del self.prefetch_map[data]
-
+    '''
     def _access_data(self, data):
 
         #NOTE(wlr): The data should already be removed from the evictable list in the prefetching stage.
