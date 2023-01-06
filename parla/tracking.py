@@ -47,18 +47,35 @@ import threading
 
 from typing import TypedDict, Dict
 
+# TODO(hc): It should be declared on PArray.
 class DataNode:
     """
     A node containing a data object (PArray) on a specific device. 
     Used in the linked lists in the EvictionManager
     """
     def __init__(self, data, device, priority=0):
-        self.data = data
-        self.device = device
-        self.priority = priority
+        self._data = data
+        self._device = device
+        self._priority = priority
 
-        self.next = None
-        self.prev = None
+        self._next = None
+        self._prev = None
+
+    @property
+    def data(self):
+        return self._data
+
+    @property
+    def device(self):
+        return self._device
+
+    @property
+    def next(self):
+        return self._next
+
+    @property
+    def prev(self):
+        return self._prev
 
     def __str__(self):
         return self.__repr__()
@@ -222,7 +239,9 @@ class LRUManager:
             # TODO(hc): but if a data movement task will be executed after a very long time, that also can be evictable.
             #           if memory is full and any task cannot proceed, we can still evict one of data that was prefetched.
             #           but this is very rare case and I am gonna leave it as the future work.
-            success = self.zr_data_list.remove(data)
+            
+            # TODO(hc): PArray should point to a corresponding data node.
+            success = self.zr_data_list.remove(data.ref_list_node)
 
             if success:
                 #This is the first prefetch of a data object that is already on the device.
@@ -233,17 +252,14 @@ class LRUManager:
             self.data_map[data.ID] = {"state" : "Prefetching", "ref_count" : 1}
             #This is a new block, update the used memory size.
             self.used_memory += data.size
-        self.prefetch_map[data] = data
-        self.active_map[data] = data
-
+        #self.prefetch_map[data] = data
+        #self.active_map[data] = data
         assert(self.used_memory <= self.memory_limit)
 
     def _stop_prefetch_data(self, data):
         self.data_map[data.ID]["state"] = "Reserved"
 
-    '''
-    def _access_data(self, data):
-
+    def _acquire_data(self, data):
         #NOTE(wlr): The data should already be removed from the evictable list in the prefetching stage.
         #           Any logic here would be a sanity check. I'm removing it for now.
 
@@ -256,40 +272,39 @@ class LRUManager:
         data.add_use(self.device)
 
     def _release_data(self, data):
-        node = self.data_map[data]
+        assert(data.ID in self.data_map)
 
-        active_count = data.get_active(self.device)
-        use_count = data.get_use(self.device)
+        self._decrease_ref_count(data)
+        assert(self.data_map[data.ID].ref_count >= 0)
 
-        data.remove_active(self.device)
-        data.remove_use(self.device)
+        #active_count = data.get_active(self.device)
+        #use_count = data.get_use(self.device)
 
-        if active_count == 1:
-            del self.active_map[data]
+        #data.remove_active(self.device)
+        #data.remove_use(self.device)
 
+        if self.data_map[data.ID].ref_count == 0:
+            #del self.active_map[data]
             #If the data object is no longer needed by any already prefetched tasks, it can be evicted.
+            node = data.ref_list_node 
             self.data_list.append(node)
             self.evictable_memory += data.nbytes
 
-        if use_count == 1:
-            del self.used_map[data]
+        #if use_count == 1:
+            #del self.used_map[data]
         
     def _evict_data(self, data):
-        node = self.data_map[data]
-
-        assert(data.get_use(self.device) == 0)
-        assert(data.get_active(self.device) == 0)
+        assert(self.data_map[data.ID].ref_count == 0)
 
         #Call internal data object evict method
         #This should:
         #  - Backup the data if its not in a SHARED state
         #    (SHARED state means the data has a valid copy on multiple devices. Eviction should never destroy the only remaining copy)
         #  - Mark the data for deletion (this may be done by the CuPy/Python GC)
-        data.evict(self.device)
+        data.evict()
 
-        self.data_list.remove(node)
-        del self.data_map[data]
-
+        self.zr_data_list.remove(data.ref_list_node)
+        del self.data_map[data.ID]
         self.used_memory -= data.nbytes
         self.evictable_memory -= data.nbytes
 
@@ -297,9 +312,8 @@ class LRUManager:
         # Get the oldest data object
         # Because we append after use this is at the front of the list
 
-        node = self.data_list.head
-        self._evict_data(node)
-    '''
+        node = self.zr_data_list.head
+        self._evict_data(node.data)
 
 '''
 class LFUManager(EvictionManager):
