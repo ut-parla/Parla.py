@@ -104,6 +104,7 @@ class ListNode:
         return f"ListNode({self.list})"
 
 
+# TODO(hc): This list should be protected by a lock.
 class DLList:
     """
     A doubly linked list used in the EvictionManager.
@@ -190,6 +191,7 @@ class DataMapType(TypedDict):
     # TODO(hc): state should be an enum type.
     state: str
     ref_count: int
+    ref_list_node: DataNode
 
 
 #class LRUManager(EvictionManager):
@@ -206,9 +208,11 @@ class LRUManager:
         # A list containig zero-reference data objects in a specified device.
         self.zr_data_list = DLList()
         # A dictionary containing all data information on a device.
-        self.data_map = Dict[DataMapType]
+        self.data_dict = Dict[DataMapType]
         # A lock for guarding a reference count.
-        self.ref_count_lock = threading.Condition(threading.Lock())
+        self._ref_count_lock = threading.Condition(threading.Lock())
+        # A lock for guarding a data state.
+        self._data_state_lock = threading.Condition(threading.Lock())
 
         #Note(wlr): These tracking dictionaries are optional, I just think it's interesting to track.
         #Holds data objects on this device that are being prefetched.
@@ -220,18 +224,52 @@ class LRUManager:
         #holds data objects that are currently being used by tasks.
         self.used_map = {}
 
-    def _increase_ref_count(self, data):
-        with self.ref_count_lock:
-            assert(self.data_map[data.ID]["ref_count"] >= 0)
-            self.data_map[data.ID]["ref_count"] += 1
+    def _increase_ref_count(self, data_info):
+        with self._ref_count_lock:
+            assert(data_info["ref_count"] >= 0)
+            data_info["ref_count"] += 1
 
-    def _decrease_ref_count(self, data):
-        with self.ref_count_lock:
-            self.data_map[data.ID]["ref_count"] -= 1
-            assert(self.data_map[data.ID]["ref_count"] >= 0)
+    def _decrease_ref_count(self, data_info):
+        with self._ref_count_lock:
+            data_info["ref_count"] -= 1
+            assert(data_info["ref_count"] >= 0)
 
-    def _start_prefetch_data(self, data):
-        if data.ID in self.data_map:
+    def _check_ref_count_zero(self, data_info):
+        with self._ref_count_lock:
+            return data_info["ref_count"] == 0
+
+    def _update_data_state(self, data_id, new_state):
+        data_state = self.data_dict[data_id]["state"]
+        # prefetching, reserved, using, free
+        with self._data_state_lock:
+            if data_state == new_state:
+                return
+            if new_state == "prefetching":
+                if data_state == "free":
+                    data_state = new_state
+                return
+            elif new_state == "reserved":
+                if data_state == "prefetching":
+                    data_state = new_state
+                return
+            elif new_state == "using":
+                if data_state == "reserved":
+                    data_state = new_state
+                return
+            elif new_state == "free":
+                if data_state != "prefetching":
+                    assert(data_state != reserved)
+                    data_state = new_state
+                return
+
+    def _dict_id(self, data, dev):
+        """ Genereate an ID of a data on a data information dictionary. """
+        dev_index = "G" + str(dev.index) if (dev.architecture is not cpu) else "C" 
+        return str(data.ID + "." + dev_index) 
+
+    def _start_prefetch_data(self, data, dev):
+        data_id = self._dict_id(data, dev)
+        if data_id in self.data_dict:
             #This is a prefetch of a data object that is already on the device (or is being prefetched).
             #This means the data is no longer evictable as its about to be in-use by data movement and compute tasks.
             #Remove it from the evictable list.
@@ -241,41 +279,48 @@ class LRUManager:
             #           but this is very rare case and I am gonna leave it as the future work.
             
             # TODO(hc): PArray should point to a corresponding data node.
-            success = self.zr_data_list.remove(data.ref_list_node)
+            data_info = self.data_dict[data_id]
+            success = self.zr_data_list.remove(data_info.ref_list_node)
 
             if success:
                 #This is the first prefetch of a data object that is already on the device.
                 #Update the evictable memory size (as this data object is no longer evictable).
                 self.evictable_memory -= data.size
-            self._increase_ref_count(data)
+            self._increase_ref_count(data_info)
         else:
-            self.data_map[data.ID] = {"state" : "Prefetching", "ref_count" : 1}
+            self.data_dict[data_id] = { "state" : "prefetching", \
+                                        "ref_count" : 1, \
+                                        "ref_list_node" : DataNode(data, dev) }
             #This is a new block, update the used memory size.
             self.used_memory += data.size
         #self.prefetch_map[data] = data
         #self.active_map[data] = data
         assert(self.used_memory <= self.memory_limit)
 
-    def _stop_prefetch_data(self, data):
-        self.data_map[data.ID]["state"] = "Reserved"
+    def _stop_prefetch_data(self, data, dev):
+        data_id = self._dict_id(data, dev)
+        assert(data_id in self.data_dict)
+        self._update_data_state(data_id, "reserved") 
 
-    def _acquire_data(self, data):
+    def _acquire_data(self, data, dev):
         #NOTE(wlr): The data should already be removed from the evictable list in the prefetching stage.
         #           Any logic here would be a sanity check. I'm removing it for now.
-
-        #node = self.data_map.get(data, None)
+        #node = self.data_dict.get(data, None)
         #if node is not None:
         #    #Remove the node from the eviction list while it's in use
         #    success = self.data_list.remove(node)
+        #self.used_map[data] = data
+        #data.add_use(self.device)
+        data_id = self._dict_id(data, dev)
+        assert(data_id in self.data_dict)
+        self._update_data_state(data_id, "using") 
 
-        self.used_map[data] = data
-        data.add_use(self.device)
-
-    def _release_data(self, data):
-        assert(data.ID in self.data_map)
-
-        self._decrease_ref_count(data)
-        assert(self.data_map[data.ID].ref_count >= 0)
+    def _release_data(self, data, dev):
+        data_id = self._dict_id(data, dev)
+        assert(data_id in self.data_dict)
+        data_info = self.data_dict[data_id]
+        self._decrease_ref_count(data_info)
+        assert(self._check_ref_count_zero(data_info))
 
         #active_count = data.get_active(self.device)
         #use_count = data.get_use(self.device)
@@ -283,37 +328,37 @@ class LRUManager:
         #data.remove_active(self.device)
         #data.remove_use(self.device)
 
-        if self.data_map[data.ID].ref_count == 0:
+        if data_info["ref_count"] == 0:
             #del self.active_map[data]
             #If the data object is no longer needed by any already prefetched tasks, it can be evicted.
-            node = data.ref_list_node 
+            node = data_info["ref_list_node"]
             self.data_list.append(node)
             self.evictable_memory += data.nbytes
-
         #if use_count == 1:
             #del self.used_map[data]
         
-    def _evict_data(self, data):
-        assert(self.data_map[data.ID].ref_count == 0)
-
+    def _evict_data(self, target_data, target_dev):
+        data_id = self._dict_id(target_data, target_dev)
+        data_info = self.data_dict[data_id]
+        assert(self._check_ref_count_zero(data_info))
         #Call internal data object evict method
         #This should:
         #  - Backup the data if its not in a SHARED state
         #    (SHARED state means the data has a valid copy on multiple devices. Eviction should never destroy the only remaining copy)
         #  - Mark the data for deletion (this may be done by the CuPy/Python GC)
-        data.evict()
-
-        self.zr_data_list.remove(data.ref_list_node)
-        del self.data_map[data.ID]
+        target_data.evict(target_dev)
+        self.zr_data_list.remove(data_info["ref_list_node"])
+        del data_info
         self.used_memory -= data.nbytes
         self.evictable_memory -= data.nbytes
 
     def _evict(self):
         # Get the oldest data object
         # Because we append after use this is at the front of the list
-
         node = self.zr_data_list.head
-        self._evict_data(node.data)
+        n_data = node.data
+        n_dev = node.dev 
+        self._evict_data(n_data, n_dev)
 
 '''
 class LFUManager(EvictionManager):
