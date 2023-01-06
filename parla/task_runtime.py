@@ -386,7 +386,8 @@ class Task:
                             # If any event created by the current task exist,
                             # notify dependents and make them wait for that event,
                             # not Parla task completion.
-                            self._notify_dependents(events)
+                            if not isinstance(task_state, TaskRunning):
+                                self._notify_dependents(events)
                         env.sync_events()
                     task_state = task_state or TaskCompleted(None)
                 except Exception as e:
@@ -403,7 +404,8 @@ class Task:
                     # new dependents could be added after the above
                     # notifications, while other devices are running
                     # their kernels asynchronously.
-                    self._notify_dependents()
+                    if not isinstance(task_state, TaskRunning):
+                        self._notify_dependents()
                     self._set_state(task_state)
                     self._finish(ctx)
         except Exception as e:
