@@ -24,8 +24,8 @@ EvictionManager:
 #TODO(hc): how to handle slicing?
 
 
-
 import threading
+
 
 #TODO(wlr): Nothing in this file is threadsafe at the moment. Developing structure first, then we'll add locks.
 
@@ -45,6 +45,7 @@ import threading
 #Needs:
 # - wrap in locks (use external locks on base class)
 
+from typing import TypedDict, Dict
 
 class DataNode:
     """
@@ -65,6 +66,7 @@ class DataNode:
     def __repr__(self):
         return f"DataNode({self.data}, {self.device})"
 
+
 class ListNode:
     """
     A node containing a linked list of DataNodes with an associated value (typically priority).
@@ -84,9 +86,10 @@ class ListNode:
     def __repr__(self):
         return f"ListNode({self.list})"
 
+
 class DLList:
     """
-    A doubly linked list used in the EvictionManager
+    A doubly linked list used in the EvictionManager.
     """
     def __init__(self):
         self.head = None
@@ -161,161 +164,56 @@ class DLList:
 
     def __len__(self):
         return self.length
-class EvictionManager:
+
+
+class DataMapType(TypedDict):
     """
-    Track usage of data objects on devices. Used to chose which blocks to evict.
+    Track information of data instance in a device
     """
-
-    def __init__(self, device, memory_limit):
-        self.device = device
-
-        #values in bytes
-        self.memory_limit = memory_limit
-        self.used_memory = 0
-        self.evictable_memory = 0
-
-        self.lock = threading.Condition(threading.Lock())
-
-    def map_data(self, data):
-        """
-        Called when a data object is mapped to a device.
-        """
-        with self.lock:
-            self._map_data(data)
-
-    def _map_data(self, data):
-        """
-        Called when a data object is mapped to a device.
-        """
-        pass
-
-    def _unmap_data(self, data):
-        pass
-
-    def unmap_data(self, data):
-        """
-        Called when a data object is unmapped from a device.
-        """
-        with self.lock:
-            self._unmap_data(self, data)
-
-    def _start_prefetch_data(self, data):
-        pass
-
-    def start_prefetch_data(self, data):
-        """
-        Called when a data object starts a prefetch.
-        Updates the used memory size.
-
-        Can update the priority of the data object.
-        """
-        with self.lock:
-            self._start_prefetch_data(data)
-
-    def _stop_prefetch_data(self, data):
-        """
-        Called when a data object is no longer being prefetched.
-
-        Updates the priority of the data object.
-        """
-        # TODO(hc): what does it mean?
-        pass
-
-    def stop_prefetch_data(self, data):
-        """
-        Called when a data object is no longer being prefetched.
-
-        Updates the priority of the data object.
-        """
-        with self.lock:
-            self._stop_prefetch_data(data)
-
-    def _access_data(self, data):
-        pass
+    state: str
+    ref_count: int
 
 
-    def access_data(self, data):
-        """
-        Called when a data object is accessed.
-
-        Can update the priority of the data object.
-        Locks the data object (cannot be evicted while in use)
-        Updates the evictable memory size.
-        """
-        with self.lock:
-            self._access_data(data)
-
-
-    def _release_data(self, data):
-        pass
-
-    def release_data(self, data):
-        """
-        Called when a data object is no longer in use.
-
-        Updates the priority of the data object.
-        Unlocks the data object (can be evicted)
-        Updates the evictable memory size.
-        """
-        with self.lock:
-            self._release_data(data)
-
-    def _evict_data(self, data):
-        pass
-
-    def evict_data(self, data):
-        """
-        Called to evict a specific data object.
-        Updates the used memory size and evictable memory size.
-        """
-        with self.lock:
-            self._evict_data(data)
-
-    def _evict(self):
-        """
-        Called when memory is needed.
-
-        Evicts the data object with the highest priority (based on the policy).
-        """
-        pass
-
-
-    def evict(self):
-        """
-        Called when memory is needed.
-
-        Evicts the data object with the highest priority (based on the policy).
-        """
-        with self.lock:
-            self._evict()    
-
-class LRUManager(EvictionManager):
+#class LRUManager(EvictionManager):
+class LRUManager:
     """
-    Eviction manager for a LRU (least recently used) policy.
-
-    Use is updated when a data object is accessed and released by a task.
+    LRU policy for garbage collecting.
+    It mantains a list of the zero-referenced data objects for each device.
+    The head of the list is the target task to be evicted
+    and the tail of the list is the data used most recently.
     """
 
     def __init__(self, device, memory_limit):
         super().__init__(device, memory_limit)
-        self.data_list = DLList()
-        self.data_map = {}
+        # A list containig zero-reference data objects in a specified device.
+        self.zr_data_list = DLList()
+        # A dictionary containing all data information on a device.
+        self.data_map = Dict[DataMapType]
+        # A lock for guarding a reference count.
+        self.ref_count_lock = threading.Condition(threading.Lock())
 
         #Note(wlr): These tracking dictionaries are optional, I just think it's interesting to track.
         #Holds data objects on this device that are being prefetched.
+        #XXX(hc): This might be necessary as data being prefetched cannot be used yet but it can avoid
+        # unnecessary future data prefetching or move.
         self.prefetch_map = {}
         #Holds data objects on this device that are needed by tasks that have not yet completed (this includes data in the process of being prefetched).
         self.active_map = {}
         #holds data objects that are currently being used by tasks.
         self.used_map = {}
 
+    def _increase_ref_count(self, data):
+        with self.ref_count_lock:
+            assert(self.data_map[data.ID]["ref_count"] >= 0)
+            self.data_map[data.ID]["ref_count"] += 1
+
+    def _decrease_ref_count(self, data):
+        with self.ref_count_lock:
+            self.data_map[data.ID]["ref_count"] -= 1
+            assert(self.data_map[data.ID]["ref_count"] >= 0)
 
     def _start_prefetch_data(self, data):
-
-        data.add_prefetch(self.device)
-        data.add_active(self.device)
-
-        if data in self.data_map:
+        if data.ID in self.data_map:
             #This is a prefetch of a data object that is already on the device (or is being prefetched).
             #This means the data is no longer evictable as its about to be in-use by data movement and compute tasks.
             #Remove it from the evictable list.
@@ -323,21 +221,23 @@ class LRUManager(EvictionManager):
             # TODO(hc): but if a data movement task will be executed after a very long time, that also can be evictable.
             #           if memory is full and any task cannot proceed, we can still evict one of data that was prefetched.
             #           but this is very rare case and I am gonna leave it as the future work.
-            success = self.data_list.remove(data)
+            success = self.zr_data_list.remove(data)
 
             if success:
                 #This is the first prefetch of a data object that is already on the device.
                 #Update the evictable memory size (as this data object is no longer evictable).
                 self.evictable_memory -= data.size
+            self._increase_ref_count(data)
         else:
+            self.data_map[data.ID] = {"state" : "Reserved", "ref_count" : 1}
             #This is a new block, update the used memory size.
             self.used_memory += data.size
-
         self.prefetch_map[data] = data
         self.active_map[data] = data
 
         assert(self.used_memory <= self.memory_limit)
 
+    '''
     def _stop_prefetch_data(self, data):
 
         count = data.get_prefetch(self.device)
@@ -403,7 +303,9 @@ class LRUManager(EvictionManager):
 
         node = self.data_list.head
         self._evict_data(node)
+    '''
 
+'''
 class LFUManager(EvictionManager):
     """
     Eviction Manager for a LFU (Least Frequently Used) policy. 
@@ -582,3 +484,132 @@ class LFUManager(EvictionManager):
         # Get the oldest data object and remove it
         node = self._get_evict_target()
         self._evict_data(node)
+
+class EvictionManager:
+    """
+    Track usage of data objects on devices. Used to chose which blocks to evict.
+    """
+
+    def __init__(self, device, memory_limit):
+        self.device = device
+
+        #values in bytes
+        self.memory_limit = memory_limit
+        self.used_memory = 0
+        self.evictable_memory = 0
+
+        self.lock = threading.Condition(threading.Lock())
+
+    def map_data(self, data):
+        """
+        Called when a data object is mapped to a device.
+        """
+        with self.lock:
+            self._map_data(data)
+
+    def _map_data(self, data):
+        """
+        Called when a data object is mapped to a device.
+        """
+        pass
+
+    def _unmap_data(self, data):
+        pass
+
+    def unmap_data(self, data):
+        """
+        Called when a data object is unmapped from a device.
+        """
+        with self.lock:
+            self._unmap_data(self, data)
+
+    def _start_prefetch_data(self, data):
+        pass
+
+    def start_prefetch_data(self, data):
+        """
+        Called when a data object starts a prefetch.
+        Updates the used memory size.
+
+        Can update the priority of the data object.
+        """
+        with self.lock:
+            self._start_prefetch_data(data)
+
+    def _stop_prefetch_data(self, data):
+        """
+        Called when a data object is no longer being prefetched.
+
+        Updates the priority of the data object.
+        """
+        # TODO(hc): what does it mean?
+        pass
+
+    def stop_prefetch_data(self, data):
+        """
+        Called when a data object is no longer being prefetched.
+
+        Updates the priority of the data object.
+        """
+        with self.lock:
+            self._stop_prefetch_data(data)
+
+    def _access_data(self, data):
+        pass
+
+
+    def access_data(self, data):
+        """
+        Called when a data object is accessed.
+
+        Can update the priority of the data object.
+        Locks the data object (cannot be evicted while in use)
+        Updates the evictable memory size.
+        """
+        with self.lock:
+            self._access_data(data)
+
+
+    def _release_data(self, data):
+        pass
+
+    def release_data(self, data):
+        """
+        Called when a data object is no longer in use.
+
+        Updates the priority of the data object.
+        Unlocks the data object (can be evicted)
+        Updates the evictable memory size.
+        """
+        with self.lock:
+            self._release_data(data)
+
+    def _evict_data(self, data):
+        pass
+
+    def evict_data(self, data):
+        """
+        Called to evict a specific data object.
+        Updates the used memory size and evictable memory size.
+        """
+        with self.lock:
+            self._evict_data(data)
+
+    def _evict(self):
+        """
+        Called when memory is needed.
+
+        Evicts the data object with the highest priority (based on the policy).
+        """
+        pass
+
+
+    def evict(self):
+        """
+        Called when memory is needed.
+
+        Evicts the data object with the highest priority (based on the policy).
+        """
+        with self.lock:
+            self._evict()    
+'''
