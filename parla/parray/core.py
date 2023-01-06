@@ -218,7 +218,12 @@ class PArray:
             ret = self._array.get_by_global_slices(self._current_device_index, slices)
 
         # ndarray.__getitem__() may return a ndarray
-        if isinstance(ret, numpy.ndarray):
+        if ret is None:
+            # when current device has no copy (could happen when a slice annotation is needed at @spawn)
+            # get ret from owner, so it could have an estimation of the number of bytes used
+            ret = self._array.get_by_global_slices(self._coherence.owner, slices)
+            return PArray(ret, parent=self, slices=slices)
+        elif isinstance(ret, numpy.ndarray):
             return PArray(ret, parent=self, slices=slices)
         elif isinstance(ret, cupy.ndarray):
             if ret.shape == ():

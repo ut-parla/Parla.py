@@ -362,8 +362,24 @@ class MultiDeviceBuffer:
             global_slices: slice/ints/tuple/list<int>, use the same format as advance indexing of numpy
 
         Return
-            :class:`cupy.ndarray` or :class:`numpy.array` object
+            :class:`cupy.ndarray` or :class:`numpy.array` object or `None` if there is no copy at that device
         """
+        # check if a copy exists at this device
+        #
+        # This is needed for the usage of @spawn() annotation
+        # sometimes device has no copy but still need a parray slices view object in advance
+        # Example:
+        # A = parray(numpy_array)
+        # @spawn(inout=[A], placement=gpu(0))
+        # def task1():
+        #   ... a task move A to GPU. free CPU copy ...
+        # @spawn(inout=[A[0]], placement=gpu(1))
+        # def task2():
+        #   error: cpu's copy is freed -> `inout=[A[0]]` trigger an exception,
+        #   since it try a slice A at CPU (spawn() itself is happened at outer CPU task)
+        if self._buffer[device_id] is None:
+            return None
+
         # check if there is a mapping
         if self._indices_map[device_id] is None:
             return self._buffer[device_id].__getitem__(global_slices)

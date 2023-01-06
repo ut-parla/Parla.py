@@ -539,7 +539,7 @@ class Coherence:
         if device_local_state == self.INVALID: # already evicted, do nothing
             operations.append(MemoryOperation.noop())
         elif device_local_state == self.SHARED:
-            if device_id == self._owner:  # has a chance this is the last copy
+            if device_id == self.owner:  # has a chance this is the last copy
                 # find new owner
                 new_owner = None
                 for device, state in self._local_states.items():
@@ -565,20 +565,20 @@ class Coherence:
                             new_owner = CPU_INDEX
                     else:
                         self._global_state = self.INVALID  # the system lose the last copy
-                self._owner = new_owner
+                self.owner = new_owner
 
             # update states
             self._local_states[device_id] = self.INVALID
             operations.append(MemoryOperation.evict(device_id))
         else:  # Modified, this device owns the last copy
             if keep_one_copy:  # write back to CPU
-                self._owner = CPU_INDEX
+                self.owner = CPU_INDEX
                 self._local_states[CPU_INDEX] = self.MODIFIED
 
                 operations.append(MemoryOperation.load(CPU_INDEX, device_id))
             else:
                 self._global_state = self.INVALID  # the system lose the last copy
-                self._owner = None
+                self.owner = None
 
             self._local_states[device_id] = self.INVALID
             operations.append(MemoryOperation.evict(device_id))
