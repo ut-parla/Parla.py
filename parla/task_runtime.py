@@ -628,6 +628,7 @@ class ComputeTask(Task):
                        self.dataflow.output):
             for d in self.req.devices:
                 ctx.scheduler.lrum._release_data(parray, d, str(self.taskid))
+        ctx.scheduler.lrum._evict()
 
     def _execute_task(self):
         self.acquire_parray()

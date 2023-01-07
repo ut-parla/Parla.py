@@ -258,7 +258,6 @@ class LRUManager:
 
     def _check_ref_count_zero(self, data_info):
         with self._data_ref_count_lock:
-            print("Check:", data_info["ref_count"], flush=True)
             return data_info["ref_count"] == 0
 
     def _update_data_state(self, data_id, new_state, taskid):
@@ -280,7 +279,6 @@ class LRUManager:
                     data_info["state"] = new_state
                 return
             elif new_state == GCDataState.ACQUIRED:
-                print(">>>>> ", data_state, flush=True)
                 assert(data_state == GCDataState.RESERVED)
                 data_info["state"] = new_state
                 return
@@ -341,7 +339,6 @@ class LRUManager:
             f"prefetching completes (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
             f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
 
-
     def _acquire_data(self, data, dev, taskid = ""):
         #NOTE(wlr): The data should already be removed from the evictable list in the prefetching stage.
         #           Any logic here would be a sanity check. I'm removing it for now.
@@ -358,7 +355,6 @@ class LRUManager:
             f"a compute task acquires"+
             f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
             f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
-
 
     def _release_data(self, data, dev, taskid = ""):
         data_id = self._dict_id(data, dev)
@@ -378,6 +374,7 @@ class LRUManager:
             #If the data object is no longer needed by any already prefetched tasks, it can be evicted.
             node = data_info["ref_list_node"]
             self.zr_data_list.append(node)
+            print(">>>>>>>>>>>>>>>>>>>> ", type(node), " and ", type(node.data))
             #self.evictable_memory += data.nbytes
         #if use_count == 1:
             #del self.used_map[data]
@@ -390,13 +387,16 @@ class LRUManager:
     def _evict_data(self, target_data, target_dev):
         data_id = self._dict_id(target_data, target_dev)
         data_info = self.data_dict[data_id]
+        dev_id = -1 if target_dev.architecture is cpu else target_dev.index
+        print(f"[GC] Zero-referenced data (ID: {data_id}) is evicted", flush=True)
         assert(self._check_ref_count_zero(data_info))
         #Call internal data object evict method
         #This should:
         #  - Backup the data if its not in a SHARED state
         #    (SHARED state means the data has a valid copy on multiple devices. Eviction should never destroy the only remaining copy)
         #  - Mark the data for deletion (this may be done by the CuPy/Python GC)
-        target_data.evict(target_dev)
+        print("type:", type(target_data))
+        target_data.evict(dev_id)
         self.zr_data_list.remove(data_info["ref_list_node"])
         del data_info
         #self.used_memory -= data.nbytes
@@ -405,10 +405,12 @@ class LRUManager:
     def _evict(self):
         # Get the oldest data object
         # Because we append after use this is at the front of the list
-        node = self.zr_data_list.head
-        n_data = node.data
-        n_dev = node.dev 
-        self._evict_data(n_data, n_dev)
+        while self.zr_data_list.head != None:
+            node = self.zr_data_list.head
+            n_data = node.data
+            n_dev = node.device 
+            self._evict_data(n_data, n_dev)
+
 
 '''
 class LFUManager(EvictionManager):
