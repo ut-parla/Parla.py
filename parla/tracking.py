@@ -108,6 +108,7 @@ class DLList:
         self.next = None
         self.prev = None
         self.length = 0
+        self._list_lock = threading.Condition(threading.Lock())
 
     def __str__(self):
         return self.__repr__()
@@ -116,76 +117,81 @@ class DLList:
         return f"DLList({self.head}, {self.tail})"
 
     def append(self, node):
-        if self.head is None:
-            self.head = node
-            self.tail = node
-        else:
-            self.tail.next = node
-            node.prev = self.tail
-            self.tail = node
-
-        self.length += 1
+        with self._list_lock:
+            if self.head is None:
+                self.head = node
+                self.tail = node
+            else:
+                self.tail.next = node
+                node.prev = self.tail
+                self.tail = node
+            self.length += 1
 
     def remove(self, node):
-        edit = False
+        with self._list_lock:
+            edit = False
 
-        if self.head == node:
-            self.head = node.next
-            edit = True
+            if self.head == node:
+                self.head = node.next
+                edit = True
 
-        if self.tail == node:
-            self.tail = node.prev
-            edit = True
+            if self.tail == node:
+                self.tail = node.prev
+                edit = True
 
-        if node.prev is not None:
-            node.prev.next = node.next
-            edit = True
+            if node.prev is not None:
+                node.prev.next = node.next
+                edit = True
 
-        if node.next is not None:
-            node.next.prev = node.prev
-            edit = True
+            if node.next is not None:
+                node.next.prev = node.prev
+                edit = True
 
-        node.prev = None
-        node.next = None
+            node.prev = None
+            node.next = None
 
-        if edit:
-            self.length -= 1
+            if edit:
+                self.length -= 1
 
-        return edit
+            return edit
         
     def insert_before(self, node, new_node):
-        if node.prev is not None:
-            node.prev.next = new_node
-            new_node.prev = node.prev
-        else:
-            self.head = new_node
-        node.prev = new_node
-        new_node.next = node
+        with self._list_lock:
+            if node.prev is not None:
+                node.prev.next = new_node
+                new_node.prev = node.prev
+            else:
+                self.head = new_node
+            node.prev = new_node
+            new_node.next = node
 
-        self.length += 1
+            self.length += 1
 
     def insert_after(self, node, new_node):
-        if node.next is not None:
-            node.next.prev = new_node
-            new_node.next = node.next
-        else:
-            self.tail = new_node
-        node.next = new_node
-        new_node.prev = node
+        with self._list_lock:
+            if node.next is not None:
+                node.next.prev = new_node
+                new_node.next = node.next
+            else:
+                self.tail = new_node
+            node.next = new_node
+            new_node.prev = node
 
-        self.length += 1
+            self.length += 1
 
     def __len__(self):
-        return self.length
+        with self._list_lock:
+            return self.length
 
     def __repr__(self):
-        repr_str = "<Data List>:\n"
-        tmp_node = self.head
-        while (tmp_node != None):
-            repr_str += str(id(tmp_node)) + " -> "
-            tmp_node = tmp_node.next
-        repr_str += "\n"
-        return repr_str
+        with self._list_lock:
+            repr_str = "<Data List>:\n"
+            tmp_node = self.head
+            while (tmp_node != None):
+                repr_str += str(id(tmp_node)) + " -> "
+                tmp_node = tmp_node.next
+            repr_str += "\n"
+            return repr_str
 
 
 class DataMapType(TypedDict):
