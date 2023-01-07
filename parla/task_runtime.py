@@ -17,6 +17,8 @@ from parla.environments import EnvironmentComponentInstance, TaskEnvironmentRegi
 from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 
+from parla.tracking import LRUManager
+
 # Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -611,8 +613,27 @@ class ComputeTask(Task):
             if self.num_unspawned_dependencies == 0:
                 self._ready_to_map()
 
+    def acquire_parray(self):
+        ctx = get_scheduler_context()
+        for parray in (self.dataflow.input + \
+                       self.dataflow.inout + \
+                       self.dataflow.output):
+            for d in self.req.devices:
+                ctx.scheduler.lrum._acquire_data(parray, d)
+
+    def release_parray(self):
+        ctx = get_scheduler_context()
+        for parray in (self.dataflow.input + \
+                       self.dataflow.inout + \
+                       self.dataflow.output):
+            for d in self.req.devices:
+                ctx.scheduler.lrum._release_data(parray, d)
+
     def _execute_task(self):
-        return self._state.func(self, *self._state.args)
+        self.acquire_parray()
+        result = self._state.func(self, *self._state.args)
+        self.release_parray()
+        return result
 
     def cleanup(self):
         self._func = None
@@ -673,7 +694,10 @@ class DataMovementTask(Task):
         dev_no = -1
         if (dev_type.architecture is not cpu):
             dev_no = dev_type.index
+        ctx = get_scheduler_context()
+        ctx.scheduler.lrum._start_prefetch_data(self._target_data, dev_type)
         self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
+        ctx.scheduler.lrum._stop_prefetch_data(self._target_data, dev_type)  
         return TaskCompleted(None)
 
     def cleanup(self):
@@ -1479,6 +1503,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._device_launched_datamove_task_counts = {
             dev: 0 for dev in self._available_resources.get_resources()}
 
+        self._lrum = LRUManager()
+
         # Dictionary mapping data block to task lists.
         self._datablock_dict = defaultdict(list)
 
@@ -1505,6 +1531,10 @@ class Scheduler(ControllableThread, SchedulerContext):
     @ property
     def scheduler(self):
         return self
+
+    @ property
+    def lrum(self):
+        return self._lrum
 
     def __enter__(self):
         if self._active_task_count != 1:

@@ -46,6 +46,7 @@ import threading
 # - wrap in locks (use external locks on base class)
 
 from typing import TypedDict, Dict
+from parla.cpu_impl import cpu
 
 # TODO(hc): It should be declared on PArray.
 class DataNode:
@@ -58,8 +59,8 @@ class DataNode:
         self._device = device
         self._priority = priority
 
-        self._next = None
-        self._prev = None
+        self.next = None
+        self.prev = None
 
     @property
     def data(self):
@@ -68,14 +69,6 @@ class DataNode:
     @property
     def device(self):
         return self._device
-
-    @property
-    def next(self):
-        return self._next
-
-    @property
-    def prev(self):
-        return self._prev
 
     def __str__(self):
         return self.__repr__()
@@ -112,6 +105,8 @@ class DLList:
     def __init__(self):
         self.head = None
         self.tail = None
+        self.next = None
+        self.prev = None
         self.length = 0
 
     def __str__(self):
@@ -183,6 +178,15 @@ class DLList:
     def __len__(self):
         return self.length
 
+    def __repr__(self):
+        repr_str = "<Data List>:\n"
+        tmp_node = self.head
+        while (tmp_node != None):
+            repr_str += str(id(tmp_node)) + " -> "
+            tmp_node = tmp_node.next
+        repr_str += "\n"
+        return repr_str
+
 
 class DataMapType(TypedDict):
     """
@@ -203,12 +207,12 @@ class LRUManager:
     and the tail of the list is the data used most recently.
     """
 
-    def __init__(self, device, memory_limit):
-        super().__init__(device, memory_limit)
+    def __init__(self, memory_limit = 999999):
+#super().__init__(device, memory_limit)
         # A list containig zero-reference data objects in a specified device.
         self.zr_data_list = DLList()
         # A dictionary containing all data information on a device.
-        self.data_dict = Dict[DataMapType]
+        self.data_dict: Dict[str, DataMapType] = {}
         # A lock for guarding a reference count.
         self._ref_count_lock = threading.Condition(threading.Lock())
         # A lock for guarding a data state.
@@ -236,12 +240,15 @@ class LRUManager:
 
     def _check_ref_count_zero(self, data_info):
         with self._ref_count_lock:
+            print("Check:", data_info["ref_count"], flush=True)
             return data_info["ref_count"] == 0
 
     def _update_data_state(self, data_id, new_state):
         data_state = self.data_dict[data_id]["state"]
         # prefetching, reserved, using, free
         with self._data_state_lock:
+            print(f"[GC] Data (ID: {data_id})'s state is updated from "+
+                  f"{data_state} to {new_state}", flush=True)
             if data_state == new_state:
                 return
             if new_state == "prefetching":
@@ -265,7 +272,7 @@ class LRUManager:
     def _dict_id(self, data, dev):
         """ Genereate an ID of a data on a data information dictionary. """
         dev_index = "G" + str(dev.index) if (dev.architecture is not cpu) else "C" 
-        return str(data.ID + "." + dev_index) 
+        return str(data.ID) + "." + dev_index
 
     def _start_prefetch_data(self, data, dev):
         data_id = self._dict_id(data, dev)
@@ -280,27 +287,39 @@ class LRUManager:
             
             # TODO(hc): PArray should point to a corresponding data node.
             data_info = self.data_dict[data_id]
-            success = self.zr_data_list.remove(data_info.ref_list_node)
+            success = self.zr_data_list.remove(data_info["ref_list_node"])
+            self._update_data_state(data_id, "prefetching")
 
-            if success:
+            #if success:
                 #This is the first prefetch of a data object that is already on the device.
                 #Update the evictable memory size (as this data object is no longer evictable).
-                self.evictable_memory -= data.size
+                #self.evictable_memory -= data.size
             self._increase_ref_count(data_info)
+            print(f"[GC] Existing data (ID: {data_id}) is updated through prefetching"+
+                f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+                f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
         else:
             self.data_dict[data_id] = { "state" : "prefetching", \
                                         "ref_count" : 1, \
                                         "ref_list_node" : DataNode(data, dev) }
+            print(f"[GC] New data (ID: {data_id}) is added through prefetching"+
+                  f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+                  f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
+        print(f"[GC] Zero-referenced list after prefetching data: \n{self.zr_data_list}", flush=True)
             #This is a new block, update the used memory size.
-            self.used_memory += data.size
+            #self.used_memory += data.size
         #self.prefetch_map[data] = data
         #self.active_map[data] = data
-        assert(self.used_memory <= self.memory_limit)
+        #assert(self.used_memory <= self.memory_limit)
 
     def _stop_prefetch_data(self, data, dev):
         data_id = self._dict_id(data, dev)
         assert(data_id in self.data_dict)
         self._update_data_state(data_id, "reserved") 
+        print(f"[GC] Existing data (ID: {data_id}) is updated as prefetching completes"+
+            f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+            f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
+
 
     def _acquire_data(self, data, dev):
         #NOTE(wlr): The data should already be removed from the evictable list in the prefetching stage.
@@ -314,13 +333,16 @@ class LRUManager:
         data_id = self._dict_id(data, dev)
         assert(data_id in self.data_dict)
         self._update_data_state(data_id, "using") 
+        print(f"[GC] Existing data (ID: {data_id}) is updated as a compute task acquires"+
+            f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+            f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
+
 
     def _release_data(self, data, dev):
         data_id = self._dict_id(data, dev)
         assert(data_id in self.data_dict)
         data_info = self.data_dict[data_id]
         self._decrease_ref_count(data_info)
-        assert(self._check_ref_count_zero(data_info))
 
         #active_count = data.get_active(self.device)
         #use_count = data.get_use(self.device)
@@ -329,14 +351,19 @@ class LRUManager:
         #data.remove_use(self.device)
 
         if data_info["ref_count"] == 0:
+            assert(self._check_ref_count_zero(data_info))
             #del self.active_map[data]
             #If the data object is no longer needed by any already prefetched tasks, it can be evicted.
             node = data_info["ref_list_node"]
-            self.data_list.append(node)
-            self.evictable_memory += data.nbytes
+            self.zr_data_list.append(node)
+            #self.evictable_memory += data.nbytes
         #if use_count == 1:
             #del self.used_map[data]
-        
+        print(f"[GC] Existing data (ID: {data_id}) is updated as a compute task releases"+
+            f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+            f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
+        print(f"[GC] Zero-referenced list after releasing data: \n{self.zr_data_list}", flush=True)
+
     def _evict_data(self, target_data, target_dev):
         data_id = self._dict_id(target_data, target_dev)
         data_info = self.data_dict[data_id]
@@ -349,8 +376,8 @@ class LRUManager:
         target_data.evict(target_dev)
         self.zr_data_list.remove(data_info["ref_list_node"])
         del data_info
-        self.used_memory -= data.nbytes
-        self.evictable_memory -= data.nbytes
+        #self.used_memory -= data.nbytes
+        #self.evictable_memory -= data.nbytes
 
     def _evict(self):
         # Get the oldest data object
