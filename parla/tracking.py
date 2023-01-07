@@ -247,99 +247,100 @@ class LRUManager:
         self.used_map = {}
 
     def _increase_ref_count(self, data_info):
-        with self._ref_count_lock:
-            assert(data_info["ref_count"] >= 0)
-            data_info["ref_count"] += 1
+        assert(data_info["ref_count"] >= 0)
+        data_info["ref_count"] += 1
 
     def _decrease_ref_count(self, data_info):
-        with self._ref_count_lock:
-            data_info["ref_count"] -= 1
-            assert(data_info["ref_count"] >= 0)
+        data_info["ref_count"] -= 1
+        assert(data_info["ref_count"] >= 0)
 
     def _check_ref_count_zero(self, data_info):
-        with self._ref_count_lock:
-            print("Check:", data_info["ref_count"], flush=True)
-            return data_info["ref_count"] == 0
+        print("Check:", data_info["ref_count"], flush=True)
+        return data_info["ref_count"] == 0
 
-    def _update_data_state(self, data_id, new_state):
-        data_state = self.data_dict[data_id]["state"]
+    def _update_data_state(self, data_id, new_state, taskid):
         # prefetching, reserved, using, free
-        with self._data_state_lock:
-            print(f"[GC] Data (ID: {data_id})'s state is updated from "+
-                  f"{data_state} to {new_state}", flush=True)
-            if data_state == new_state:
-                return
-            if new_state == GCDataState.PREFETCHING:
-                if data_state == GCDataState.FREE:
-                    data_state = new_state
-                return
-            elif new_state == GCDataState.RESERVED:
-                if data_state == GCDataState.PREFETCHING or \
-                   data_state == GCDataState.FREE:
-                    data_state = new_state
-                return
-            elif new_state == GCDataState.ACQUIRED:
-                assert(data_state == GCDataState.ACQUIRED)
-                data_state = new_state
-                return
-            elif new_state == GCDataState.FREE:
-                assert(data_state == GCDataState.ACQUIRED)
-                data_state = new_state
-                return
+        data_info = self.data_dict[data_id]
+        data_state = data_info["state"]
+        print(f"[GC] (Task: {taskid}) Data (ID: {data_id})'s state is updated from "+
+              f"{data_state} to {new_state}", flush=True)
+        if data_state == new_state:
+            return
+        if new_state == GCDataState.PREFETCHING:
+            if data_state == GCDataState.FREE:
+                data_info["state"] = new_state
+            return
+        elif new_state == GCDataState.RESERVED:
+            if data_state == GCDataState.PREFETCHING or \
+               data_state == GCDataState.FREE:
+                data_info["state"] = new_state
+            return
+        elif new_state == GCDataState.ACQUIRED:
+            print(">>>>> ", data_state, flush=True)
+            assert(data_state == GCDataState.RESERVED)
+            data_info["state"] = new_state
+            return
+        elif new_state == GCDataState.FREE:
+            assert(data_state == GCDataState.ACQUIRED)
+            data_info["state"] = new_state
+            return
 
     def _dict_id(self, data, dev):
         """ Genereate an ID of a data on a data information dictionary. """
         dev_index = "G" + str(dev.index) if (dev.architecture is not cpu) else "C" 
         return str(data.ID) + "." + dev_index
 
-    def _start_prefetch_data(self, data, dev):
+    def _start_prefetch_data(self, data, dev, taskid = ""):
         data_id = self._dict_id(data, dev)
-        if data_id in self.data_dict:
-            #This is a prefetch of a data object that is already on the device (or is being prefetched).
-            #This means the data is no longer evictable as its about to be in-use by data movement and compute tasks.
-            #Remove it from the evictable list.
+        with self._data_state_lock:
+            if data_id in self.data_dict:
+                #This is a prefetch of a data object that is already on the device (or is being prefetched).
+                #This means the data is no longer evictable as its about to be in-use by data movement and compute tasks.
+                #Remove it from the evictable list.
 
-            # TODO(hc): but if a data movement task will be executed after a very long time, that also can be evictable.
-            #           if memory is full and any task cannot proceed, we can still evict one of data that was prefetched.
-            #           but this is very rare case and I am gonna leave it as the future work.
-            
-            # TODO(hc): PArray should point to a corresponding data node.
-            data_info = self.data_dict[data_id]
-            success = self.zr_data_list.remove(data_info["ref_list_node"])
-            self._update_data_state(data_id, GCDataState.PREFETCHING)
+                # TODO(hc): but if a data movement task will be executed after a very long time, that also can be evictable.
+                #           if memory is full and any task cannot proceed, we can still evict one of data that was prefetched.
+                #           but this is very rare case and I am gonna leave it as the future work.
+                
+                # TODO(hc): PArray should point to a corresponding data node.
+                data_info = self.data_dict[data_id]
+                success = self.zr_data_list.remove(data_info["ref_list_node"])
+                self._update_data_state(data_id, GCDataState.PREFETCHING, taskid)
 
-            #if success:
-                #This is the first prefetch of a data object that is already on the device.
-                #Update the evictable memory size (as this data object is no longer evictable).
-                #self.evictable_memory -= data.size
-            self._increase_ref_count(data_info)
-            print(f"[GC] Existing data (ID: {data_id}) is updated through prefetching"+
-                f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
-                f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
-        else:
-            self.data_dict[data_id] = { "state" : GCDataState.PREFETCHING, \
-                                        "ref_count" : 1, \
-                                        "ref_list_node" : DataNode(data, dev) }
-            print(f"[GC] New data (ID: {data_id}) is added through prefetching"+
-                  f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
-                  f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
-        print(f"[GC] Zero-referenced list after prefetching data: \n{self.zr_data_list}", flush=True)
+                #if success:
+                    #This is the first prefetch of a data object that is already on the device.
+                    #Update the evictable memory size (as this data object is no longer evictable).
+                    #self.evictable_memory -= data.size
+                self._increase_ref_count(data_info)
+                print(f"[GC] (Task: {taskid}) Existing data (ID: {data_id}) is updated "+
+                    f"through prefetching (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+                    f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
+            else:
+                self.data_dict[data_id] = { "state" : GCDataState.PREFETCHING, \
+                                            "ref_count" : 1, \
+                                            "ref_list_node" : DataNode(data, dev) }
+                print(f"[GC] (Task: {taskid}) New data (ID: {data_id}) is added through "+
+                      f"prefetching (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+                      f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
+        print(f"[GC] (Task: {taskid}) Zero-referenced list after prefetching data: "+
+              f"\n{self.zr_data_list}", flush=True)
             #This is a new block, update the used memory size.
             #self.used_memory += data.size
         #self.prefetch_map[data] = data
         #self.active_map[data] = data
         #assert(self.used_memory <= self.memory_limit)
 
-    def _stop_prefetch_data(self, data, dev):
+    def _stop_prefetch_data(self, data, dev, taskid=""):
         data_id = self._dict_id(data, dev)
-        assert(data_id in self.data_dict)
-        self._update_data_state(data_id, GCDataState.RESERVED) 
-        print(f"[GC] Existing data (ID: {data_id}) is updated as prefetching completes"+
-            f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
-            f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
+        with self._data_state_lock: 
+            assert(data_id in self.data_dict)
+            self._update_data_state(data_id, GCDataState.RESERVED, taskid) 
+            print(f"[GC] (Task: {taskid}) Existing data (ID: {data_id}) is updated as "+
+                f"prefetching completes (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+                f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
 
 
-    def _acquire_data(self, data, dev):
+    def _acquire_data(self, data, dev, taskid = ""):
         #NOTE(wlr): The data should already be removed from the evictable list in the prefetching stage.
         #           Any logic here would be a sanity check. I'm removing it for now.
         #node = self.data_dict.get(data, None)
@@ -349,53 +350,58 @@ class LRUManager:
         #self.used_map[data] = data
         #data.add_use(self.device)
         data_id = self._dict_id(data, dev)
-        assert(data_id in self.data_dict)
-        self._update_data_state(data_id, GCDataState.ACQUIRED) 
-        print(f"[GC] Existing data (ID: {data_id}) is updated as a compute task acquires"+
-            f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
-            f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
+        with self._data_state_lock: 
+            assert(data_id in self.data_dict)
+            self._update_data_state(data_id, GCDataState.ACQUIRED, taskid) 
+            print(f"[GC] (Task: {taskid}) Existing data (ID: {data_id}) is updated as "+
+                f"a compute task acquires"+
+                f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+                f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
 
 
-    def _release_data(self, data, dev):
+    def _release_data(self, data, dev, taskid = ""):
         data_id = self._dict_id(data, dev)
-        assert(data_id in self.data_dict)
-        data_info = self.data_dict[data_id]
-        self._decrease_ref_count(data_info)
+        with self._data_state_lock: 
+            assert(data_id in self.data_dict)
+            data_info = self.data_dict[data_id]
+            self._decrease_ref_count(data_info)
 
-        #active_count = data.get_active(self.device)
-        #use_count = data.get_use(self.device)
+            #active_count = data.get_active(self.device)
+            #use_count = data.get_use(self.device)
 
-        #data.remove_active(self.device)
-        #data.remove_use(self.device)
+            #data.remove_active(self.device)
+            #data.remove_use(self.device)
 
-        if data_info["ref_count"] == 0:
-            assert(self._check_ref_count_zero(data_info))
-            #del self.active_map[data]
-            #If the data object is no longer needed by any already prefetched tasks, it can be evicted.
-            node = data_info["ref_list_node"]
-            self.zr_data_list.append(node)
-            #self.evictable_memory += data.nbytes
-        #if use_count == 1:
-            #del self.used_map[data]
-        print(f"[GC] Existing data (ID: {data_id}) is updated as a compute task releases"+
-            f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
-            f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
-        print(f"[GC] Zero-referenced list after releasing data: \n{self.zr_data_list}", flush=True)
+            if data_info["ref_count"] == 0:
+                assert(self._check_ref_count_zero(data_info))
+                #del self.active_map[data]
+                #If the data object is no longer needed by any already prefetched tasks, it can be evicted.
+                node = data_info["ref_list_node"]
+                self.zr_data_list.append(node)
+                #self.evictable_memory += data.nbytes
+            #if use_count == 1:
+                #del self.used_map[data]
+            print(f"[GC] (Task: {taskid}) Existing data (ID: {data_id}) is updated as a compute "+
+                f"task releases (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
+                f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
+            print(f"[GC] (Task: {taskid}) Zero-referenced list after releasing data: "+
+                  f"\n{self.zr_data_list}", flush=True)
 
     def _evict_data(self, target_data, target_dev):
         data_id = self._dict_id(target_data, target_dev)
-        data_info = self.data_dict[data_id]
-        assert(self._check_ref_count_zero(data_info))
-        #Call internal data object evict method
-        #This should:
-        #  - Backup the data if its not in a SHARED state
-        #    (SHARED state means the data has a valid copy on multiple devices. Eviction should never destroy the only remaining copy)
-        #  - Mark the data for deletion (this may be done by the CuPy/Python GC)
-        target_data.evict(target_dev)
-        self.zr_data_list.remove(data_info["ref_list_node"])
-        del data_info
-        #self.used_memory -= data.nbytes
-        #self.evictable_memory -= data.nbytes
+        with self._data_state_lock: 
+            data_info = self.data_dict[data_id]
+            assert(self._check_ref_count_zero(data_info))
+            #Call internal data object evict method
+            #This should:
+            #  - Backup the data if its not in a SHARED state
+            #    (SHARED state means the data has a valid copy on multiple devices. Eviction should never destroy the only remaining copy)
+            #  - Mark the data for deletion (this may be done by the CuPy/Python GC)
+            target_data.evict(target_dev)
+            self.zr_data_list.remove(data_info["ref_list_node"])
+            del data_info
+            #self.used_memory -= data.nbytes
+            #self.evictable_memory -= data.nbytes
 
     def _evict(self):
         # Get the oldest data object

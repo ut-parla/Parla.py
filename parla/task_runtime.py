@@ -619,7 +619,7 @@ class ComputeTask(Task):
                        self.dataflow.inout + \
                        self.dataflow.output):
             for d in self.req.devices:
-                ctx.scheduler.lrum._acquire_data(parray, d)
+                ctx.scheduler.lrum._acquire_data(parray, d, str(self.taskid))
 
     def release_parray(self):
         ctx = get_scheduler_context()
@@ -627,7 +627,7 @@ class ComputeTask(Task):
                        self.dataflow.inout + \
                        self.dataflow.output):
             for d in self.req.devices:
-                ctx.scheduler.lrum._release_data(parray, d)
+                ctx.scheduler.lrum._release_data(parray, d, str(self.taskid))
 
     def _execute_task(self):
         self.acquire_parray()
@@ -695,9 +695,9 @@ class DataMovementTask(Task):
         if (dev_type.architecture is not cpu):
             dev_no = dev_type.index
         ctx = get_scheduler_context()
-        ctx.scheduler.lrum._start_prefetch_data(self._target_data, dev_type)
+        ctx.scheduler.lrum._start_prefetch_data(self._target_data, dev_type, str(self.taskid))
         self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
-        ctx.scheduler.lrum._stop_prefetch_data(self._target_data, dev_type)  
+        ctx.scheduler.lrum._stop_prefetch_data(self._target_data, dev_type, str(self.taskid))  
         return TaskCompleted(None)
 
     def cleanup(self):
