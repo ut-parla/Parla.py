@@ -45,8 +45,10 @@ import threading
 #Needs:
 # - wrap in locks (use external locks on base class)
 
+from enum import Enum
 from typing import TypedDict, Dict
 from parla.cpu_impl import cpu
+
 
 # TODO(hc): It should be declared on PArray.
 class DataNode:
@@ -194,12 +196,22 @@ class DLList:
             return repr_str
 
 
+class GCDataState(Enum):
+    """
+    Enum of data states.
+    """
+    PREFETCHING = "Prefetching" # Data is being prefetched.
+    RESERVED = "Reserved" # Data's ref. count is >= 1, but not acquired.
+    ACQUIRED = "Acquired" # A task is using data.
+    FREE = "Free" # None of tasks (mapped/running) does not need data.
+
+
 class DataMapType(TypedDict):
     """
     Track information of data instance in a device
     """
     # TODO(hc): state should be an enum type.
-    state: str
+    state: GCDataState
     ref_count: int
     ref_list_node: DataNode
 
@@ -257,22 +269,22 @@ class LRUManager:
                   f"{data_state} to {new_state}", flush=True)
             if data_state == new_state:
                 return
-            if new_state == "prefetching":
-                if data_state == "free":
+            if new_state == GCDataState.PREFETCHING:
+                if data_state == GCDataState.FREE:
                     data_state = new_state
                 return
-            elif new_state == "reserved":
-                if data_state == "prefetching":
+            elif new_state == GCDataState.RESERVED:
+                if data_state == GCDataState.PREFETCHING or \
+                   data_state == GCDataState.FREE:
                     data_state = new_state
                 return
-            elif new_state == "using":
-                if data_state == "reserved":
-                    data_state = new_state
+            elif new_state == GCDataState.ACQUIRED:
+                assert(data_state == GCDataState.ACQUIRED)
+                data_state = new_state
                 return
-            elif new_state == "free":
-                if data_state != "prefetching":
-                    assert(data_state != reserved)
-                    data_state = new_state
+            elif new_state == GCDataState.FREE:
+                assert(data_state == GCDataState.ACQUIRED)
+                data_state = new_state
                 return
 
     def _dict_id(self, data, dev):
@@ -294,7 +306,7 @@ class LRUManager:
             # TODO(hc): PArray should point to a corresponding data node.
             data_info = self.data_dict[data_id]
             success = self.zr_data_list.remove(data_info["ref_list_node"])
-            self._update_data_state(data_id, "prefetching")
+            self._update_data_state(data_id, GCDataState.PREFETCHING)
 
             #if success:
                 #This is the first prefetch of a data object that is already on the device.
@@ -305,7 +317,7 @@ class LRUManager:
                 f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
                 f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
         else:
-            self.data_dict[data_id] = { "state" : "prefetching", \
+            self.data_dict[data_id] = { "state" : GCDataState.PREFETCHING, \
                                         "ref_count" : 1, \
                                         "ref_list_node" : DataNode(data, dev) }
             print(f"[GC] New data (ID: {data_id}) is added through prefetching"+
@@ -321,7 +333,7 @@ class LRUManager:
     def _stop_prefetch_data(self, data, dev):
         data_id = self._dict_id(data, dev)
         assert(data_id in self.data_dict)
-        self._update_data_state(data_id, "reserved") 
+        self._update_data_state(data_id, GCDataState.RESERVED) 
         print(f"[GC] Existing data (ID: {data_id}) is updated as prefetching completes"+
             f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
             f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
@@ -338,7 +350,7 @@ class LRUManager:
         #data.add_use(self.device)
         data_id = self._dict_id(data, dev)
         assert(data_id in self.data_dict)
-        self._update_data_state(data_id, "using") 
+        self._update_data_state(data_id, GCDataState.ACQUIRED) 
         print(f"[GC] Existing data (ID: {data_id}) is updated as a compute task acquires"+
             f" (Ref. count: {self.data_dict[data_id]['ref_count']}, "+
             f"Ref. node ID: {id(self.data_dict[data_id]['ref_list_node'])})", flush=True)
