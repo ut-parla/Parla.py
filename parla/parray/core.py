@@ -206,8 +206,8 @@ class PArray:
 
         # update shape
         self._array.shape = array.shape
-
-        cupy.cuda.stream.get_current_stream().synchronize()
+        if num_gpu > 0:
+            cupy.cuda.stream.get_current_stream().synchronize()
 
     # slicing/indexing
 
@@ -282,8 +282,7 @@ class PArray:
 
         with self._coherence_cv[device_id]:
             operations = self._coherence.evict(device_id, keep_one_copy)
-            for op in operations:
-                self._process_operation(op)
+            self._process_operations(operations)
 
 
     # Coherence update operations:
@@ -362,7 +361,8 @@ class PArray:
                     self._array.copy_data_between_device(op.dst, op.src, dst_is_current_device)
 
                     # sync stream before set it as ready, so asyc call is ensured to be done
-                    cupy.cuda.stream.get_current_stream().synchronize()
+                    if num_gpu > 0:
+                        cupy.cuda.stream.get_current_stream().synchronize()
 
                     # data is ready now
                     if MemoryOperation.LOAD_SUBARRAY in op.flag:
