@@ -10,6 +10,13 @@ import re
 # Helper functions
 ######
 
+# a wrapper around pe.run
+# cannot use pe.run directly since it won't force close a process
+def wperun(command, timeout):
+    child = pe.spawn(command, timeout=timeout)
+    output = child.read()
+    child.close(force=True)
+    return (output, child.exitstatus)
 
 def wassert(output, condition, required=True, verbose=True):
     if condition:
@@ -97,7 +104,7 @@ def run_test(gpu_list, timeout):
     print("\t   [Running Test Script 1/1]")
     for n_gpus in gpu_list:
         command = f"python test_script.py -ngpus {n_gpus}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -127,7 +134,7 @@ def run_cholesky_magma(gpu_list, timeout):
     #Loop over number of GPUs in each subtest
     for n_gpus in gpu_list:
         command = f"./testing_dpotrf_mgpu --ngpu {n_gpus} -N 28000"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -152,7 +159,7 @@ def run_cholesky_28(gpu_list, timeout):
 
         print("\t  --Making input matrix...")
         command = f"python examples/cholesky/make_cholesky_input.py -n 28000 -output examples/cholesky/chol_28000.npy"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
@@ -162,7 +169,7 @@ def run_cholesky_28(gpu_list, timeout):
     #Test 1: Manual Movement, User Placement
     for n_gpus in gpu_list:
         command = f"python examples/cholesky/blocked_cholesky_manual.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14 -matrix examples/cholesky/chol_28000.npy"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -177,7 +184,7 @@ def run_cholesky_28(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/cholesky/blocked_cholesky_automatic.py -ngpus {n_gpus} -fixed 1 -b 2000 -nblocks 14 -matrix examples/cholesky/chol_28000.npy"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -191,7 +198,7 @@ def run_cholesky_28(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/cholesky/blocked_cholesky_automatic.py -ngpus {n_gpus} -fixed 0 -b 2000 -nblocks 14"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -216,7 +223,7 @@ def run_cholesky_20_host(core_list, timeout):
     if not os.path.exists("examples/cholesky/chol_20000.npy"):
         print("\t  --Making input matrix...")
         command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
@@ -228,7 +235,7 @@ def run_cholesky_20_host(core_list, timeout):
     for num_cores in cpu_cores:
         command = f"python examples/cholesky/blocked_cholesky_cpu.py -matrix examples/cholesky/chol_20000.npy -b 2000 -workers {num_cores}"
         print(command, "...")
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -252,7 +259,7 @@ def run_cholesky_20_gpu(gpu_list, timeout):
     if not os.path.exists("examples/cholesky/chol_20000.npy"):
         print("\t  --Making input matrix...")
         command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
@@ -267,7 +274,7 @@ def run_cholesky_20_gpu(gpu_list, timeout):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/cholesky/blocked_cholesky_manual.py -matrix examples/cholesky/chol_20000.npy -fix 1 -ngpus {n_gpus}"
         #print("Current running:", command)
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -291,7 +298,7 @@ def run_dask_cholesky_20_host(cores_list, timeout):
     if not os.path.exists("examples/cholesky/chol_20000.npy"):
         print("\t  --Making input matrix...")
         command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
@@ -306,7 +313,7 @@ def run_dask_cholesky_20_host(cores_list, timeout):
         for pt in perthread_list[wi]:
             command = f"python examples/cholesky/dask/dask_cpu_cholesky.py -workers {n_workers} -perthread {pt} -matrix examples/cholesky/chol_20000.npy"
             #print(command, "...")
-            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            output = wperun(command, timeout)
             #Make sure no errors or timeout were thrown
             wassert(output, output[1] == 0)
             #Parse output
@@ -331,7 +338,7 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
     if not os.path.exists("examples/cholesky/chol_20000.npy"):
         print("\t  --Making input matrix...")
         command = f"python examples/cholesky/make_cholesky_input.py -n 20000 -output examples/cholesky/chol_20000.npy"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         print("\t  --Generated input matrix.")
@@ -346,7 +353,7 @@ def run_dask_cholesky_20_gpu(gpu_list, timeout):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         os.environ['UCX_TLS'] = "cuda,cuda_copy,cuda_ipc,tcp"
         command = f"python examples/cholesky/dask/dask_gpu_cholesky.py -matrix examples/cholesky/chol_20000.npy"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         if "No module named" in str(output[0]):
             print("ERROR", output[0])
             assert(False)
@@ -375,7 +382,7 @@ def run_jacobi(gpu_list, timeout):
     #Test 1: Manual Movement, User Placement
     for n_gpus in gpu_list:
         command = f"python examples/jacobi/jacobi_manual.py -ngpus {n_gpus} -fixed 1"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -390,7 +397,7 @@ def run_jacobi(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/jacobi/jacobi_automatic.py -ngpus {n_gpus} -fixed 1"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -404,7 +411,7 @@ def run_jacobi(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/jacobi/jacobi_automatic.py -ngpus {n_gpus} -fixed 0"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -439,7 +446,7 @@ def run_matmul_cublas(gpu_list, timeout):
     print("\t   [Running Matmul 32K (cuBLAS) 1/1]")
     for n_gpus in gpu_list:
         command = f"./{n_gpus}gpuGEMM.exe"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -463,7 +470,7 @@ def run_matmul(gpu_list, timeout):
     #Test 1: Manual Movement, User Placement
     for n_gpus in gpu_list:
         command = f"python examples/matmul/matmul_manual.py -ngpus {n_gpus} -fixed 1 -n 32000"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -478,7 +485,7 @@ def run_matmul(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/matmul/matmul_automatic.py -ngpus {n_gpus} -fixed 1 -n 32000"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -492,7 +499,7 @@ def run_matmul(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/matmul/matmul_automatic.py -ngpus {n_gpus} -fixed 0 -n 32000"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -520,7 +527,7 @@ def run_blr_threads(gpu_list, timeout):
     if (not os.path.exists("examples/blr/inputs/matrix_10k.npy")) or (not os.path.exists("examples/blr/inputs/vector_10k.npy")):
         print("\t  --Making input matrix_10k...")
         command = f"python examples/blr/app/main.py -mode gen -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         print("\t  --Generated input matrix_10k.")
@@ -530,7 +537,7 @@ def run_blr_threads(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/blr/app/main.py -mode run -type mgpu_blr -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -ngpus {n_gpus}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -559,7 +566,7 @@ def run_blr_parla(gpu_list, timeout):
     if (not os.path.exists("examples/blr/inputs/matrix_10k.npy")) or (not os.path.exists("examples/blr/inputs/vector_10k.npy")):
         print("\t  --Making input matrix_10k...")
         command = f"python examples/blr/app/main.py -mode gen -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         print("\t  --Generated input matrix_10k.")
@@ -569,7 +576,7 @@ def run_blr_parla(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement lazy -ngpus {n_gpus}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -583,7 +590,7 @@ def run_blr_parla(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 1 -movement eager -ngpus {n_gpus}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -597,7 +604,7 @@ def run_blr_parla(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/blr/app/main.py -mode run -type parla -matrix examples/blr/inputs/matrix_10k.npy -vector examples/blr/inputs/vector_10k.npy -b 2500 -nblocks 4 -fixed 0 -movement eager -ngpus {n_gpus}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -626,7 +633,7 @@ def run_nbody_parla(gpu_list, timeout):
     if not os.path.exists("examples/nbody/python-bh/input/n10M.txt"):
         print("\t  --Making input particle file...")
         command = f"python examples/nbody/python-bh/bin/gen_input.py normal 10000000 examples/nbody/python-bh/input/n10M.txt"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         print("\t  --Made input particle file.")
@@ -636,7 +643,7 @@ def run_nbody_parla(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}_eager_sched.ini"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -651,7 +658,7 @@ def run_nbody_parla(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}_eager.ini"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -665,7 +672,7 @@ def run_nbody_parla(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/parla{n_gpus}.ini"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -695,7 +702,7 @@ def run_nbody_threads(gpu_list, timeout):
     # Generate input file
     if not os.path.exists("examples/nbody/python-bh/input/n10M.txt"):
         command = f"python examples/nbody/python-bh/bin/gen_input.py normal 10000000 examples/nbody/python-bh/input/n10M.txt"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
 
@@ -707,7 +714,7 @@ def run_nbody_threads(gpu_list, timeout):
     for mode in mode_list:
         n_gpus = gpu_list[idx]
         command = f"python examples/nbody/python-bh/bin/run_2d.py examples/nbody/python-bh/input/n10M.txt 1 1 examples/nbody/python-bh/configs/{mode}.ini"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -739,7 +746,7 @@ def run_reduction(gpu_list, timeout):
         command = f"python examples/synthetic/graphs/generate_reduce_graph.py -overlap 1 "
         command += f"-level 8 -branch 2 -N 6250 -gil_time 0 -weight 16000 "
         command += f"-user 0 -output {reduction_policy_path}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for reduction + policy")
 
@@ -747,7 +754,7 @@ def run_reduction(gpu_list, timeout):
         command = f"python examples/synthetic/graphs/generate_reduce_graph.py -overlap 1 "
         command += f"-level 8 -branch 2 -N 6250 -gil_time 0 -weight 16000 "
         command += f"-user 1 -output {reduction_user_path}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for reduction + user")
 
@@ -760,7 +767,7 @@ def run_reduction(gpu_list, timeout):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_user_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 1 -user 1"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
@@ -776,7 +783,7 @@ def run_reduction(gpu_list, timeout):
         command = f"python examples/synthetic/run.py -graph {reduction_user_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 1"
         #print(command)
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
@@ -791,7 +798,7 @@ def run_reduction(gpu_list, timeout):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {reduction_policy_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 0"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #print(output)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -822,7 +829,7 @@ def run_independent(gpu_list, timeout):
         command = f"python examples/synthetic/graphs/generate_independent_graph.py -overlap 0 "
         command += f"-width 300 -N 6250 -gil_time 0 -location 1 -weight 16000 "
         command += f"-user 0 -output {independent_policy_path}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for independent + policy")
 
@@ -830,7 +837,7 @@ def run_independent(gpu_list, timeout):
         command = f"python examples/synthetic/graphs/generate_independent_graph.py -overlap 0 "
         command += f"-width 300 -N 6250 -gil_time 0 -location 1 -weight 16000 "
         command += f"-user 1 -output {independent_user_path}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for independent + user")
 
@@ -844,7 +851,7 @@ def run_independent(gpu_list, timeout):
         command = f"python examples/synthetic/run.py -graph {independent_user_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 1 -user 1"
         print(command)
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
@@ -859,7 +866,7 @@ def run_independent(gpu_list, timeout):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {independent_user_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 1"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
@@ -874,7 +881,7 @@ def run_independent(gpu_list, timeout):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {independent_policy_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 0"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #print(output)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -904,7 +911,7 @@ def run_serial(gpu_list, timeout):
         command = f"python examples/synthetic/graphs/generate_serial_graph.py -overlap 1 "
         command += f"-level 150 -N 6250 -gil_time 0 -location 1 -weight 16000 "
         command += f"-user 0 -output {serial_policy_path}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for serial + policy")
 
@@ -912,7 +919,7 @@ def run_serial(gpu_list, timeout):
         command = f"python examples/synthetic/graphs/generate_serial_graph.py -overlap 1 "
         command += f"-level 150 -N 6250 -gil_time 0 -location 1 -weight 16000 "
         command += f"-user 1 -output {serial_user_path}"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         print(output)
         wassert(output, output[1] == 0)
         print("\t --Generated input graph for serial + user")
@@ -927,7 +934,7 @@ def run_serial(gpu_list, timeout):
         command = f"python examples/synthetic/run.py -graph {serial_user_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 1 -user 1"
         print(command)
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         print(output)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -943,7 +950,7 @@ def run_serial(gpu_list, timeout):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {serial_user_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 1"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
         sub_dict[n_gpus] = times
@@ -958,7 +965,7 @@ def run_serial(gpu_list, timeout):
         os.environ['CUDA_VISIBLE_DEVICES'] = str(cuda_visible_devices)
         command = f"python examples/synthetic/run.py -graph {serial_policy_path}"
         command += f" -d 1000 -loop 6 -reinit 2 -data_move 2 -user 0"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #print(output)
         times = parse_synthetic_times(output[0])
         print(f"\t    {n_gpus} GPUs: {times}")
@@ -978,7 +985,7 @@ def run_batched_cholesky(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/variants/batched_cholesky.py -ngpus {n_gpus} -use_cpu 1"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -991,7 +998,7 @@ def run_batched_cholesky(gpu_list, timeout):
     sub_dict = {}
     for n_gpus in gpu_list:
         command = f"python examples/variants/batched_cholesky.py -ngpus {n_gpus} -use_cpu 0"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -1016,7 +1023,7 @@ def run_prefetching_test(gpu_list, timeout):
     print("\t   [Running 1/2] Manual Movement")
     for data_size in data_sizes:
         command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 1 -loop 5 -d {data_size} -reinit 2"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -1031,7 +1038,7 @@ def run_prefetching_test(gpu_list, timeout):
     print("\t   [Running 2/2] Automatic Movement")
     for data_size in data_sizes:
         command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/prefetch.gph -data_move 2 -loop 5 -d {data_size} -reinit 2 -loop 5"
-        output = pe.run(command, timeout=timeout, withexitstatus=True)
+        output = wperun(command, timeout)
         #Make sure no errors or timeout were thrown
         wassert(output, output[1] == 0)
         #Parse output
@@ -1064,7 +1071,7 @@ def run_independent_parla_scaling(thread_list, timeout):
         print(f"\t   [Running {count}/{len(sizes)}], Task Grain = {size} μs")
         for thread in thread_list:
             command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/independent_1000.gph -threads {thread} -data_move 0 -weight {size} -use_gpu 0"
-            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            output = wperun(command, timeout)
             #Make sure no errors or timeout were thrown
             #print(output)
             wassert(output, output[1] == 0)
@@ -1094,7 +1101,7 @@ def run_independent_dask_thread_scaling(thread_list, timeout):
         print(f"\t   [Running {count}/{len(sizes)}], Task Grain = {size} μs")
         for thread in thread_list:
             command = f"python examples/synthetic/artifact/scripts/run_dask_thread.py -workers {thread} -time {size} -n {n}"
-            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            output = wperun(command, timeout)
             #Make sure no errors or timeout were thrown
             wassert(output, output[1] == 0)
             #Parse output
@@ -1128,7 +1135,7 @@ def run_independent_dask_process_scaling(process_list, timeout):
             output = pe.run(command, timeout=None)
             command = f"python examples/synthetic/artifact/scripts/run_dask_process.py -workers {process} -time {size} -n {n}"
             print("LIMIT: ", timeout)
-            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            output = wperun(command, timeout)
             #Make sure no errors or timeout were thrown
             #wassert(output, output[1] == 0, verbose=True, require=False)
             print("OUTPUT: ", output)
@@ -1166,7 +1173,7 @@ def run_GIL_test_parla(thread_list, timeout):
         print(f"\t   [Running {count}/{len(sizes)}], Task Grain = {size} μs")
         for thread in thread_list:
             command = f"python examples/synthetic/run.py -graph examples/synthetic/artifact/graphs/independent_1000.gph -threads {thread} -data_move 0 -weight {size} -use_gpu 0 -gweight {gil}"
-            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            output = wperun(command, timeout)
             #Make sure no errors or timeout were thrown
             print(output)
             wassert(output, output[1] == 0)
@@ -1194,7 +1201,7 @@ def run_GIL_test_dask(thread_list, timeout):
         print(f"\t   [Running {count}/{len(sizes)}], Task Grain = {size} μs")
         for thread in thread_list:
             command = f"python examples/synthetic/artifact/scripts/run_dask_thread_gil.py -workers {thread} -time {size} -n {n}"
-            output = pe.run(command, timeout=timeout, withexitstatus=True)
+            output = wperun(command, timeout)
             #Make sure no errors or timeout were thrown
             wassert(output, output[1] == 0)
             #Parse output
