@@ -382,6 +382,7 @@ class Task:
                         events = env.get_events_from_components()
                         self._wait_for_dependency_events(env)
                         task_state = self._execute_task()
+                        print(str(self.taskid), " execution complets", flush=True)
                         # Events could be multiple for multiple devices task.
                         env.record_events()
                         if len(events) > 0:
@@ -389,7 +390,9 @@ class Task:
                             # notify dependents and make them wait for that event,
                             # not Parla task completion.
                             if not isinstance(task_state, TaskRunning):
+                                print(str(self.taskid), " notifies", flush=True)
                                 self._notify_dependents(events)
+                                print(str(self.taskid), " notifies done", flush=True)
                         env.sync_events()
                     task_state = task_state or TaskCompleted(None)
                 except Exception as e:
@@ -488,6 +491,7 @@ class Task:
 
     def _notify_dependents(self, events=None):
         for dependent in self._dependents:
+            print("dependent:", str(dependent.taskid), flush=True)
             dependent._handle_dependency_event_mutex(events)
         self._dependents = []
 
@@ -515,6 +519,7 @@ class Task:
     def _handle_dependency_event_mutex(self, events):
         with self._mutex:
             self._num_blocking_dependencies -= 1
+            print(str(self.taskid), " has dependency:", self._num_blocking_dependencies, flush=True)
             # Add events from one dependent task.
             # (We are aiming to multiple device tasks, and it would
             #  be possible to have multiple events)
@@ -615,25 +620,28 @@ class ComputeTask(Task):
 
     def acquire_parray(self):
         ctx = get_scheduler_context()
-        for parray in (self.dataflow.input + \
-                       self.dataflow.inout + \
-                       self.dataflow.output):
-            for d in self.req.devices:
-                ctx.scheduler.lrum._acquire_data(parray, d, str(self.taskid))
+        if self.dataflow is not None:
+            for parray in (self.dataflow.input + \
+                           self.dataflow.inout + \
+                           self.dataflow.output):
+                for d in self.req.devices:
+                    ctx.scheduler.lrum._acquire_data(parray, d, str(self.taskid))
 
     def release_parray(self):
         ctx = get_scheduler_context()
-        for parray in (self.dataflow.input + \
-                       self.dataflow.inout + \
-                       self.dataflow.output):
-            for d in self.req.devices:
-                ctx.scheduler.lrum._release_data(parray, d, str(self.taskid))
-        ctx.scheduler.lrum._evict()
+        if self.dataflow is not None:
+            for parray in (self.dataflow.input + \
+                           self.dataflow.inout + \
+                           self.dataflow.output):
+                for d in self.req.devices:
+                    ctx.scheduler.lrum._release_data(parray, d, str(self.taskid))
+            ctx.scheduler.lrum._evict()
 
     def _execute_task(self):
         self.acquire_parray()
         result = self._state.func(self, *self._state.args)
         self.release_parray()
+        print("Execution done", flush=True)
         return result
 
     def cleanup(self):
@@ -687,18 +695,23 @@ class DataMovementTask(Task):
             self._operand_type = operand_type
 
     def _execute_task(self):
+        print(str(self.taskid), " starts data move", flush=True)
         write_flag = True
         if (self._operand_type == OperandType.IN):
             write_flag = False
         # Move data to current device
-        dev_type = get_current_devices()[0]
+        self.dev_type = get_current_devices()[0]
         dev_no = -1
-        if (dev_type.architecture is not cpu):
-            dev_no = dev_type.index
+        if (self.dev_type.architecture is not cpu):
+            dev_no = self.dev_type.index
         ctx = get_scheduler_context()
-        ctx.scheduler.lrum._start_prefetch_data(self._target_data, dev_type, str(self.taskid))
+        print(str(self.taskid), " starts data move - 1", flush=True)
+        ctx.scheduler.lrum._start_prefetch_data(self._target_data, self.dev_type, str(self.taskid))
+        print(str(self.taskid), " starts data move - 2", flush=True)
         self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
-        ctx.scheduler.lrum._stop_prefetch_data(self._target_data, dev_type, str(self.taskid))  
+        print(str(self.taskid), " starts data move - 3", flush=True)
+        ctx.scheduler.lrum._stop_prefetch_data(self._target_data, self.dev_type, str(self.taskid))  
+        print(str(self.taskid), " starts data move - 4", flush=True)
         return TaskCompleted(None)
 
     def cleanup(self):
@@ -713,7 +726,7 @@ class DataMovementTask(Task):
         # Don't update parray tracking information either
         # The scheduler already registered the new location
         # If size changes, the ComputeTask will take care of that
-
+        ctx = get_scheduler_context()
         # Decrease the number of running tasks on the device d.
         for d in self.req.devices:
             ctx.scheduler.update_mapped_task_count_mutex(self, d, -1)
