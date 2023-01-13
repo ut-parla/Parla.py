@@ -65,6 +65,8 @@ def main(N, d, steps, NUM_WORKERS, WIDTH, cpu_array, sync_flag, vcu_flag,
 
                 if strong_flag:
                     kernel_time = kernel_time / NUM_WORKERS
+                else:
+                    kernel_time = kernel_time
 
                 free_time = kernel_time * (1.0 - gil_fraction)
                 lock_time = kernel_time * gil_fraction
@@ -106,12 +108,16 @@ def main(N, d, steps, NUM_WORKERS, WIDTH, cpu_array, sync_flag, vcu_flag,
         print(', '.join([str(NUM_WORKERS), str(steps), str(sleep_time),
               str(accesses), str(gil_fraction), str(elapsed)]), flush=True)
 
+def drange(start, stop):
+    while start < stop:
+        yield start
+        start <<= 1
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--workers', type=int, default=1)
-    parser.add_argument('--width', int, default=0)
+    parser.add_argument('--width', type=int, default=0)
     parser.add_argument('--steps', type=int, default=1)
     parser.add_argument('-d', type=int, default=7)
     parser.add_argument('-n', type=int, default=2**23)
@@ -125,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("--frac", type=float, default=0)
 
     parser.add_argument('--strong', type=int, default=0)
-    parser.add_argument('--sleep', type=int, default=0)
+    parser.add_argument('--sleep', type=int, default=1)
     parser.add_argument('--restrict', type=int, default=0)
 
     args = parser.parse_args()
@@ -148,7 +154,13 @@ if __name__ == "__main__":
         cpu_array.append(np.zeros([N, d]))
         increment_wrapper(cpu_array[ng], 1)
 
-    with Parla():
-        main(N, d, STEPS, NUM_WORKERS, args.width, cpu_array, isync, args.vcus,
-             args.deps, args.verbose, args.t, args.accesses, args.frac,
-             args.sleep, args.strong, args.restrict)
+    print(', '.join([str('workers'), str('n'), str('task_time'), str(
+        'accesses'), str('frac'), str('total_time')]), flush=True)
+    for task_time in [10000, 50000]:
+        for accesses in [1]:
+            for nworkers in drange(1, args.workers):
+                for frac in [0]:
+                    with Parla():
+                        main(N, d, STEPS, nworkers, nworkers, cpu_array, isync, args.vcus,
+                             args.deps, args.verbose, task_time, accesses, frac,
+                             args.sleep, args.strong, args.restrict)
