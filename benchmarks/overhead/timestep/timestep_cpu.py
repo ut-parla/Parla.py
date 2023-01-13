@@ -6,9 +6,10 @@ from numba import njit, jit
 import math
 import time
 
-from miniparla import Parla
-from miniparla.barriers import TaskSpace
-from miniparla.spawn import spawn
+from parla import Parla, get_all_devices
+from parla.cpu import cpu
+
+from parla.tasks import spawn, TaskSpace, tasks
 
 from sleep.core import bsleep, sleep_with_gil
 
@@ -138,7 +139,6 @@ if __name__ == "__main__":
         increment_wrapper(cpu_array[ng], 1)
 
     with Parla():
-        print("args.verbose", args.verbose, flush=True)
         main(N, d, STEPS, NUM_WORKERS, cpu_array, isync, args.vcus,
              args.deps, args.verbose, args.t, args.accesses, args.frac,
              args.sleep, args.strong, args.restrict)
