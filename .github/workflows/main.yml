@@ -75,3 +75,20 @@ jobs:
 
       - name: Run Figure 14
         run: python3 examples/launcher.py --figure 14
+
+  parray_test:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+
+      - name: Run Automove Test
+        run: python3 tests/test_automove.py
+      
+      - name: Run Fine Grained Parray Test
+        run: python3 tests/test_fine_grained_parray.py
+
+      - name: Run Reduction Test
+        run: python3 tests/test_reduction.py
