@@ -34,7 +34,7 @@ def increment_wrapper(array, counter):
     increment(array, counter)
 
 
-def main(N, d, steps, NUM_WORKERS, cpu_array, sync_flag, vcu_flag,
+def main(N, d, steps, NUM_WORKERS, WIDTH, cpu_array, sync_flag, vcu_flag,
          dep_flag, verbose, sleep_time, accesses, gil_fraction,
          sleep_flag, strong_flag, restrict_flag):
 
@@ -46,12 +46,18 @@ def main(N, d, steps, NUM_WORKERS, cpu_array, sync_flag, vcu_flag,
         start_t = time.perf_counter()
         for t in range(steps):
 
-            for ng in range(NUM_WORKERS):
+            if restrict_flag:
+                odeps = [T[1, t-1, l] for l in range(WIDTH)]
+
+            for ng in range(WIDTH):
 
                 if not dep_flag or (t == 0):
                     deps = []
                 else:
-                    deps = [T[1, t-1, ng]]
+                    if restrict_flag:
+                        deps = odeps
+                    else:
+                        deps = [T[1, t-1, ng]]
 
                 vcus = 1.0/NUM_WORKERS
 
@@ -85,13 +91,13 @@ def main(N, d, steps, NUM_WORKERS, cpu_array, sync_flag, vcu_flag,
 
             if sync_flag:
                 if restrict_flag:
-                    await T[1, t, :]
+                    await tasks([T[1, t, l] for l in range(WIDTH)])
                 else:
                     await T
 
         if not sync_flag:
             if restrict_flag:
-                await T[1, steps-1, :]
+                await tasks([T[1, steps-1, l] for l in range(WIDTH)])
             else:
                 await T
         end_t = time.perf_counter()
@@ -105,6 +111,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--workers', type=int, default=1)
+    parser.add_argument('--width', int, default=0)
     parser.add_argument('--steps', type=int, default=1)
     parser.add_argument('-d', type=int, default=7)
     parser.add_argument('-n', type=int, default=2**23)
@@ -123,6 +130,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if args.width == 0:
+        args.width = args.workers
+
     NUM_WORKERS = args.workers
     STEPS = args.steps
     N = args.n
@@ -139,6 +149,6 @@ if __name__ == "__main__":
         increment_wrapper(cpu_array[ng], 1)
 
     with Parla():
-        main(N, d, STEPS, NUM_WORKERS, cpu_array, isync, args.vcus,
+        main(N, d, STEPS, NUM_WORKERS, args.width, cpu_array, isync, args.vcus,
              args.deps, args.verbose, args.t, args.accesses, args.frac,
              args.sleep, args.strong, args.restrict)

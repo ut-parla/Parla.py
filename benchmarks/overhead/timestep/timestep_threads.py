@@ -20,6 +20,11 @@ parser.add_argument('-barrier', type=int, default=1)
 args = parser.parse_args()
 
 
+def task(barrier, n, t, accesses, frac):
+    for k in range(accesses):
+        free_sleep(free_time)
+        lock_sleep(lock_time)
+
 def thread_task(barrier, n, t, accesses, frac):
 
     kernel_time = t / accesses
@@ -27,9 +32,7 @@ def thread_task(barrier, n, t, accesses, frac):
     lock_time = kernel_time * frac
 
     for i in range(n):
-        for k in range(accesses):
-            free_sleep(free_time)
-            lock_sleep(lock_time)
+        task(barrier, n, t, accesses,frac)
         if args.barrier:
             barrier.wait()
 
