@@ -116,23 +116,23 @@ def drange(start, stop):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--workers', type=int, default=1)
-    parser.add_argument('--width', type=int, default=0)
-    parser.add_argument('--steps', type=int, default=1)
-    parser.add_argument('-d', type=int, default=7)
-    parser.add_argument('-n', type=int, default=2**23)
-    parser.add_argument('--isync', type=int, default=0)
-    parser.add_argument('--vcus', type=int, default=0)
-    parser.add_argument('--deps', type=int, default=1)
-    parser.add_argument('--verbose', type=int, default=0)
+    parser.add_argument('--workers', type=int, default=1, help='How many workers to use. This will perform a sample of 1 to workers by powers of 2')
+    parser.add_argument('--width', type=int, default=0, help='The width of the task graph. If not set this is equal to nworkers.')
+    parser.add_argument('--steps', type=int, default=1, help='The depth of the task graph.')
+    parser.add_argument('-d', type=int, default=7, help='The size of the data if using numba busy kernel')
+    parser.add_argument('-n', type=int, default=2**23, help='The size of the data if using numba busy kernel')
+    parser.add_argument('--isync', type=int, default=0, help='Whether to synchronize (internally) using await at every timestep.')
+    parser.add_argument('--vcus', type=int, default=1, help='Whether tasks use vcus to restrict how many can run on a single device')
+    parser.add_argument('--deps', type=int, default=1, help='Whether tasks have dependencies on the prior iteration')
+    parser.add_argument('--verbose', type=int, default=0, help='Verbose!')
 
-    parser.add_argument("-t", type=int, default=10)
-    parser.add_argument("--accesses", type=int, default=10)
-    parser.add_argument("--frac", type=float, default=0)
+    parser.add_argument("-t", type=int, default=10, help='The task time in microseconds. These are hardcoded in this main.')
+    parser.add_argument("--accesses", type=int, default=10, help='How many times the task stops busy waiting and accesses the GIL')
+    parser.add_argument("--frac", type=float, default=0, help='The fraction of the total task time that the GIL is held')
 
-    parser.add_argument('--strong', type=int, default=0)
-    parser.add_argument('--sleep', type=int, default=1)
-    parser.add_argument('--restrict', type=int, default=0)
+    parser.add_argument('--strong', type=int, default=0, help='Whether to use strong (1) or weak (0) scaling of the task time')
+    parser.add_argument('--sleep', type=int, default=1, help='Whether to use the synthetic sleep (1) or the numba busy kernel (0)')
+    parser.add_argument('--restrict', type=int, default=0, help='This does two separate things. If using isync it restricts to only waiting on the prior timestep. If using deps, it changes the dependencies from being a separate chain to depending on all tasks in the prior timestep')
 
     args = parser.parse_args()
 
@@ -157,9 +157,9 @@ if __name__ == "__main__":
     print(', '.join([str('workers'), str('n'), str('task_time'), str(
         'accesses'), str('frac'), str('total_time')]), flush=True)
     for task_time in [10000, 50000]:
-        for accesses in [1]:
+        for accesses in [args.accesses]:
             for nworkers in drange(1, args.workers):
-                for frac in [0]:
+                for frac in [args.frac]:
                     with Parla():
                         main(N, d, STEPS, nworkers, nworkers, cpu_array, isync, args.vcus,
                              args.deps, args.verbose, task_time, accesses, frac,
