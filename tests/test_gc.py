@@ -17,17 +17,28 @@ def main():
 
     for i in range(0, 4):
         # Spawn a task to be scheduled by the Parla runtime
+        """
         @spawn(t[i], input=[A, B], placement=gpu(i))
         def axb():
-            print(f"{A} >>>> ", flush=True)
             C = A @ B
-            print("C is ", type(C))
+            print("axb is called", flush=True)
             time.sleep(10)
+        """
+        @spawn(t[i], input=[A], placement=gpu(i))
+        def axb():
+            print("axb is called", flush=True)
+            time.sleep(3)
 
-    @spawn(dependencies=[t])
+    @spawn(t[4], dependencies=[t[:4]])
     def apb():
         print("apb", flush=True)
-        time.sleep(20)
+        time.sleep(2)
+
+    @spawn(dependencies=[t[4]], input=[A], placement=gpu(1))
+    def apb():
+        print("apb2", flush=True)
+        print(A.array)
+        time.sleep(2)
 
 
 
