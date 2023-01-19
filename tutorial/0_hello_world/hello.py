@@ -10,19 +10,29 @@ This is a Parla tutorial introducing the Parla runtime, where a simple console-p
 '''
 
 # Import Parla
-from parla import Parla, spawn
+from parla import Parla, spawn, parray
 # Import the 'cpu' device type
 from parla.cpu import cpu
 
+import parla.tracking 
+
+import numpy as np
 
 # Define the main function (recommended when using Parla)
 # Tasks cannot be defined in the global scope
 def main():
+    A = parray.asarray([[1, 2], [3, 4]])
+    data = np.random.rand(2, 2)
+    B = parray.asarray(data)
 
     # Spawn a task to be scheduled by the Parla runtime
-    @spawn()
+    @spawn(input=[A], output=[B], placement=cpu)
     def hello_world():
         print("Hello, World!", flush=True)
+
+    @spawn(input=[A], placement=cpu)
+    def hello_world2():
+        print("Grab task A", flush=True)
 
 # Execute the Parla program within the Parla context
 if __name__ == "__main__":

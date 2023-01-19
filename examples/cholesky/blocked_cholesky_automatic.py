@@ -208,7 +208,7 @@ def cholesky_blocked_inplace(a, block_size):
 
             @spawn(gemm1[j, k], [solve[j, k], gemm1[j, 0:k]], input=[a[j][k]], inout=[a[j][j]], placement=loc_syrk, memory=mem)
             def t1():
-                #print(f"+SYRK: ({j}, {k}) - Requires rw({j},{j})  r({j}, {k})", flush=True)
+                print(f"+SYRK: ({j}, {k}) - Requires rw({j},{j})  r({j}, {k})", flush=True)
                 out = a[j][j].array
                 rhs = a[j][k].array
                 out = update(rhs, rhs, out)
@@ -217,7 +217,7 @@ def cholesky_blocked_inplace(a, block_size):
                 stream.synchronize()
                 a[j][j].update(out)
                 stream.synchronize()
-                #print(f"-SYRK: ({j}, {k}) - Requires rw({j},{j})  r({j}, {k})", flush=True)
+                print(f"-SYRK: ({j}, {k}) - Requires rw({j},{j})  r({j}, {k})", flush=True)
 
         # Cholesky on block
         mem = 8*block_size**2
@@ -229,7 +229,7 @@ def cholesky_blocked_inplace(a, block_size):
 
         @spawn(subcholesky[j], [gemm1[j, 0:j]], inout=[a[j][j]], placement=loc_potrf, memory=mem)
         def t2():
-            #print(f"+POTRF: ({j}) - Requires rw({j},{j})", flush=True)
+            print(f"+POTRF: ({j}) - Requires rw({j},{j})", flush=True)
             dblock = a[j][j].array
 
             log_memory()
@@ -239,7 +239,7 @@ def cholesky_blocked_inplace(a, block_size):
             stream.synchronize()
             a[j][j].update(dblock)
             stream.synchronize()
-            #print(f"-POTRF: ({j}) - Requires rw({j},{j})", flush=True)
+            print(f"-POTRF: ({j}) - Requires rw({j},{j})", flush=True)
         for i in range(j+1, len(a)):
             for k in range(j):
                 # Inter-block GEMM
@@ -251,7 +251,7 @@ def cholesky_blocked_inplace(a, block_size):
 
                 @spawn(gemm2[i, j, k], [solve[j, k], solve[i, k], gemm2[i, j, 0:k]], inout=[a[i][j]], input=[a[i][k], a[j][k]], placement=loc_gemm, memory=mem)
                 def t3():
-                    #print(f"+GEMM: ({i}, {j}, {k}) - Requires rw({i},{j}), r({i}, {k}), r({j}, {k})", flush=True)
+                    print(f"+GEMM: ({i}, {j}, {k}) - Requires rw({i},{j}), r({i}, {k}), r({j}, {k})", flush=True)
                     out = a[i][j].array
                     rhs1 = a[i][k].array
                     rhs2 = a[j][k].array
@@ -263,7 +263,7 @@ def cholesky_blocked_inplace(a, block_size):
                     stream.synchronize()
                     a[i][j].update(out)
                     stream.synchronize()
-                    #print(f"-GEMM: ({i}, {j}, {k}) - Requires rw({i},{j}), r({i}, {k}), r({j}, {k})", flush=True)
+                    print(f"-GEMM: ({i}, {j}, {k}) - Requires rw({i},{j}), r({i}, {k}), r({j}, {k})", flush=True)
 
             # Triangular solve
             mem = 8*2*block_size**2
@@ -275,7 +275,7 @@ def cholesky_blocked_inplace(a, block_size):
 
             @spawn(solve[i, j], [gemm2[i, j, 0:j], subcholesky[j]], inout=[a[i][j]], input=[a[j][j]], placement=loc_trsm, memory=mem)
             def t4():
-                #print(f"+TRSM: ({i}, {j}) - Requires rw({i},{j}), r({j}, {j})", flush=True)
+                print(f"+TRSM: ({i}, {j}) - Requires rw({i},{j}), r({j}, {j})", flush=True)
                 factor = a[j][j].array
                 panel = a[i][j].array
 
@@ -285,7 +285,7 @@ def cholesky_blocked_inplace(a, block_size):
                 stream.synchronize()
                 a[i][j].update(out)
                 stream.synchronize()
-                #print(f"-TRSM: ({i}, {j}) - Requires rw({i},{j}), r({j}, {j})", flush=True)
+                print(f"-TRSM: ({i}, {j}) - Requires rw({i},{j}), r({j}, {j})", flush=True)
 
     return subcholesky[len(a) - 1]
 

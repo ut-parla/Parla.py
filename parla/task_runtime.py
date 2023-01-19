@@ -17,6 +17,8 @@ from parla.environments import EnvironmentComponentInstance, TaskEnvironmentRegi
 from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 
+from parla.tracking import LRUManager
+
 # Logger configuration (uncomment and adjust level if needed)
 #logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -353,6 +355,11 @@ class Task:
         """Cleanup works after executing the task."""
         raise NotImplementedError()
 
+    @abstractmethod
+    def _invoke_garbage_collector(self):
+        """Invoke a garbage collector; for now, invoke it for
+           each task execution."""
+        raise NotImplementedError()
 
     def run(self):
         assert self._assigned, "Task was not assigned before running."
@@ -362,6 +369,7 @@ class Task:
             with self._mutex:
                 # A default state to avoid exceptions during catch
                 task_state = TaskException(RuntimeError("Unknown fatal error"))
+                event_exists = False
                 # Run the task and assign the new task state
                 try:
                     assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(self._state, self.taskid)
@@ -383,10 +391,12 @@ class Task:
                         # Events could be multiple for multiple devices task.
                         env.record_events()
                         if len(events) > 0:
+                            event_exists = True
                             # If any event created by the current task exist,
                             # notify dependents and make them wait for that event,
                             # not Parla task completion.
                             if not isinstance(task_state, TaskRunning):
+                                self._invoke_garbage_collector()
                                 self._notify_dependents(events)
                         env.sync_events()
                     task_state = task_state or TaskCompleted(None)
@@ -404,10 +414,12 @@ class Task:
                     # new dependents could be added after the above
                     # notifications, while other devices are running
                     # their kernels asynchronously.
-                    if not isinstance(task_state, TaskRunning):
+                    if event_exists == False and not isinstance(task_state, TaskRunning):
+                        self._invoke_garbage_collector()
                         self._notify_dependents()
                     self._set_state(task_state)
-                    self._finish(ctx)
+                    if isinstance(self._state, TaskCompleted): 
+                        self._finish(ctx)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
             raise e
@@ -611,8 +623,30 @@ class ComputeTask(Task):
             if self.num_unspawned_dependencies == 0:
                 self._ready_to_map()
 
+    def acquire_parray(self):
+        ctx = get_scheduler_context()
+        if self.dataflow is not None:
+            for parray in (self.dataflow.input + \
+                           self.dataflow.inout + \
+                           self.dataflow.output):
+                for d in self.req.devices:
+                    ctx.scheduler.lrum._acquire_data(parray, d, str(self.taskid))
+
+    def _invoke_garbage_collector(self):
+        print(f"Garbage collector is activated", flush=True)
+        ctx = get_scheduler_context()
+        if self.dataflow is not None:
+            for parray in (self.dataflow.input + \
+                           self.dataflow.inout + \
+                           self.dataflow.output):
+                for d in self.req.devices:
+                    ctx.scheduler.lrum._release_data(parray, d, str(self.taskid))
+            ctx.scheduler.lrum._evict()
+
     def _execute_task(self):
-        return self._state.func(self, *self._state.args)
+        self.acquire_parray()
+        result = self._state.func(self, *self._state.args)
+        return result
 
     def cleanup(self):
         self._func = None
@@ -630,14 +664,26 @@ class ComputeTask(Task):
             ctx.scheduler.update_mapped_task_count_mutex(self, d, -1)
             ctx.scheduler.update_launched_task_count_mutex(self, d, -1)
 
-
         # _finish() can be called more than once on global task.
         if (self.dataflow != None):
+            """
+            self.release_parray()
+            for parray in self.dataflow.input:
+                for d in self.req.devices:
+                    ctx.scheduler.lrum._release_data(parray, d, str(self.taskid))
+            """
             # Update OUT parrays which may have changed size from 0 to something
             # We assume all IN and INOUT params don't change size
-            for parray in (self.dataflow.output):
+            for parray in (self.dataflow.output + self.dataflow.inout):
+                """
+                for d in self.req.devices:
+                    ctx.scheduler.lrum._release_data(parray, d, str(self.taskid))
+                """
                 ctx.scheduler._available_resources.update_parray_nbytes(
                     parray, self.req.devices)
+            """
+            ctx.scheduler.lrum._evict()
+            """
         ctx.scheduler.decr_active_compute_tasks()
         self.cleanup()
 
@@ -669,12 +715,18 @@ class DataMovementTask(Task):
         if (self._operand_type == OperandType.IN):
             write_flag = False
         # Move data to current device
-        dev_type = get_current_devices()[0]
+        self.dev_type = get_current_devices()[0]
         dev_no = -1
-        if (dev_type.architecture is not cpu):
-            dev_no = dev_type.index
+        if (self.dev_type.architecture is not cpu):
+            dev_no = self.dev_type.index
+        ctx = get_scheduler_context()
+        ctx.scheduler.lrum._start_prefetch_data(self._target_data, self.dev_type, str(self.taskid))
         self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
+        ctx.scheduler.lrum._stop_prefetch_data(self._target_data, self.dev_type, str(self.taskid))  
         return TaskCompleted(None)
+
+    def _invoke_garbage_collector(self):
+        pass
 
     def cleanup(self):
         self._target_data = None
@@ -688,7 +740,7 @@ class DataMovementTask(Task):
         # Don't update parray tracking information either
         # The scheduler already registered the new location
         # If size changes, the ComputeTask will take care of that
-
+        ctx = get_scheduler_context()
         # Decrease the number of running tasks on the device d.
         for d in self.req.devices:
             ctx.scheduler.update_mapped_task_count_mutex(self, d, -1)
@@ -1479,6 +1531,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._device_launched_datamove_task_counts = {
             dev: 0 for dev in self._available_resources.get_resources()}
 
+        self._lrum = LRUManager()
+
         # Dictionary mapping data block to task lists.
         self._datablock_dict = defaultdict(list)
 
@@ -1505,6 +1559,10 @@ class Scheduler(ControllableThread, SchedulerContext):
     @ property
     def scheduler(self):
         return self
+
+    @ property
+    def lrum(self):
+        return self._lrum
 
     def __enter__(self):
         if self._active_task_count != 1:

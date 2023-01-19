@@ -3,6 +3,9 @@ from typing import TYPE_CHECKING, Union, List, Dict, Tuple, Any
 
 import numpy
 
+import sys
+#import gc
+
 #TODO: Fix this to be more stable and less of a hack.
 try:
     import cupy
@@ -514,5 +517,19 @@ class MultiDeviceBuffer:
         """
         Clear data in device_id
         """
+        import psutil 
+        import os
+        mempool = cupy.get_default_memory_pool()
+        pinned_mempool = cupy.get_default_pinned_memory_pool()
+#proc = psutil.Process(os.getpid())
+#mem0 = proc.memory_info().rss
+        #print("Before:\n\t Used bytes:", mempool.used_bytes(), " total bytes: ", mempool.total_bytes(), " free blocks:", pinned_mempool.n_free_blocks(), flush=True)
+#del self._buffer[device_id]
+        import psutil 
         self._indices_map[device_id] = None
         self._buffer[device_id] = None
+#mem1 = proc.memory_info().rss
+#gc.collect()
+        mempool.free_all_blocks()
+        #print("After:\n\t Used bytes:", mempool.used_bytes(), " total bytes: ", mempool.total_bytes(), " free blocks:", pinned_mempool.n_free_blocks(), flush=True)
+#print("\t Before deallcation: ", mem0, " after: ", mem1, flush=True)
