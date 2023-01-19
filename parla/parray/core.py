@@ -282,9 +282,7 @@ class PArray:
 
         with self._coherence_cv[device_id]:
             operations = self._coherence.evict(device_id, keep_one_copy)
-            print("Evict operations", flush=True)
             self._process_operations(operations)
-            print("Evict operations done", flush=True)
 
 
     # Coherence update operations:
@@ -338,19 +336,13 @@ class PArray:
         """
         for op in operations:
             if op.inst == MemoryOperation.NOOP:
-                print("No-op", flush=True)
                 pass  # do nothing
             elif op.inst == MemoryOperation.CHECK_DATA:
-                print("Check starts", flush=True)
                 if not self._coherence.data_is_ready(op.src):  # if data is not ready, wait
-                    print("Check starts - 1", flush=True)
                     with self._coherence_cv[op.src]:
-                        print("Check starts - 2", flush=True)
                         while not self._coherence.data_is_ready(op.src):
                             self._coherence_cv[op.src].wait()
-                print("Check completes", flush=True)
             elif op.inst == MemoryOperation.LOAD:
-                print("Load starts", flush=True)
                 with self._coherence_cv[op.dst]:  # hold the CV when moving data
 
                     # if the flag is set, skip this checking
@@ -378,13 +370,10 @@ class PArray:
                     else:
                          self._coherence.set_data_as_ready(op.dst)
                     self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
-                print("Load completes", flush=True)
             elif op.inst == MemoryOperation.EVICT:
-                print("Evict starts", flush=True)
                 self._array.clear(op.src)  # decrement the reference counter, relying on GC to free the memory
                 if MemoryOperation.NO_MARK_AS_READY not in op.flag:
                     self._coherence.set_data_as_ready(op.src, None)  # mark it as done
-                print("Evict completes", flush=True)
             elif op.inst == MemoryOperation.ERROR:
                 raise RuntimeError("PArray gets an error from coherence protocol")
             else:
@@ -421,13 +410,9 @@ class PArray:
         slices = None if not self._slices else self._slices[0]
 
         if do_write:
-            print("write starts", flush=True)
             self._coherence_write(device_id, slices)
-            print("write complets", flush=True)
         else:
-            print("read starts", flush=True)
             self._coherence_read(device_id, slices)
-            print("read complets", flush=True)
 
     def _on_same_device(self, other: "PArray") -> bool:
         """

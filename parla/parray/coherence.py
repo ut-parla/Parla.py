@@ -535,6 +535,7 @@ class Coherence:
         """
         device_local_state = self._local_states[device_id]
         operations = []
+        evict_last_copy = False
 
         if device_local_state == self.INVALID: # already evicted, do nothing
             operations.append(MemoryOperation.noop())
@@ -547,40 +548,35 @@ class Coherence:
                         new_owner = device
                         break
 
-                # this device owns the last copy
-                if new_owner is None:  
-                    if keep_one_copy:  
-                        if device_id == CPU_INDEX:
-                            # the last copy is already at CPU, 
-                            # do nothing and skip the rest of the code
-                            return [MemoryOperation.noop()]
-                        else:
-                            # write back the last copy to CPU
-                            operations.append(MemoryOperation.load(CPU_INDEX, device_id))
+                if new_owner is None:
+                  evict_last_copy = True
+            else:
+                # update states
+                self._local_states[device_id] = self.INVALID
+                operations.append(MemoryOperation.evict(device_id))
+                self._versions[device_id] = -1
+                self._is_complete[device_id] = None
 
-                            # now CPU has exclusive access to the data
-                            self._global_state = self.MODIFIED
-                            self._local_states[CPU_INDEX] = self.MODIFIED
-
-                            new_owner = CPU_INDEX
-                    else:
-                        self._global_state = self.INVALID  # the system lose the last copy
-                self.owner = new_owner
-
-            # update states
-            self._local_states[device_id] = self.INVALID
-            operations.append(MemoryOperation.evict(device_id))
         else:  # Modified, this device owns the last copy
-            if keep_one_copy:  # write back to CPU
-                self.owner = CPU_INDEX
-                self._local_states[CPU_INDEX] = self.MODIFIED
+            evict_last_copy = True
 
-                operations.append(MemoryOperation.load(CPU_INDEX, device_id))
+        if evict_last_copy:
+            if keep_one_copy:  # write back to CPU
+                if device_id != CPU_INDEX:
+                    operations.extend(self._write_back_to(CPU_INDEX, self.MODIFIED, on_different_device=True, this_device_id=device_id)[0])
+
+                    self.owner = CPU_INDEX
+                    self._local_states[CPU_INDEX] = self.MODIFIED
+                    self._is_complete[device_id] = True
+                else:
+                    return [MemoryOperation.noop()]
             else:
                 self._global_state = self.INVALID  # the system lose the last copy
                 self.owner = None
+                self._versions[device_id] = -1
+                self._is_complete[device_id] = None
 
-            self._local_states[device_id] = self.INVALID
-            operations.append(MemoryOperation.evict(device_id))
+                self._local_states[device_id] = self.INVALID
+                operations.append(MemoryOperation.evict(device_id))
 
         return operations

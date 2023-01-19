@@ -355,6 +355,11 @@ class Task:
         """Cleanup works after executing the task."""
         raise NotImplementedError()
 
+    @abstractmethod
+    def _invoke_garbage_collector(self):
+        """Invoke a garbage collector; for now, invoke it for
+           each task execution."""
+        raise NotImplementedError()
 
     def run(self):
         assert self._assigned, "Task was not assigned before running."
@@ -364,6 +369,7 @@ class Task:
             with self._mutex:
                 # A default state to avoid exceptions during catch
                 task_state = TaskException(RuntimeError("Unknown fatal error"))
+                event_exists = False
                 # Run the task and assign the new task state
                 try:
                     assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(self._state, self.taskid)
@@ -382,17 +388,16 @@ class Task:
                         events = env.get_events_from_components()
                         self._wait_for_dependency_events(env)
                         task_state = self._execute_task()
-                        print(str(self.taskid), " execution complets", flush=True)
                         # Events could be multiple for multiple devices task.
                         env.record_events()
                         if len(events) > 0:
+                            event_exists = True
                             # If any event created by the current task exist,
                             # notify dependents and make them wait for that event,
                             # not Parla task completion.
                             if not isinstance(task_state, TaskRunning):
-                                print(str(self.taskid), " notifies", flush=True)
+                                self._invoke_garbage_collector()
                                 self._notify_dependents(events)
-                                print(str(self.taskid), " notifies done", flush=True)
                         env.sync_events()
                     task_state = task_state or TaskCompleted(None)
                 except Exception as e:
@@ -409,10 +414,12 @@ class Task:
                     # new dependents could be added after the above
                     # notifications, while other devices are running
                     # their kernels asynchronously.
-                    if not isinstance(task_state, TaskRunning):
+                    if event_exists == False and not isinstance(task_state, TaskRunning):
+                        self._invoke_garbage_collector()
                         self._notify_dependents()
                     self._set_state(task_state)
-                    self._finish(ctx)
+                    if isinstance(self._state, TaskCompleted): 
+                        self._finish(ctx)
         except Exception as e:
             logger.exception("Task %r: Exception in task handling", self)
             raise e
@@ -491,7 +498,6 @@ class Task:
 
     def _notify_dependents(self, events=None):
         for dependent in self._dependents:
-            print("dependent:", str(dependent.taskid), flush=True)
             dependent._handle_dependency_event_mutex(events)
         self._dependents = []
 
@@ -519,7 +525,6 @@ class Task:
     def _handle_dependency_event_mutex(self, events):
         with self._mutex:
             self._num_blocking_dependencies -= 1
-            print(str(self.taskid), " has dependency:", self._num_blocking_dependencies, flush=True)
             # Add events from one dependent task.
             # (We are aiming to multiple device tasks, and it would
             #  be possible to have multiple events)
@@ -627,7 +632,8 @@ class ComputeTask(Task):
                 for d in self.req.devices:
                     ctx.scheduler.lrum._acquire_data(parray, d, str(self.taskid))
 
-    def release_parray(self):
+    def _invoke_garbage_collector(self):
+        print(f"Garbage collector is activated", flush=True)
         ctx = get_scheduler_context()
         if self.dataflow is not None:
             for parray in (self.dataflow.input + \
@@ -640,8 +646,6 @@ class ComputeTask(Task):
     def _execute_task(self):
         self.acquire_parray()
         result = self._state.func(self, *self._state.args)
-        self.release_parray()
-        print("Execution done", flush=True)
         return result
 
     def cleanup(self):
@@ -660,14 +664,26 @@ class ComputeTask(Task):
             ctx.scheduler.update_mapped_task_count_mutex(self, d, -1)
             ctx.scheduler.update_launched_task_count_mutex(self, d, -1)
 
-
         # _finish() can be called more than once on global task.
         if (self.dataflow != None):
+            """
+            self.release_parray()
+            for parray in self.dataflow.input:
+                for d in self.req.devices:
+                    ctx.scheduler.lrum._release_data(parray, d, str(self.taskid))
+            """
             # Update OUT parrays which may have changed size from 0 to something
             # We assume all IN and INOUT params don't change size
-            for parray in (self.dataflow.output):
+            for parray in (self.dataflow.output + self.dataflow.inout):
+                """
+                for d in self.req.devices:
+                    ctx.scheduler.lrum._release_data(parray, d, str(self.taskid))
+                """
                 ctx.scheduler._available_resources.update_parray_nbytes(
                     parray, self.req.devices)
+            """
+            ctx.scheduler.lrum._evict()
+            """
         ctx.scheduler.decr_active_compute_tasks()
         self.cleanup()
 
@@ -695,7 +711,6 @@ class DataMovementTask(Task):
             self._operand_type = operand_type
 
     def _execute_task(self):
-        print(str(self.taskid), " starts data move", flush=True)
         write_flag = True
         if (self._operand_type == OperandType.IN):
             write_flag = False
@@ -705,14 +720,13 @@ class DataMovementTask(Task):
         if (self.dev_type.architecture is not cpu):
             dev_no = self.dev_type.index
         ctx = get_scheduler_context()
-        print(str(self.taskid), " starts data move - 1", flush=True)
         ctx.scheduler.lrum._start_prefetch_data(self._target_data, self.dev_type, str(self.taskid))
-        print(str(self.taskid), " starts data move - 2", flush=True)
         self._target_data._auto_move(device_id=dev_no, do_write=write_flag)
-        print(str(self.taskid), " starts data move - 3", flush=True)
         ctx.scheduler.lrum._stop_prefetch_data(self._target_data, self.dev_type, str(self.taskid))  
-        print(str(self.taskid), " starts data move - 4", flush=True)
         return TaskCompleted(None)
+
+    def _invoke_garbage_collector(self):
+        pass
 
     def cleanup(self):
         self._target_data = None
