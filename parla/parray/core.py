@@ -7,6 +7,8 @@ from parla.device import Device
 
 from .coherence import MemoryOperation, Coherence, CPU_INDEX
 from .memory import MultiDeviceBuffer
+from .cyparray_state import CyPArrayState
+from .cyparray import CyPArray
 
 import threading
 import numpy
@@ -39,6 +41,8 @@ class PArray:
     _coherence: Coherence
     _slices: List[SlicesType]
     _coherence_cv: Dict[int, threading.Condition]
+    _cy_parray: CyPArray  # the wrapper class of C++ PArray class, which store the size and id
+    _cyparray_state: CyPArrayState  # the wrapper class of C++ PArrayState class, which store the exist and valid state
 
     def __init__(self, array: ndarray, parent: "PArray" = None, slices=None) -> None:
         if parent is not None:  # create a view (a subarray) of a PArray
@@ -46,6 +50,7 @@ class PArray:
             # so this PArray will becomes a 'view' of its parents
             self._array = parent._array
             self._coherence = parent._coherence
+            self._cyparray_state = parent._cyparray_state
 
             # _slices is a list so subarray of subarray works
             self._slices = parent._slices.copy()  # copy parent's slices list
@@ -68,12 +73,15 @@ class PArray:
 
             # no need to register again since parent already did that
         else:  # initialize a new PArray
+            # init Cython PArrayState
+            self._cyparray_state = CyPArrayState()
+
             # per device buffer of data
-            self._array = MultiDeviceBuffer(num_gpu)
+            self._array = MultiDeviceBuffer(num_gpu, self._cyparray_state)
             location = self._array.set_complete_array(array)
 
             # coherence protocol for managing data among multi device
-            self._coherence = Coherence(location, num_gpu)
+            self._coherence = Coherence(location, num_gpu, self._cyparray_state)
 
             # no slices since it is a new array rather than a subarray
             self._slices = []
@@ -94,6 +102,10 @@ class PArray:
 
             # Register the parray with the scheduler
             task_runtime.get_scheduler_context().scheduler._available_resources.track_parray(self)
+
+        # record the size in Cython PArray
+        self._cyparray = CyPArray(self.ID, self._cyparray_state)
+        self._cyparray.set_size(self.subarray_nbytes)
 
     # Properties:
 
@@ -180,6 +192,11 @@ class PArray:
         # clean up data
         self._array._buffer = {n: None for n in range(num_gpu)}
         self._array._buffer[CPU_INDEX] = None
+
+        # update it to cpp side
+        for n in range(num_gpu):
+            self._cyparray_state.set_exist_on_device(n, False)
+        self._cyparray_state.set_exist_on_device(CPU_INDEX, False)
 
         # copy new data to buffer
         if isinstance(array, numpy.ndarray):

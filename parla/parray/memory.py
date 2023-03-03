@@ -16,6 +16,7 @@ if TYPE_CHECKING:  # False at runtime
     ndarray = Union[numpy.ndarray, cupy.ndarray]
     SlicesType = Union[slice, int, tuple]
     IndicesMapType = List[Union[Dict[int, int], tuple]]
+    from .cyparray_state import CyPArrayState
 
 class MultiDeviceBuffer:
     """Underlying Buffer of PArray.
@@ -26,8 +27,9 @@ class MultiDeviceBuffer:
     _buffer: Dict[int, ndarray | List[ndarray] | None]
     shape: tuple
     _indices_map: Dict[int, List[IndicesMapType] | None]
+    _cyparray_state: CyPArrayState
 
-    def __init__(self, num_gpu: int):
+    def __init__(self, num_gpu: int, cyparray_state: CyPArrayState):
         # per device buffer
         # key: device_id
         # val: single (complete) ndarray or list of (sub) ndarray
@@ -42,6 +44,8 @@ class MultiDeviceBuffer:
 
         # the shape of the complete array
         self.shape = ()
+
+        self._cyparray_state = cyparray_state
 
     def nbytes_at(self, device_id:int) -> int:
         """
@@ -77,6 +81,7 @@ class MultiDeviceBuffer:
 
         self._buffer[location] = array
         self.shape = array.shape
+        self._cyparray_state.set_exist_on_device(location, True)
         return location
 
     def set(self, device_id: int, array: ndarray, is_complete: bool = True, overwrite: bool = False) -> None:
@@ -98,6 +103,7 @@ class MultiDeviceBuffer:
                 self._buffer[device_id] = [array]
             else:
                 self._buffer[device_id].append(array)
+        self._cyparray_state.set_exist_on_device(device_id, True)
 
     def get(self, device_id: int) -> ndarray | List[ndarray] | None:
         """
@@ -469,6 +475,7 @@ class MultiDeviceBuffer:
                 self._move_data(copy_from_device_async, dst, src, subarray_index, dst_slices, src_slices, dst_is_current_device)
             else:  # copy from GPU to CPU
                 self._move_data(cupy.asnumpy, dst, src, subarray_index, dst_slices, src_slices)  # dst_is_current_device is no need if dst is CPU
+        self._cyparray_state.set_exist_on_device(dst, True)
 
     def get_slices_hash(self, global_slices: SlicesType) -> int:
         """
@@ -516,3 +523,4 @@ class MultiDeviceBuffer:
         """
         self._indices_map[device_id] = None
         self._buffer[device_id] = None
+        self._cyparray_state.set_exist_on_device(device_id, False)

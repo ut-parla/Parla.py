@@ -2,6 +2,7 @@
 
 import os
 from setuptools import setup, Extension
+from Cython.Build import cythonize
 
 """
 from Cython.Build import cythonize
@@ -22,5 +23,5 @@ setup(name = "parla",
       url = "https://github.com/ut-parla/Parla.py",
       description = "Parla: A heterogenous Python Tasking system",
       packages = ['parla', 'parla.parray'],
-      #ext_modules = cache_filler_modules + cython_modules,
+      ext_modules=cythonize('parla/parray/*.pyx', language_level = "3", language="c++")
       )

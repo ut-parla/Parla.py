@@ -5,6 +5,7 @@ import threading
 
 if TYPE_CHECKING:  # False at runtime
     SlicesType = Union[slice, int, tuple]
+    from .cyparray_state import CyPArrayState
 
 CPU_INDEX = -1
 
@@ -111,8 +112,9 @@ class Coherence:
     owner: int
     _latest_version: int
     _lock: threading.Lock
+    _cyparray_state: CyPArrayState
 
-    def __init__(self, init_owner: int, num_gpu: int):
+    def __init__(self, init_owner: int, num_gpu: int, cyparray_state: CyPArrayState):
         """
         Args:
             init_owner: the owner of the first copy in the system
@@ -150,6 +152,9 @@ class Coherence:
 
         # held the lock when updating states
         self._lock = threading.Lock()
+
+        self._cyparray_state = cyparray_state
+        self._cyparray_state.set_valid_on_device(init_owner, True)
 
     def data_is_ready(self, device_id: int, ensure_is_complete: bool = False) -> bool:
         """
@@ -216,6 +221,7 @@ class Coherence:
                 if new_state == self.MODIFIED:
                     # invalidate all subarray
                     self._local_states[id] = self.INVALID
+                    self._cyparray_state.set_valid_on_device(id, False)
                     self._versions[id] = -1
                     self._is_complete[id] = None
                     evict_list.append(id)
@@ -223,6 +229,7 @@ class Coherence:
                     # change all states to SHARED
                     for hash, state in self._local_states[id].items():
                         self._local_states[id][hash] = self.SHARED
+                    self._cyparray_state.set_valid_on_device(id, True)
             else:  # write back the latest complete array
                 if self._versions[id] >= latest_complete_version:
                     latest_complete_version = self._versions[id]
@@ -233,14 +240,17 @@ class Coherence:
                     if self._local_states[id] == self.SHARED:
                         if new_state == self.MODIFIED:
                             self._local_states[id] = self.INVALID
+                            self._cyparray_state.set_valid_on_device(id, False)
                             self._versions[id] = -1
                             self._is_complete[id] = None
                             evict_list.append(id)
                     elif self._local_states[id] == self.MODIFIED:
                         if new_state == self.SHARED:
                             self._local_states[id] = self.SHARED
+                            self._cyparray_state.set_valid_on_device(id, True)
                         elif new_state == self.MODIFIED:
                             self._local_states[id] = self.INVALID
+                            self._cyparray_state.set_valid_on_device(id, False)
                             self._versions[id] = -1
                             self._is_complete[id] = None
                             evict_list.append(id)
@@ -321,6 +331,8 @@ class Coherence:
                 self._versions[device_id] = self._versions[self.owner]
                 self._local_states[self.owner] = self.SHARED  # owner is updated, so it is in SHARED states
                 self._local_states[device_id] = self.SHARED
+                self._cyparray_state.set_valid_on_device(self.owner, True)
+                self._cyparray_state.set_valid_on_device(device_id, True)
 
                 # change owner
                 if self._owner_is_latest():
@@ -377,9 +389,11 @@ class Coherence:
             if self._is_complete[device_id]:
                 if device_local_state == self.INVALID:
                     self._local_states[device_id] = self.SHARED
+                    self._cyparray_state.set_valid_on_device(device_id, True)
             else:
                 if device_local_state == self.INVALID:
                     self._local_states[device_id][slices_hash] = self.SHARED
+                    self._cyparray_state.set_valid_on_device(device_id, True)
 
             return operations
 
@@ -433,6 +447,8 @@ class Coherence:
                 self._versions[device_id] = self._versions[self.owner]
                 self._local_states[device_id] = self.MODIFIED
                 self._local_states[self.owner] = self.INVALID  # owner is invalid too
+                self._cyparray_state.set_valid_on_device(device_id, True)
+                self._cyparray_state.set_valid_on_device(self.owner, True)
 
                 # change owner
                 self.owner = device_id
@@ -474,6 +490,7 @@ class Coherence:
                         if self._owner_is_latest():
                             self._latest_version += 1
                         self._local_states[self.owner] = self.INVALID  # invalidate overlapping copy
+                        self._cyparray_state.set_valid_on_device(self.owner, False)
                 elif device_local_state == self.SHARED:
                     if self._is_complete[device_id]:
                         self._latest_version += 1
@@ -499,6 +516,7 @@ class Coherence:
                             if not isinstance(state, dict):
                                 if id != device_id:
                                     self._local_states[id] = self.INVALID
+                                    self._cyparray_state.set_valid_on_device(id, False)
 
                                     if id != self.owner:  # owner's buffer will be kept (so won't lost the last complete copy)
                                         self._versions[id] = -1
@@ -513,9 +531,11 @@ class Coherence:
             if self._is_complete[device_id]:
                 if device_local_state != self.MODIFIED:
                     self._local_states[device_id] = self.MODIFIED
+                    self._cyparray_state.set_valid_on_device(device_id, True)
             else:
                 if device_local_state != self.MODIFIED:
                     self._local_states[device_id][slices_hash] = self.MODIFIED
+                    self._cyparray_state.set_valid_on_device(device_id, True)
             return operations
 
     def evict(self, device_id: int, keep_one_copy: bool = True) -> List[MemoryOperation]:
@@ -561,6 +581,7 @@ class Coherence:
                             # now CPU has exclusive access to the data
                             self._global_state = self.MODIFIED
                             self._local_states[CPU_INDEX] = self.MODIFIED
+                            self._cyparray_state.set_valid_on_device(CPU_INDEX, True)
 
                             new_owner = CPU_INDEX
                     else:
@@ -569,11 +590,13 @@ class Coherence:
 
             # update states
             self._local_states[device_id] = self.INVALID
+            self._cyparray_state.set_valid_on_device(device_id, False)
             operations.append(MemoryOperation.evict(device_id))
         else:  # Modified, this device owns the last copy
             if keep_one_copy:  # write back to CPU
                 self.owner = CPU_INDEX
                 self._local_states[CPU_INDEX] = self.MODIFIED
+                self._cyparray_state.set_valid_on_device(CPU_INDEX, True)
 
                 operations.append(MemoryOperation.load(CPU_INDEX, device_id))
             else:
@@ -581,6 +604,7 @@ class Coherence:
                 self.owner = None
 
             self._local_states[device_id] = self.INVALID
+            self._cyparray_state.set_valid_on_device(device_id, False)
             operations.append(MemoryOperation.evict(device_id))
 
         return operations
