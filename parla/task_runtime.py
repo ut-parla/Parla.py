@@ -18,7 +18,7 @@ from parla.cpu_impl import cpu
 from parla.dataflow import Dataflow
 
 # Logger configuration (uncomment and adjust level if needed)
-#logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 __all__ = ["Task", "SchedulerContext", "DeviceSetRequirements", "OptionsRequirements",
@@ -52,12 +52,10 @@ class UnspawnedDependencies:
         self._dependencies = defaultdict(list)
 
     def add(self, dependency: 'TaskID', dependent: 'TaskID'):
-        if dependent.task is None:
-            raise ValueError(
-                "dependent task %s should have been spawned", repr(dependent)
-            )
+        print("Adding dependency: {} -> {}".format(dependency, dependent), flush=True)
         with self._mutex:
             self._dependencies[dependency].append(dependent)
+            print("Added dependency: {} -> {}".format(dependency, dependent), flush=True)
 
     def get_dependents(self, tid: 'TaskID') -> List['TaskID']:
         with self._mutex:
@@ -85,6 +83,8 @@ class TaskWaiting(TaskState):
 
 # TODO(lhc): Why do we need dependency information at here?
 #           It is not exploited/managed correctly.
+
+
 class TaskRunning(TaskState):
     __slots__ = ["func", "args", "dependencies"]
 
@@ -124,6 +124,7 @@ class TaskRunning(TaskState):
             return "TaskRunning({})".format(self.func.__name__)
         else:
             return "Functionless task"
+
 
 class TaskCompleted(TaskState):
     __slots__ = ["ret"]
@@ -353,7 +354,6 @@ class Task:
         """Cleanup works after executing the task."""
         raise NotImplementedError()
 
-
     def run(self):
         assert self._assigned, "Task was not assigned before running."
         assert isinstance(self.req, EnvironmentRequirements), \
@@ -364,7 +364,8 @@ class Task:
                 task_state = TaskException(RuntimeError("Unknown fatal error"))
                 # Run the task and assign the new task state
                 try:
-                    assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(self._state, self.taskid)
+                    assert isinstance(self._state, TaskRunning), " Task is not running state: {} on task: {}".format(
+                        self._state, self.taskid)
                     # TODO(lhc): This assumes Parla only has two devices.
                     #            The reason why I am trying to do is importing
                     #            Parla's cuda.py is expensive.
@@ -437,9 +438,9 @@ class Task:
 
     def is_blocked_by_dependencies(self) -> bool:
         if self._num_blocking_dependencies == 0:
-            return False 
+            return False
         else:
-            return True 
+            return True
 
     def is_blocked_by_dependencies_mutex(self) -> bool:
         with self._mutex:
@@ -454,8 +455,8 @@ class Task:
         # is scheduable.
         # TODO(hc): Task state should be defined better.
         return isinstance(self._state, TaskRunning) and \
-               not self.is_blocked_by_dependencies() and\
-               self._assigned
+            not self.is_blocked_by_dependencies() and\
+            self._assigned
 
     def _enqueue_to_scheduler(self):
         get_scheduler_context().enqueue_task(self)
@@ -560,6 +561,8 @@ class ComputeTask(Task):
         super(ComputeTask, self).__init__(
             dependencies, taskid, req, name, init_state=TaskWaiting()
         )
+
+        print("Creating task")
         with self._mutex:
             # This task could be spawend when it is ready.
             # To set its state Running when it is running later,
@@ -575,11 +578,14 @@ class ComputeTask(Task):
             self.num_unspawned_dependencies = num_unspawned_dependencies
 
             # Enable tasks who have waited for this task to map.
+            print("Notifying spawned dependents")
             self.__notify_spawned_dependents()
+            print("Notified spawned dependents")
 
             # If this task is not waiting for any dependent tasks,
             # enqueue onto the spawned queue.
             if self.num_unspawned_dependencies == 0:
+                print("Ready to map", flush=True)
                 self._ready_to_map()
                 get_scheduler_context().scheduler.incr_active_compute_tasks()
             logger.debug("Task %r: Creating", self)
@@ -589,11 +595,17 @@ class ComputeTask(Task):
         PRIVATE USE ONLY. Not thread-safe and should be called WITH ITS MUTEX.
         """
         # Get the list of all waiting dependents from the global collection.
+        print("Getting dependents", flush=True)
         dependents = unspawned_dependencies.get_dependents(self.taskid)
+        print("Got dependents", flush=True)
         for d_tid in dependents:
+            print("Getting dependent: ", d_tid, flush=True)
             dt = d_tid.task
             assert isinstance(dt, ComputeTask), type(dt)
+            print("Handling dependent spawn")
+            self._dependents.append(dt)
             dt._handle_dependency_spawn(self)
+            print("Handled dependent spawn")
 
     def _ready_to_map(self):
         assert self.num_unspawned_dependencies == 0
@@ -606,10 +618,16 @@ class ComputeTask(Task):
 
     def _handle_dependency_spawn(self, dependency: "Task"):
         with self._mutex:
+            print("Inside handle dependency spawn", flush=True)
             self.num_unspawned_dependencies -= 1
-            self._add_dependency(dependency)
+            self._dependencies.append(dependency)
+            # self._add_dependency(dependency)
+            print("Added dependency: ",
+                  self.num_unspawned_dependencies, flush=True)
             if self.num_unspawned_dependencies == 0:
+                print("Ready to map", flush=True)
                 self._ready_to_map()
+                print("Finished ready to map", flush=True)
 
     def _execute_task(self):
         return self._state.func(self, *self._state.args)
@@ -629,7 +647,6 @@ class ComputeTask(Task):
                 d, self.req.resources)
             ctx.scheduler.update_mapped_task_count_mutex(self, d, -1)
             ctx.scheduler.update_launched_task_count_mutex(self, d, -1)
-
 
         # _finish() can be called more than once on global task.
         if (self.dataflow != None):
@@ -655,7 +672,8 @@ class DataMovementTask(Task):
         super(DataMovementTask, self).__init__([], taskid, req, name,
                                                # TODO(lhc): temporary task running state.
                                                #            This would be a data movement kernel.
-                                               init_state=TaskRunning(None, None, None),
+                                               init_state=TaskRunning(
+                                                   None, None, None),
                                                init_assigned=True
                                                )
         with self._mutex:
@@ -820,14 +838,20 @@ class SchedulerContext(metaclass=ABCMeta):
         # dependent tasks are spawned.
         spawned_dependencies = []
         for dependency in list(dependencies):
+            print("Looking at dependency: ", dependency, flush=True)
             if isinstance(dependency, TaskID):
                 # If the dependency is not yet spawned, temporarily removes it from
                 # a task's dependency list.
+                print("Dependency is a TaskID", flush=True)
                 unspawned_dependencies.add(dependency, taskid)
             else:
                 spawned_dependencies.append(dependency)
         num_unspawned_dependencies = len(
             dependencies) - len(spawned_dependencies)
+
+        print("Spawned dependencies: ", spawned_dependencies, flush=True)
+        print("num_unspawned_dependencies: ",
+              num_unspawned_dependencies, flush=True)
 
         return ComputeTask(
             function, args, spawned_dependencies, taskid, req, dataflow, name,
@@ -1020,6 +1044,8 @@ class WorkerThread(ControllableThread, SchedulerContext):
                             f"[WorkerThread %d] Starting: %s", self.index, self.task.name)
                         self._status = "Running Task {}".format(self.task)
                         self.task.run()
+
+                        print("Finished task: ", self.task.name, flush=True)
                         self.scheduler.decr_running_tasks()
                         # Free self back to worker pool
                         self._remove_task()
@@ -1620,7 +1646,6 @@ class Scheduler(ControllableThread, SchedulerContext):
         else:
             self._datamove_task_dev_queues[dev].append(task)
 
-
     def enqueue_dev_queue_mutex(self, dev, task: Task):
         """Enqueue a task on the device queue.
            Note that this enqueue has no data race.
@@ -1826,8 +1851,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         with self._spawned_queue_monitor:
             if (len(self._new_spawned_task_queue) > 0):
                 new_q = self._new_spawned_task_queue
-                # Only map tasks whose dependencies are all mapped 
-                # to avoid resource deadlock. 
+                # Only map tasks whose dependencies are all mapped
+                # to avoid resource deadlock.
                 new_tasks = []
                 failed_tasks = []
                 for _ in range(len(new_q)):
@@ -1953,7 +1978,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         # create more data movement tasks and make additional dependencies.
         # The computation task should not be run until all the data movement
         # tasks are created.
-        # 
+        #
         if not datamove_task.is_blocked_by_dependencies_mutex():
             return datamove_task
         return None
@@ -1993,19 +2018,19 @@ class Scheduler(ControllableThread, SchedulerContext):
                         mappable_datamove_tasks = []
                         for data in task.dataflow.input:
                             dtask = self._construct_datamove_task(
-                                    data, task, OperandType.IN)
+                                data, task, OperandType.IN)
                             if dtask is not None:
                                 mappable_datamove_tasks.append(dtask)
                         for data in task.dataflow.output:
                             dtask = self._construct_datamove_task(
-                                    data, task, OperandType.OUT)
+                                data, task, OperandType.OUT)
                             if dtask is not None:
-                                  mappable_datamove_tasks.append(dtask)
+                                mappable_datamove_tasks.append(dtask)
                         for data in task.dataflow.inout:
                             dtask = self._construct_datamove_task(
-                                    data, task, OperandType.INOUT)
+                                data, task, OperandType.INOUT)
                             if dtask is not None:
-                                  mappable_datamove_tasks.append(dtask)
+                                mappable_datamove_tasks.append(dtask)
 
                         # Update parray tracking and task count on the device
                         for parray in (task.dataflow.input + task.dataflow.inout + task.dataflow.output):
@@ -2088,7 +2113,7 @@ class Scheduler(ControllableThread, SchedulerContext):
             while len(queue):
                 task = queue.pop()
                 worker = self._free_worker_threads.pop()  # grab a worker
-                #print("Worker thread:", str(worker.index))
+                # print("Worker thread:", str(worker.index))
                 logger.info(f"[Scheduler] Launching %s task, %r on %r",
                             dev.architecture.id, task, worker)
                 # XXX(lhc): The error that tried to launch a completed task
@@ -2111,7 +2136,7 @@ class Scheduler(ControllableThread, SchedulerContext):
                 if isinstance(task._state, TaskCompleted):
                     logger.info(f"This should not be passed.")
                     continue
-                self.scheduler.incr_running_tasks() 
+                self.scheduler.incr_running_tasks()
                 worker.assign_task(task)
                 logger.debug(f"[Scheduler] Launched %r", task)
 
@@ -2136,13 +2161,17 @@ class Scheduler(ControllableThread, SchedulerContext):
                     compute_queue = self._compute_task_dev_queues[dev]
                     datamove_queue = self._datamove_task_dev_queues[dev]
                     if len(compute_queue) > 0:
-                        num_launched_compute_task_count = self.get_launched_compute_task_count(dev)
+                        num_launched_compute_task_count = self.get_launched_compute_task_count(
+                            dev)
                         if is_cpu or num_launched_compute_task_count < (self._num_colocatable_tasks + 1):
-                            self._launch_task(compute_queue, dev, is_cpu, num_launched_compute_task_count)
+                            self._launch_task(
+                                compute_queue, dev, is_cpu, num_launched_compute_task_count)
                     if len(datamove_queue) > 0:
-                        num_launched_datamove_task_count = self.get_launched_datamove_task_count(dev)
+                        num_launched_datamove_task_count = self.get_launched_datamove_task_count(
+                            dev)
                         if is_cpu or num_launched_datamove_task_count < (self._num_colocatable_tasks + 1):
-                            self._launch_task(datamove_queue, dev, is_cpu, num_launched_datamove_task_count)
+                            self._launch_task(
+                                datamove_queue, dev, is_cpu, num_launched_datamove_task_count)
 
     def start_scheduler_callbacks(self):
         map_succeed = True
@@ -2152,8 +2181,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         schedule_succeed = self.schedule_tasks_callback()
         launch_succeed = self.launch_tasks_callback()
         while self.no_running_tasks():
-            if not map_succeed and not schedule_succeed and not launch_succeed:
-                break
+            # if not map_succeed and not schedule_succeed and not launch_succeed:
+            #    break
             map_succeed = self.map_tasks_callback()
             schedule_succeed = self.schedule_tasks_callback()
             launch_succeed = self.launch_tasks_callback()
@@ -2233,7 +2262,8 @@ class Scheduler(ControllableThread, SchedulerContext):
         # Check runtime conditions
         # Are there any tasks to launch?
         # Are there any free worker threads?
-        condition = len(self._free_worker_threads) > 0 and self.num_active_tasks() != 0
+        condition = len(
+            self._free_worker_threads) > 0 and self.num_active_tasks() != 0
         """
         dev_condition = False
         if condition:
