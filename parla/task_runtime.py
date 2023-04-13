@@ -1424,7 +1424,7 @@ class Scheduler(ControllableThread, SchedulerContext):
         self._active_task_count = 1
 
         # Track the number of running tasks
-        self._running_task_count = 1
+        self._running_task_count = 0
 
         # For load-balancing purposes
         self._active_compute_task_count = 0
@@ -1561,6 +1561,7 @@ class Scheduler(ControllableThread, SchedulerContext):
 
     def decr_running_tasks(self):
         with self._running_count_monitor:
+            print("decr_running_tasks", self._running_task_count, flush=True)
             self._running_task_count -= 1
 
     def no_running_tasks(self):
@@ -1570,6 +1571,10 @@ class Scheduler(ControllableThread, SchedulerContext):
     def num_active_tasks(self):
         with self._active_count_monitor:
             return self._active_task_count
+
+    def has_active_tasks(self):
+        with self._active_count_monitor:
+            return self._active_task_count > 0
 
     def incr_active_tasks(self):
         with self._active_count_monitor:
@@ -2136,6 +2141,8 @@ class Scheduler(ControllableThread, SchedulerContext):
                 if isinstance(task._state, TaskCompleted):
                     logger.info(f"This should not be passed.")
                     continue
+
+                print("Increment running tasks: ", task, flush=True)
                 self.scheduler.incr_running_tasks()
                 worker.assign_task(task)
                 logger.debug(f"[Scheduler] Launched %r", task)
@@ -2180,9 +2187,11 @@ class Scheduler(ControllableThread, SchedulerContext):
         map_succeed = self.map_tasks_callback()
         schedule_succeed = self.schedule_tasks_callback()
         launch_succeed = self.launch_tasks_callback()
-        while self.no_running_tasks():
+        print("Start scheduler callbacks", self.no_running_tasks(), flush=True)
+        while (self.no_running_tasks()) and (self.has_active_tasks()):
             # if not map_succeed and not schedule_succeed and not launch_succeed:
             #    break
+            print("Running callbacks", flush=True)
             map_succeed = self.map_tasks_callback()
             schedule_succeed = self.schedule_tasks_callback()
             launch_succeed = self.launch_tasks_callback()
