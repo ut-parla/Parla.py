@@ -120,3 +120,34 @@ What's more, this memory model requires the application to be data race free in 
 For example, if there is no dependence between task A and task B, they may be scheduled to run in parallel. If A write on a PArray and B read from it, a data race will happen between two tasks and the behavior is undefined.
 
 For fine grained data movement, read and write on two different portion of a PArray is not considered to be a race and could run correctly with parallel tasks. However, read and write on a portion and a complete copy will be considered as a race.
+
+#### Writeback of Subarray
+Since we assume subarray are not overlapped, PArray runtime will not writeback changes of subarray in other deivces unless a writeback is triggered.
+
+That means the following example won't work since task_B will not see changes in task_A.
+```
+@spawn(t[0], output=[arr[0]],placement=gpu[0])
+def task_a():
+    arr[0] = 1
+
+@spawn(t[1], dependencies=[t[0]], input=[arr[0]],placement=gpu[1])
+def task_b():
+    assert arr[0] == 1 # will fail since task_a's change has not been writeback to other devices
+```
+
+Therefore, whenever you want to access overlapping subarray (including the same subarray in different devices), you need to insert a writeback task between them to sync the data, which should be
+
+```
+@spawn(t[0], output=[arr[0]],placement=gpu[0])
+def task_a():
+    arr[0] = 1
+
+@spawn(a[0], dependencies=[t[0]], inout=[arr],placement=cpu)  # try to access array with `inout` will trigger writeback to that device
+def write_back():
+    pass # do nothing is okay
+
+@spawn(t[1], dependencies=[t[0], a[0]], input=[arr[0]],placement=gpu[1])
+def task_b():
+    assert arr[0] == 1 # success now
+```
+
