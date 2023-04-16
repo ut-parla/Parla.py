@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     SlicesType = Union[slice, int, tuple]
 
 
+UINT64_LIMIT = (1 << 64 - 1)
+
 class PArray:
     """Multi-dimensional array on a CPU or CUDA device.
 
@@ -40,7 +42,7 @@ class PArray:
     _slices: List[SlicesType]
     _coherence_cv: Dict[int, threading.Condition]
 
-    def __init__(self, array: ndarray, parent: "PArray" = None, slices=None) -> None:
+    def __init__(self, array: ndarray, parent: "PArray" = None, slices=None, name: str = "NA") -> None:
         if parent is not None:  # create a view (a subarray) of a PArray
             # inherit parent's buffer and coherence states
             # so this PArray will becomes a 'view' of its parents
@@ -52,6 +54,9 @@ class PArray:
             # add current slices to the end
             self._slices.append(slices)
 
+            # self._name = parent._name + "::subarray::" + str(slices)
+            self._name = parent._name + "::subarray::" + str(self._slices)
+
             # inherit parent's condition variables
             self._coherence_cv = parent._coherence_cv
 
@@ -61,7 +66,9 @@ class PArray:
             # a unique ID for this subarray
             # which is the combine of parent id and slice hash
             self.parent_ID = parent.ID
-            self.ID = parent.ID * 31 + self._slices_hash  # use a prime number to avoid collision
+            # use a prime number to avoid collision
+            # modulo over uint64 to make it compatible with C++ end
+            self.ID = (parent.ID * 31 + self._slices_hash) % UINT64_LIMIT
 
             self.nbytes = parent.nbytes          # the bytes used by the complete array
             self.subarray_nbytes = array.nbytes  # the bytes used by this subarray
@@ -92,10 +99,18 @@ class PArray:
             self.nbytes = array.nbytes
             self.subarray_nbytes = self.nbytes  # no subarray
 
+            self._name = name
+
             # Register the parray with the scheduler
             task_runtime.get_scheduler_context().scheduler._available_resources.track_parray(self)
 
     # Properties:
+
+    @property
+    def name(self):
+        if self._name is None:
+            return "PArray::"+str(self.ID)
+        return self._name
 
     @property
     def array(self) -> ndarray:
@@ -174,6 +189,7 @@ class PArray:
 
         Note: should be called within the current task context
         Note: data should be put in OUT/INOUT fields of spawn
+        Note: should not call this over an sliced array
         """
         this_device = self._current_device_index
 
@@ -200,14 +216,50 @@ class PArray:
 
         # update size
         self.nbytes = array.nbytes
+        self.subarray_nbytes = self.nbytes
+
+        self._slices = []
 
         # reset coherence
-        self._coherence = Coherence(this_device, num_gpu)
+        self._coherence.reset(this_device)
 
         # update shape
         self._array.shape = array.shape
 
-        cupy.cuda.stream.get_current_stream().synchronize()
+        if num_gpu > 0:
+            cupy.cuda.stream.get_current_stream().synchronize()
+
+    def print_overview(self) -> None:
+        """
+        Print global overview of current PArray for debugging
+        """
+        state_str_map = {0: "INVALID",
+                         1: "SHARED",
+                         2: "MODIFIED"}
+
+        print(f"---Overview of PArray\n"
+              f"ID: {self.ID}, "
+              f"Name: {self._name}, "
+              f"Parent_ID: {self.parent_ID if self.ID != self.parent_ID else None}, "
+              f"Slice: {self._slices[0] if self.ID != self.parent_ID else None}, "
+              f"Bytes: {self.subarray_nbytes}, "
+              f"Owner: {'GPU ' + str(self._coherence.owner) if self._coherence.owner != CPU_INDEX else 'CPU'}")
+        for device_id, state in self._coherence._local_states.items():
+            if device_id == CPU_INDEX:
+                device_name = "CPU"
+            else:
+                device_name = f"GPU {device_id}"
+            print(f"At {device_name}: ", end="")
+
+            if isinstance(state, dict):
+                print(
+                    f"state: {[state_str_map[s] for s in list(state.values())]}, including sliced copy:  # states of slices is unordered wrt the below slices")
+                for slice, slice_id in zip(self._array._indices_map[device_id], range(len(self._array._indices_map[device_id]))):
+                    print(
+                        f"\tslice {slice_id} - indices: {slice}, bytes: {self._array._buffer[device_id][slice_id].nbytes}")
+            else:
+                print(f"state: {state_str_map[state]}")
+        print("---End of Overview")
 
     # slicing/indexing
 
@@ -282,9 +334,7 @@ class PArray:
 
         with self._coherence_cv[device_id]:
             operations = self._coherence.evict(device_id, keep_one_copy)
-            for op in operations:
-                self._process_operation(op)
-
+            self._process_operations(operations)
 
     # Coherence update operations:
 
@@ -305,8 +355,9 @@ class PArray:
             device_id = self._current_device_index
 
         # update protocol and get operation
-        operations = self._coherence.read(device_id, self._slices_hash) # locks involve
-        self._process_operations(operations, slices) # condition variable involve
+        with self._coherence._lock:  # locks involve
+            operations = self._coherence.read(device_id, self._slices_hash)
+            self._process_operations(operations, slices)
 
     def _coherence_write(self, device_id: int = None, slices: SlicesType = None) -> None:
         """Tell the coherence protocol a write happened on a device.
@@ -325,8 +376,9 @@ class PArray:
             device_id = self._current_device_index
 
         # update protocol and get operation
-        operations = self._coherence.write(device_id, self._slices_hash) # locks involve
-        self._process_operations(operations, slices) # condition variable involve
+        with self._coherence._lock:  # locks involve
+            operations = self._coherence.write(device_id, self._slices_hash)
+            self._process_operations(operations, slices)
 
     # Device management methods:
 
@@ -338,42 +390,24 @@ class PArray:
         for op in operations:
             if op.inst == MemoryOperation.NOOP:
                 pass  # do nothing
-            elif op.inst == MemoryOperation.CHECK_DATA:
-                if not self._coherence.data_is_ready(op.src):  # if data is not ready, wait
-                    with self._coherence_cv[op.src]:
-                        while not self._coherence.data_is_ready(op.src):
-                            self._coherence_cv[op.src].wait()
             elif op.inst == MemoryOperation.LOAD:
-                with self._coherence_cv[op.dst]:  # hold the CV when moving data
+                if MemoryOperation.LOAD_SUBARRAY in op.flag:
+                    # build slices mapping first
+                    self._array.set_slices_mapping(op.dst, slices)
 
-                    # if the flag is set, skip this checking
-                    if not MemoryOperation.SKIP_SRC_CHECK in op.flag:
-                        with self._coherence_cv[op.src]:  # wait on src until it is ready
-                            while not self._coherence.data_is_ready(op.src):
-                                self._coherence_cv[op.src].wait()
+                # check flag to see if dst is current device
+                dst_is_current_device = op.flag != MemoryOperation.SWITCH_DEVICE_FLAG
 
-                    if MemoryOperation.LOAD_SUBARRAY in op.flag:
-                        self._array.set_slices_mapping(op.dst, slices)  # build slices mapping first
+                # copy data
+                self._array.copy_data_between_device(
+                    op.dst, op.src, dst_is_current_device)
 
-                    # check flag to see if dst is current device
-                    dst_is_current_device = op.flag != MemoryOperation.SWITCH_DEVICE_FLAG
-
-                    # copy data
-                    self._array.copy_data_between_device(op.dst, op.src, dst_is_current_device)
-
-                    # sync stream before set it as ready, so asyc call is ensured to be done
+                # sync stream before set it as ready, so asyc call is ensured to be done
+                if num_gpu > 0:
                     cupy.cuda.stream.get_current_stream().synchronize()
-
-                    # data is ready now
-                    if MemoryOperation.LOAD_SUBARRAY in op.flag:
-                        self._coherence.set_data_as_ready(op.dst, self._slices_hash)  # mark it as done
-                    else:
-                         self._coherence.set_data_as_ready(op.dst)
-                    self._coherence_cv[op.dst].notify_all()  # let other threads know the data is ready
             elif op.inst == MemoryOperation.EVICT:
-                self._array.clear(op.src)  # decrement the reference counter, relying on GC to free the memory
-                if MemoryOperation.NO_MARK_AS_READY not in op.flag:
-                    self._coherence.set_data_as_ready(op.src, None)  # mark it as done
+                # decrement the reference counter, relying on GC to free the memor
+                self._array.clear(op.src)
             elif op.inst == MemoryOperation.ERROR:
                 raise RuntimeError("PArray gets an error from coherence protocol")
             else:
@@ -479,7 +513,6 @@ class PArray:
             return x.array.__ge__(y.array)
         else:
             return x.array.__ge__(y)
-
 
     # Truth value of an array (bool):
 
