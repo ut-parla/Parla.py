@@ -80,6 +80,13 @@ def test_parray_task():
                 assert a[-1] == 4
                 assert a._coherence.owner == 1
 
+            @spawn(ts[5], dependencies=[ts[4]], placement=gpu[0], inout=[a])
+            def check_array_indexing():
+                a[np.array([0,2])] = 0
+                assert len(a) == 4
+                assert a[0] == 0
+                assert a._coherence.owner == 0
+
 if __name__=="__main__":
     test_parray_creation()
     test_parray_task()

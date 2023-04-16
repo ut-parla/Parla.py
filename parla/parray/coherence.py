@@ -119,7 +119,7 @@ class Coherence:
         """
         for device_id in self._local_states.keys():
             self._local_states[device_id] = self.INVALID
-            self._versions[device_id] = None
+            self._versions[device_id] = -1
             self._is_complete[device_id] = None
         
         self._local_states[new_owner] = self.MODIFIED
