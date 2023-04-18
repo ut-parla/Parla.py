@@ -375,7 +375,6 @@ class PArray:
         with self._coherence._lock:  # locks involve
             operations = self._coherence.read(device_id, self._slices_hash)
             self._process_operations(operations, slices)
-            print(f"read: {self._name}")
 
     def _coherence_write(self, device_id: int = None, slices: SlicesType = None) -> None:
         """Tell the coherence protocol a write happened on a device.
@@ -397,7 +396,6 @@ class PArray:
         with self._coherence._lock:  # locks involve
             operations = self._coherence.write(device_id, self._slices_hash)
             self._process_operations(operations, slices)
-            print(f"write: {self._name}")
 
     # Device management methods:
 
