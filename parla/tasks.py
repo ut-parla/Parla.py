@@ -407,9 +407,14 @@ def spawn(taskid: Optional[TaskID] = None,
 
         processed_dependencies = tasks(*dependencies)._flat_tasks
 
+        print("spawn: ", taskid, processed_dependencies,
+              req, body, separated_body, flush=True)
+
         # gather input/output/inout, which is hint for data from or to the this task
         # TODO (ses): I gathered these into lists so I could perform concatentation later. This may be inefficient.
         dataflow = Dataflow(list(input), list(output), list(inout))
+
+        print("After dataflow", flush=True)
 
         # Get handle to current scheduler
         scheduler = task_runtime.get_scheduler_context()
@@ -417,6 +422,12 @@ def spawn(taskid: Optional[TaskID] = None,
         if isinstance(scheduler, WorkerThread):
             # If we are in a worker thread, get the real scheduler object instead.
             scheduler = scheduler.scheduler
+
+        print("After scheduler", flush=True)
+
+        logger.debug("Creating: %s %r", taskid, body)
+
+        print("Before spawn_task", flush=True)
 
         # Spawn the task via the Parla runtime API
         task = scheduler.spawn_task(
@@ -428,6 +439,8 @@ def spawn(taskid: Optional[TaskID] = None,
             dataflow=dataflow,
             name=getattr(body, "__name__", None))
 
+        print("After spawn_task", flush=True)
+
         logger.debug("Created: %s %r", taskid, body)
 
         for scope in task_locals.task_scopes:
@@ -435,6 +448,8 @@ def spawn(taskid: Optional[TaskID] = None,
 
         # Activate scheduler
         scheduler.start_scheduler_callbacks()
+
+        print("After start_scheduler_callbacks", flush=True)
 
         # Return the task object to user code
         return task
