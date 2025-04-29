@@ -1,10 +1,10 @@
 import os
-os.environ["OMP_NUM_THREADS"] = "24" # This is the default on my machine (Zemaitis)
+os.environ["OMP_NUM_THREADS"] = "12" # This is the default on my machine (Zemaitis)
 import numpy as np
 from time import perf_counter as time
 
-NMATRICES = 8
-MATRIX_SIZES  = [512, 4096]
+NMATRICES = 20
+MATRIX_SIZES  = [1024, 8192]
 
 small_mats = [np.random.rand(MATRIX_SIZES[0], MATRIX_SIZES[0]) for i in range(NMATRICES)]
 large_mat = np.random.rand(MATRIX_SIZES[1], MATRIX_SIZES[1])

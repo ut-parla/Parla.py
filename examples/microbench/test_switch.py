@@ -4,7 +4,7 @@ t = time.perf_counter()
 from parla.multiload import multiload_contexts
 begin_multiload = time.perf_counter() - t
 
-m = 12
+m = 4
 import_times = []
 for i in range(m):
     with multiload_contexts[i]:

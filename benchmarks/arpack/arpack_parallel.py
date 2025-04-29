@@ -9,7 +9,7 @@ from parla.multiload import multiload, multiload_contexts
 
 OMP_NUM_THREADS = sys.argv[2]
 nworkers = int(sys.argv[1])
-n = 40000
+n = 100000
 nruns = 11
 
 os.environ['OMP_NUM_THREADS'] = OMP_NUM_THREADS
@@ -46,7 +46,7 @@ for i in range(nruns):
         try:
             with multiload_contexts[i]:
                 a = sparse.csr_matrix((data, indices, indptr), shape = (n, n))
-                eig = sla.eigsh(a, 25, which = 'LM', v0 = np.asarray(v0))
+                eig = sla.eigsh(a, 10, which = 'SM', v0 = np.asarray(v0))
         except:
             traceback.print_exc()
             raise

@@ -13,7 +13,10 @@
 
 long int context_new() {
     void* dlh_environ = dlmopen_debuggable(LM_ID_NEWLM, "libparla_context.so", RTLD_NOW|RTLD_GLOBAL);
-    if(!dlh_environ) return -1;
+    if (dlh_environ == NULL) {
+        fprintf(stderr, "Error in `dlmopen`: %s\n", dlerror());
+        return -1;
+    }
     Lmid_t lmid;
     int r = dlinfo(dlh_environ, RTLD_DI_LMID, &lmid);
     DEBUG("Loaded libparla_context.so into %ld (r=%d)", lmid, r);
@@ -26,7 +29,9 @@ void * context_dlopen(long int context, const char *file) {
     int flags = RTLD_LAZY|RTLD_GLOBAL;
     DEBUG("Loading %s (%x) into %ld", file, flags, context);
     void* p = dlmopen_debuggable(context, file, flags);
-//    DEBUG("Loaded %p", p);
+    if (p == NULL) {
+        fprintf(stderr, "Error in `dlmopen`: %s\n", dlerror());
+    }
     return p;
 }
 

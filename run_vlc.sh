@@ -1,0 +1,2 @@
+#! /bin/sh
+LD_LIBRARY_PATH="$HOME/Parla.py/runtime_libs/build:$HOME/miniconda3/envs/VLCs/lib" LD_PRELOAD="$HOME/Parla.py/runtime_libs/build/libparla_supervisor.so" "$HOME/Parla.py/runtime_libs/usingldso" "$HOME/glibc/install" python "$@"

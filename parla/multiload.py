@@ -26,7 +26,7 @@ from .environments import EnvironmentComponentDescriptor, EnvironmentComponentIn
 
 __all__ = ["multiload", "MultiloadContext", "MultiloadComponent", "CPUAffinity", "mark_module_as_global"]
 
-NUMBER_OF_REPLICAS = 12
+NUMBER_OF_REPLICAS = 4
 MAX_REPLICA_ID = 16
 
 
@@ -110,8 +110,10 @@ class MultiloadContext():
                 self.dlopen("librt.so.1")
                 self.dlopen("libm.so.6")
                 self.dlopen("libpthread.so.0")
+                # self.dlopen("libiomp5.so")
                 libpython_name = get_config_var("INSTSONAME").rstrip(".a").split(".so")[0].lstrip("lib")
                 self.load_stub_library(libpython_name)
+                # self.dlopen("forwarding_modules.cpython-37m-x86_64-linux-gnu.so")
                 sys.setdlopenflags(self.saved_rtld)
 
     def dispose(self):

@@ -1,0 +1,50 @@
+# packages in environment at /root/miniconda3/envs/VLCs:
+#
+# Name                    Version                   Build  Channel
+_libgcc_mutex             0.1                        main  
+_openmp_mutex             5.1                       1_gnu  
+blas                      1.0                         mkl  
+bzip2                     1.0.8                h5eee18b_5  
+c-ares                    1.19.1               h5eee18b_0  
+ca-certificates           2024.3.11            h06a4308_0  
+certifi                   2022.12.7        py37h06a4308_0  
+cmake                     3.22.1               h1fce559_0  
+cython                    0.29.33          py37h6a678d5_0  
+expat                     2.5.0                h6a678d5_0  
+intel-openmp              2023.1.0         hdb19cb5_46306  
+krb5                      1.20.1               h568e23c_1  
+ld_impl_linux-64          2.38                 h1181459_1  
+libcurl                   8.2.1                h91b91d3_0  
+libedit                   3.1.20230828         h5eee18b_0  
+libev                     4.33                 h7f8727e_1  
+libffi                    3.4.4                h6a678d5_0  
+libgcc-ng                 11.2.0               h1234567_1  
+libgfortran-ng            7.5.0               ha8ba4b0_17  
+libgfortran4              7.5.0               ha8ba4b0_17  
+libgomp                   11.2.0               h1234567_1  
+libnghttp2                1.52.0               ha637b67_1  
+libssh2                   1.10.0               h37d81fd_2  
+libstdcxx-ng              11.2.0               h1234567_1  
+libuv                     1.44.2               h5eee18b_0  
+lz4-c                     1.9.4                h6a678d5_0  
+mkl                       2020.2                      256  
+mkl-service               2.3.0            py37he8ac12f_0  
+mkl_fft                   1.2.0            py37h23d657b_0  
+mkl_random                1.1.1            py37h0573a6f_0  
+ncurses                   6.4                  h6a678d5_0  
+numpy                     1.16.4           py37h7e9f1db_0  
+numpy-base                1.16.4           py37hde5b4d6_0  
+openssl                   1.1.1w               h7f8727e_0  
+parla                     0.1                      pypi_0    pypi
+pip                       22.3.1           py37h06a4308_0  
+python                    3.7.16               h7a1cb2a_0  
+readline                  8.2                  h5eee18b_0  
+rhash                     1.4.1                h3c74f83_1  
+setuptools                65.6.3           py37h06a4308_0  
+six                       1.16.0             pyhd3eb1b0_1  
+sqlite                    3.41.2               h5eee18b_0  
+tk                        8.6.12               h1ccaba5_0  
+wheel                     0.38.4           py37h06a4308_0  
+xz                        5.4.6                h5eee18b_0  
+zlib                      1.2.13               h5eee18b_0  
+zstd                      1.5.5                hc292b87_0  

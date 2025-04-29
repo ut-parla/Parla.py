@@ -4,8 +4,8 @@ import numpy as np
 from time import perf_counter as time
 import threading
 
-NMATRICES = 8
-MATRIX_SIZES  = [512, 4096]
+NMATRICES = 20
+MATRIX_SIZES  = [1024, 8192]
 
 small_mats = [np.random.rand(MATRIX_SIZES[0], MATRIX_SIZES[0]) for i in range(NMATRICES)]
 large_mats = []
